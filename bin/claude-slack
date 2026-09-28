@@ -1,0 +1,29 @@
+#!/bin/sh
+# Start Claude Code with the Slack channel attached to this session.
+# Usage: claude-slack [any claude flags...]
+DIR=$(cd "$(dirname "$0")/.." && pwd)
+if [ ! -f "$DIR/mcp.json" ]; then
+  echo "claude-slack: $DIR/mcp.json not found. Run 'npm run install-hooks' first." >&2
+  exit 1
+fi
+export CLAUDE_SLACK=1
+# One id per session, inherited by the channel shim and every hook, so the
+# broker never has to key on a pid (pids get reused) or a display name.
+[ -n "$CLAUDE_SLACK_SESSION" ] || export CLAUDE_SLACK_SESSION="$(uuidgen 2>/dev/null | tr 'A-Z' 'a-z' || od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+# Drop variables a parent Claude Code session would leak into us; otherwise the
+# new session inherits its parent's CLAUDE_PID and behaves as a child session.
+# CLAUDE_EFFORT in particular would override the user's saved default.
+for v in $(env | sed -n 's/^\(CLAUDE[A-Z0-9_]*\)=.*/\1/p'); do
+  case "$v" in CLAUDE_SLACK*|CLAUDE_CONFIG_DIR) ;; *) unset "$v" ;; esac
+done
+# QA/isolated runs skip the live Slack Channels feed so they never pull the real
+# channel's messages into a throwaway session.
+if [ -n "$CLAUDE_SLACK_NO_CHANNEL" ]; then
+  exec claude ${CLAUDE_SLACK_DEBUG:+--debug} --mcp-config "$DIR/mcp.json" "$@"
+fi
+# Every bridged session gets the Chrome tools, so browser work can be asked for from
+# Slack without relaunching. Harmless while the extension is missing: the tools load
+# and calls report "not connected". A later --no-chrome in "$@" still wins.
+CHROME=--chrome
+[ -n "$CLAUDE_SLACK_NO_CHROME" ] && CHROME=
+exec claude ${CLAUDE_SLACK_DEBUG:+--debug} $CHROME --mcp-config "$DIR/mcp.json" --dangerously-load-development-channels server:slack "$@"

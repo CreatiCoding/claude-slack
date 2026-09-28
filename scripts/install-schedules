@@ -1,0 +1,85 @@
+#!/bin/sh
+# Two daily jobs that used to run inside rcpilot, as launchd agents:
+#   window-warmer   07:00 12:00 17:00   `claude -p hi`     starts the 5-hour usage window on your schedule
+#   claude-update   06:00 18:00         `claude update`    keeps the Claude Code CLI current
+# A run missed while the Mac slept is made up when it wakes.
+#   sh scripts/install-schedules            install (or update) both and load them
+#   sh scripts/install-schedules --print    show the launchd files without installing
+#   sh scripts/install-schedules --status   what is loaded, and the last lines of each log
+#   sh scripts/install-schedules --run window-warmer|claude-update   run one now
+#   sh scripts/install-schedules --remove   uninstall both
+set -e
+LOGDIR="$HOME/.claude-slack/logs"
+AGENTS="$HOME/Library/LaunchAgents"
+CLAUDE=$(command -v claude) || { echo "claude not found in PATH" >&2; exit 1; }
+CLAUDE_DIR=$(dirname "$CLAUDE")
+
+# name | claude arguments | hours
+JOBS="window-warmer|-p hi|7 12 17
+claude-update|update|6 18"
+
+plist() { # name args hours
+  name=$1; args=$2; hours=$3
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.claude-slack.$name</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$CLAUDE</string>
+$(for a in $args; do echo "    <string>$a</string>"; done)
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>$CLAUDE_DIR:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <array>
+$(for h in $hours; do printf '    <dict><key>Hour</key><integer>%s</integer><key>Minute</key><integer>0</integer></dict>\n' "$h"; done)
+  </array>
+  <key>StandardOutPath</key>
+  <string>$LOGDIR/$name.log</string>
+  <key>StandardErrorPath</key>
+  <string>$LOGDIR/$name.log</string>
+</dict>
+</plist>
+PLIST
+}
+
+each() { echo "$JOBS" | while IFS='|' read -r name args hours; do "$1" "$name" "$args" "$hours"; done; }
+
+case "${1:-}" in
+  --print) each plist ;;
+  --status)
+    each sh -c 'true' >/dev/null 2>&1 || true
+    echo "$JOBS" | while IFS='|' read -r name args hours; do
+      if launchctl print "gui/$(id -u)/com.claude-slack.$name" >/dev/null 2>&1; then echo "loaded: com.claude-slack.$name  (claude $args at $hours)"; else echo "NOT loaded: com.claude-slack.$name"; fi
+      [ -f "$LOGDIR/$name.log" ] && tail -3 "$LOGDIR/$name.log" | sed 's/^/    /' || echo "    (no log yet)"
+    done
+    ;;
+  --run)
+    [ -n "${2:-}" ] || { echo "which one: window-warmer or claude-update" >&2; exit 1; }
+    launchctl kickstart -k "gui/$(id -u)/com.claude-slack.$2"
+    echo "started com.claude-slack.$2; log: $LOGDIR/$2.log"
+    ;;
+  --remove)
+    echo "$JOBS" | while IFS='|' read -r name args hours; do
+      launchctl bootout "gui/$(id -u)/com.claude-slack.$name" 2>/dev/null || true
+      rm -f "$AGENTS/com.claude-slack.$name.plist"
+      echo "removed com.claude-slack.$name"
+    done
+    ;;
+  *)
+    mkdir -p "$AGENTS" "$LOGDIR"
+    echo "$JOBS" | while IFS='|' read -r name args hours; do
+      plist "$name" "$args" "$hours" > "$AGENTS/com.claude-slack.$name.plist"
+      launchctl bootout "gui/$(id -u)/com.claude-slack.$name" 2>/dev/null || true
+      launchctl bootstrap "gui/$(id -u)" "$AGENTS/com.claude-slack.$name.plist"
+      echo "installed com.claude-slack.$name: claude $args at $hours"
+    done
+    ;;
+esac

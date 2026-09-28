@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>대화 기록</title>
+<script data-embed>if (new URLSearchParams(location.search).has('embed')) document.documentElement.classList.add('embed')</script>
+<style>
+  :root { color-scheme: dark light; --bg:#14161a; --panel:#1a1d22; --card:#1d2026; --line:#2c313a; --dim:#8b93a1; --fg:#e6e9ef; --accent:#4f8cff; --me:#2d3a52; --code:#0f1115; --danger:#f85149 }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#f6f7f9; --panel:#ffffff; --card:#ffffff; --line:#dfe3e8; --dim:#66707d; --fg:#1d2126; --accent:#1f6feb; --me:#e3edff; --code:#f1f3f5 }
+  }
+  /* Framed inside the admin page (?embed=1), which is always dark: follow it, not the phone's setting. */
+  :root.embed { color-scheme: dark; --bg:#14161a; --panel:#1a1d22; --card:#1d2026; --line:#2c313a; --dim:#8b93a1; --fg:#e6e9ef; --accent:#4f8cff; --me:#2d3a52; --code:#0f1115 }
+  :root.embed .bubble code { color:inherit }
+  html, body { overscroll-behavior:none }
+  * { box-sizing: border-box }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",system-ui,sans-serif }
+  .wrap { max-width:860px; margin:0 auto; padding:0 16px 80px }
+  header { position:sticky; top:0; z-index:5; background:var(--bg); padding:14px 0 10px; border-bottom:1px solid var(--line) }
+  h1 { font-size:17px; margin:0 0 2px; word-break:break-word }
+  .meta { color:var(--dim); font-size:12px; word-break:break-all }
+  .tools { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px }
+  .tools button, .tools a.btn { font:inherit; font-size:13px; padding:5px 12px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--fg); cursor:pointer; text-decoration:none }
+  .tools button.on { background:var(--me); border-color:var(--accent) }
+  .tools input { flex:1; min-width:150px; font:inherit; font-size:13px; padding:5px 12px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--fg) }
+  button:focus-visible, input:focus-visible, a:focus-visible { outline:2px solid var(--accent); outline-offset:2px }
+  .day { display:flex; align-items:center; gap:12px; margin:22px 0 10px; color:var(--dim); font-size:12px }
+  .day::before, .day::after { content:""; flex:1; height:1px; background:var(--line) }
+  .msg { display:flex; gap:10px; padding:4px 0; align-items:flex-start }
+  .msg.cont { padding-top:0 }
+  .msg.cont .avatar { visibility:hidden; height:0 }
+  .avatar { flex:0 0 36px; width:36px; height:36px; border-radius:8px; display:grid; place-items:center; font-weight:700; font-size:15px; color:#fff; background:#7a5cff }
+  .msg.me .avatar { background:#2f9e6f }
+  .body { min-width:0; flex:1 }
+  .who { display:flex; gap:8px; align-items:baseline; margin-bottom:1px }
+  .who b { font-size:14px }
+  .who time { color:var(--dim); font-size:11px }
+  .msg.cont .who { display:none }
+  .bubble { word-break:break-word; overflow-wrap:anywhere }
+  .msg.me .bubble { background:var(--me); border-radius:10px; padding:7px 11px; display:inline-block; max-width:100% }
+  .bubble p { margin:0 }
+  .bubble code { background:var(--code); border:1px solid var(--line); border-radius:4px; padding:0 4px; font:12.5px ui-monospace,SFMono-Regular,Menlo,monospace; color:#e5534b }
+  @media (prefers-color-scheme: light) { .bubble code { color:#c0392b } }
+  .bubble pre { background:var(--code); border:1px solid var(--line); border-radius:8px; padding:9px 11px; margin:6px 0; overflow:auto; font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace; white-space:pre-wrap; word-break:break-word }
+  .bubble pre code { background:none; border:0; padding:0; color:inherit }
+  .bubble blockquote { margin:4px 0; padding:0 0 0 10px; border-left:3px solid var(--line); color:var(--dim) }
+  .bubble a { color:var(--accent) }
+  .bubble .mention { background:rgba(79,140,255,.18); color:var(--accent); border-radius:4px; padding:0 3px }
+  .clamp { max-height:19em; overflow:hidden; position:relative }
+  .clamp::after { content:""; position:absolute; left:0; right:0; bottom:0; height:3.2em; background:linear-gradient(transparent, var(--bg)) }
+  .more { font:inherit; font-size:12px; margin-top:4px; padding:2px 10px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--accent); cursor:pointer }
+  .card { border:1px solid var(--line); border-left:4px solid #7a5cff; border-radius:8px; padding:8px 12px; margin-top:4px; background:var(--card) }
+  .card .h { font-weight:700; margin-bottom:2px }
+  .card .ctx { color:var(--dim); font-size:12px }
+  .card hr { border:0; border-top:1px solid var(--line); margin:8px 0 }
+  .card .fields { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:4px 14px; margin-top:4px }
+  .chips { display:flex; gap:6px; flex-wrap:wrap; margin-top:6px }
+  .chip { font-size:12px; padding:3px 10px; border-radius:6px; border:1px solid var(--line); color:var(--dim); background:var(--panel) }
+  .chip.primary { border-color:var(--accent); color:var(--accent) }
+  .chip.danger { border-color:#6b2b2b; color:var(--danger) }
+  .status { color:var(--dim); font-size:13px; padding:2px 0 2px 46px }
+  .hidden-note { text-align:center; color:var(--dim); font-size:12px; margin:14px 0 }
+  .hidden-note button { font:inherit; font-size:12px; margin-left:6px; padding:2px 10px; border-radius:999px; border:1px solid var(--line); background:var(--panel); color:var(--accent); cursor:pointer }
+  .empty, .error { color:var(--dim); text-align:center; padding:40px 0 }
+  .error { color:var(--danger) }
+  mark { background:#e3b341; color:#000; border-radius:3px }
+</style>
+<div class="wrap">
+  <header>
+    <h1 id="title">대화 기록</h1>
+    <div class="meta" id="meta">불러오는 중…</div>
+    <div class="tools">
+      <button id="btn-chat" class="on" onclick="setMode('chat')">대화</button>
+      <button id="btn-all" onclick="setMode('all')">전체 (상태·카드 포함)</button>
+      <input id="q" type="search" placeholder="대화 안에서 검색" oninput="setQuery(this.value)">
+      <a class="btn" id="raw" href="#" target="_blank" rel="noopener" hidden>원문(.md)</a>
+    </div>
+  </header>
+  <main id="msgs"></main>
+</div>
+<script>
+const params = new URLSearchParams(location.search)
+const token = params.get('t')
+const auth = token ? { 'x-admin-token': token } : {}
+const $ = (id) => document.getElementById(id)
+
+// ---- Slack mrkdwn -> safe HTML
+const EMOJI = { black_circle: '⚫', white_check_mark: '✅', heavy_check_mark: '✔️', x: '❌', keyboard: '⌨️', pencil2: '✏️', hourglass_flowing_sand: '⏳', hourglass: '⌛', eyes: '👀', large_blue_circle: '🔵', large_green_circle: '🟢', large_yellow_circle: '🟡', red_circle: '🔴', warning: '⚠️', wastebasket: '🗑', arrows_counterclockwise: '🔄', memo: '📝', gear: '⚙️', robot_face: '🤖', rocket: '🚀', package: '📦', broom: '🧹', bulb: '💡', tada: '🎉', sparkles: '✨', thumbsup: '👍', '+1': '👍', slightly_smiling_face: '🙂', new: '🆕', lock: '🔒', unlock: '🔓', link: '🔗', bar_chart: '📊', hammer_and_wrench: '🛠️', mag: '🔍', clipboard: '📋', repeat: '🔁', wrench: '🔧', page_facing_up: '📄', file_folder: '📁', speech_balloon: '💬', bell: '🔔', no_entry: '⛔', stop_sign: '🛑', thinking_face: '🤔', point_right: '👉', arrow_right: '➡️', information_source: 'ℹ️', question: '❓', exclamation: '❗', fire: '🔥', bug: '🐛', zap: '⚡', star: '⭐', pray: '🙏', clap: '👏', muscle: '💪', ok_hand: '👌', raised_hands: '🙌', camera: '📷', art: '🎨', chart_with_upwards_trend: '📈', book: '📖', computer: '💻', iphone: '📱', globe_with_meridians: '🌐', key: '🔑', shield: '🛡️', label: '🏷️', pushpin: '📌', paperclip: '📎', scissors: '✂️', hammer: '🔨', test_tube: '🧪', dart: '🎯', checkered_flag: '🏁', calendar: '📅', alarm_clock: '⏰', inbox_tray: '📥', outbox_tray: '📤', email: '✉️' }
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const safeUrl = (u) => (/^(https?:|mailto:)/i.test(u) ? u : '#')
+
+// Slack escapes only & < > in text, and wraps links, mentions and channels in < >.
+function mrkdwn(text) {
+  const stash = []
+  const keep = (html) => '\u0000' + (stash.push(html) - 1) + '\u0000'
+  let t = String(text ?? '')
+  // fenced and inline code first, so nothing inside them is formatted
+  t = t.replace(/```([\s\S]*?)```/g, (m, code) => keep('<pre><code>' + esc(code.replace(/^\n/, '').replace(/\n$/, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')) + '</code></pre>'))
+  t = t.replace(/`([^`\n]+)`/g, (m, code) => keep('<code>' + esc(code.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')) + '</code>'))
+  // links, mentions, channels, broadcasts: <...> in the raw Slack text
+  t = t.replace(/<(https?:[^|>\s]+|mailto:[^|>\s]+)(?:\|([^>]*))?>/g, (m, url, label) => keep('<a href="' + esc(safeUrl(url.replace(/&amp;/g, '&'))) + '" target="_blank" rel="noopener">' + esc(label || url) + '</a>'))
+  t = t.replace(/<@([A-Z0-9]+)(?:\|([^>]*))?>/g, (m, id, name) => keep('<span class="mention">@' + esc(name || '사용자') + '</span>'))
+  t = t.replace(/<#[A-Z0-9]+\|([^>]*)>/g, (m, name) => keep('<span class="mention">#' + esc(name) + '</span>'))
+  t = t.replace(/<!(here|channel|everyone)(?:\|[^>]*)?>/g, (m, w) => keep('<span class="mention">@' + w + '</span>'))
+  // now the rest is plain text with &amp; &lt; &gt; already escaped by Slack; make the remaining characters safe
+  t = t.replace(/&(?!amp;|lt;|gt;)/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/&amp;gt;/g, '&gt;').replace(/&amp;lt;/g, '&lt;')
+  // inline styles: *bold* _italic_ ~strike~ (at word edges, so snake_case and 2*3 stay as they are)
+  t = t.replace(/(^|[\s(>])\*([^*\n]+)\*(?=$|[\s.,!?:;)<])/g, '$1<b>$2</b>')
+  t = t.replace(/(^|[\s(>])_([^_\n]+)_(?=$|[\s.,!?:;)<])/g, '$1<i>$2</i>')
+  t = t.replace(/(^|[\s(>])~([^~\n]+)~(?=$|[\s.,!?:;)<])/g, '$1<s>$2</s>')
+  t = t.replace(/:([a-z0-9_+-]+):/g, (m, n) => EMOJI[n] ?? m)
+  // block quotes and paragraphs
+  const lines = t.split('\n')
+  const out = []
+  let quote = []
+  const flush = () => { if (quote.length) { out.push('<blockquote>' + quote.join('<br>') + '</blockquote>'); quote = [] } }
+  for (const l of lines) {
+    if (/^&gt;\s?/.test(l)) quote.push(l.replace(/^&gt;\s?/, ''))
+    else { flush(); out.push(l) }
+  }
+  flush()
+  let html = out.join('\n').replace(/<\/blockquote>\n/g, '</blockquote>').replace(/\n<blockquote>/g, '<blockquote>').replace(/\n/g, '<br>')
+  html = html.replace(/\u0000(\d+)\u0000/g, (m, i) => stash[Number(i)])
+  return html.replace(/<br>(<pre>)/g, '$1').replace(/(<\/pre>)<br>/g, '$1')
+}
+
+// ---- Block Kit cards (panels, permission requests, tool cards)
+function blockHtml(b) {
+  if (!b || typeof b !== 'object') return ''
+  const txt = (o) => (o && o.text ? mrkdwn(o.type === 'plain_text' ? esc(o.text) : o.text) : '')
+  switch (b.type) {
+    case 'header': return '<div class="h">' + esc(b.text?.text ?? '') + '</div>'
+    case 'section': {
+      const fields = (b.fields ?? []).map((f) => '<div>' + txt(f) + '</div>').join('')
+      return (b.text ? '<div>' + txt(b.text) + '</div>' : '') + (fields ? '<div class="fields">' + fields + '</div>' : '')
+    }
+    case 'context': return '<div class="ctx">' + (b.elements ?? []).map((e) => (e.type === 'image' ? '' : txt(e))).filter(Boolean).join(' · ') + '</div>'
+    case 'divider': return '<hr>'
+    case 'markdown': return '<div>' + mrkdwn(b.text ?? '') + '</div>'
+    case 'actions': {
+      const chips = (b.elements ?? []).map((e) => {
+        const label = e.text?.text ?? (e.type === 'overflow' ? '⋯' : e.placeholder?.text ?? e.type)
+        return '<span class="chip ' + (e.style ?? '') + '">' + esc(label) + '</span>'
+      }).join('')
+      return chips ? '<div class="chips">' + chips + '</div>' : ''
+    }
+    default: return ''
+  }
+}
+const CARD_TYPES = new Set(['header', 'section', 'context', 'divider', 'actions', 'markdown'])
+const hasCard = (m) => Array.isArray(m.blocks) && m.blocks.some((b) => CARD_TYPES.has(b.type))
+const cardHtml = (m) => '<div class="card">' + m.blocks.map(blockHtml).join('') + '</div>'
+
+// Status lines the bridge posts around a conversation: "종료됨", "연결 끊김", a typed key echoed back ...
+const STATUS_RE = /^\s*(:(black_circle|large_green_circle|large_blue_circle|large_yellow_circle|red_circle|keyboard|eyes|hourglass_flowing_sand|pencil2|arrows_counterclockwise|broom):|→ )/
+const isStatus = (m) => m.bot && (STATUS_RE.test(m.text ?? '') || (hasCard(m) && !(m.text ?? '').trim()))
+
+// ---- the view
+let data = null
+let mode = 'chat'
+let query = ''
+const expanded = new Set()
+
+const fmtTime = (ts) => new Date(Number(ts) * 1000).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })
+const fmtDay = (ts) => new Date(Number(ts) * 1000).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'short' })
+const dayKey = (ts) => new Date(Number(ts) * 1000).toDateString()
+
+function bodyHtml(m) {
+  const html = hasCard(m) ? cardHtml(m) : '<div class="bubble">' + mrkdwn(m.text) + '</div>'
+  const long = (m.text ?? '').length > 900 || (m.text ?? '').split('\n').length > 16
+  if (!long || hasCard(m)) return html
+  const open = expanded.has(m.ts)
+  return html.replace('<div class="bubble">', '<div class="bubble ' + (open ? '' : 'clamp') + '">') + '<button class="more" onclick="toggleMore(\'' + esc(m.ts) + '\')">' + (open ? '접기' : '더 보기') + '</button>'
+}
+
+function render() {
+  if (!data) return
+  const q = query.trim().toLowerCase()
+  const all = data.messages ?? []
+  const shown = all.filter((m) => (mode === 'all' || !isStatus(m)) && (!q || (m.text ?? '').toLowerCase().includes(q)))
+  const hiddenCount = mode === 'chat' ? all.filter(isStatus).length : 0
+  let html = ''
+  let prev = null
+  for (const m of shown) {
+    const day = dayKey(m.ts)
+    if (!prev || dayKey(prev.ts) !== day) html += '<div class="day">' + esc(fmtDay(m.ts)) + '</div>'
+    const me = !m.bot
+    const cont = prev && dayKey(prev.ts) === day && prev.bot === m.bot && Number(m.ts) - Number(prev.ts) < 180
+    if (m.bot && isStatus(m)) {
+      html += '<div class="status">' + mrkdwn(m.text) + ' <span class="meta">' + esc(fmtTime(m.ts)) + '</span></div>'
+    } else {
+      html += '<div class="msg ' + (me ? 'me' : 'bot') + (cont ? ' cont' : '') + '" data-ts="' + esc(m.ts) + '"><div class="avatar">' + (me ? '나' : 'C') + '</div><div class="body">' +
+        '<div class="who"><b>' + (me ? '나' : 'Claude Code') + '</b><time>' + esc(fmtTime(m.ts)) + '</time></div>' + bodyHtml(m) + '</div></div>'
+    }
+    prev = m
+  }
+  if (!shown.length) html = '<div class="empty">' + (q ? '검색 결과가 없습니다.' : '표시할 대화가 없습니다.') + '</div>'
+  if (hiddenCount) html += '<div class="hidden-note">상태 메시지 ' + hiddenCount + '개는 숨겨져 있습니다.<button onclick="setMode(\'all\')">모두 보기</button></div>'
+  $('msgs').innerHTML = html
+  if (q) {
+    // light highlight of the search word in the text nodes
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+    for (const el of $('msgs').querySelectorAll('.bubble, .card')) {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+      const nodes = []
+      while (walker.nextNode()) nodes.push(walker.currentNode)
+      for (const n of nodes) {
+        if (!re.test(n.nodeValue)) continue
+        re.lastIndex = 0
+        const span = document.createElement('span')
+        span.innerHTML = esc(n.nodeValue).replace(re, (x) => '<mark>' + x + '</mark>')
+        n.replaceWith(span)
+      }
+    }
+  }
+}
+function setMode(m) { mode = m; $('btn-chat').classList.toggle('on', m === 'chat'); $('btn-all').classList.toggle('on', m === 'all'); render() }
+function setQuery(v) { query = v; render() }
+function toggleMore(ts) { if (expanded.has(ts)) expanded.delete(ts); else expanded.add(ts); render() }
+
+async function load() {
+  const kind = params.get('kind') === 'orphan' ? 'orphan' : 'archive'
+  const key = kind === 'orphan' ? 'ts=' + encodeURIComponent(params.get('ts') ?? '') : 'path=' + encodeURIComponent(params.get('path') ?? '')
+  try {
+    const r = await fetch('/api/thread?kind=' + kind + '&' + key, { headers: auth })
+    if (r.status === 401) throw new Error('토큰이 필요합니다. 주소에 ?t=... 를 붙이세요.')
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'HTTP ' + r.status)
+    data = await r.json()
+  } catch (e) {
+    $('meta').textContent = ''
+    $('msgs').innerHTML = '<div class="error">대화를 불러오지 못했습니다: ' + esc(e.message ?? e) + '</div>'
+    return
+  }
+  const title = String(data.title ?? '').replace(/:([a-z0-9_+-]+):/g, (m, n) => EMOJI[n] ?? m).replace(/[*_~`]/g, '').trim()
+  $('title').textContent = title || '대화 기록'
+  document.title = (title || '대화 기록') + ' · 대화 기록'
+  const bits = [data.cwd, data.archivedAt && '보관 ' + new Date(data.archivedAt).toLocaleString('ko-KR'), (data.messages ?? []).length + '개 메시지', data.live && 'Slack 에 남아 있는 스레드']
+  $('meta').textContent = bits.filter(Boolean).join(' · ')
+  if (data.markdownUrl) { $('raw').href = data.markdownUrl + (token ? '&t=' + encodeURIComponent(token) : ''); $('raw').hidden = false }
+  render()
+}
+load()
+</script>
+</html>

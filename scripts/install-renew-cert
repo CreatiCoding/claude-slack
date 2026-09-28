@@ -1,0 +1,73 @@
+#!/bin/sh
+# Run scripts/renew-cert.ts every day at 04:17 through launchd. It does nothing until the certificate has
+# 30 days left; then it issues a new one, uploads it to Dokploy and tells the channel.
+#   sh scripts/install-renew-cert            install (or update) and start
+#   sh scripts/install-renew-cert --print    show the launchd file without installing it
+#   sh scripts/install-renew-cert --status   is it installed, and what did the last run say
+#   sh scripts/install-renew-cert --remove   uninstall
+# A run missed while the Mac slept is made up when it wakes.
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+LABEL=com.claude-slack.renew-cert
+PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
+LOG="$HOME/.claude-slack/logs/renew-cert.log"
+NODE=$(command -v node) || { echo "node not found" >&2; exit 1; }
+[ -f "$ROOT/.env" ] || { echo "$ROOT/.env not found (the Slack token for the result message lives there)" >&2; exit 1; }
+
+file() {
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>$LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$NODE</string>
+    <string>--env-file=$ROOT/.env</string>
+    <string>$ROOT/scripts/renew-cert.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>$ROOT</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>4</integer>
+    <key>Minute</key>
+    <integer>17</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>$LOG</string>
+  <key>StandardErrorPath</key>
+  <string>$LOG</string>
+</dict>
+</plist>
+PLIST
+}
+
+case "${1:-}" in
+  --print) file ;;
+  --status)
+    if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then echo "installed: $LABEL (daily 04:17)"; else echo "not installed"; fi
+    [ -f "$LOG" ] && { echo "--- last lines of $LOG"; tail -8 "$LOG"; } || echo "(no log yet)"
+    ;;
+  --remove)
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    rm -f "$PLIST"
+    echo "removed $LABEL"
+    ;;
+  *)
+    mkdir -p "$(dirname "$PLIST")" "$(dirname "$LOG")"
+    file > "$PLIST"
+    launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
+    launchctl bootstrap "gui/$(id -u)" "$PLIST"
+    echo "installed $LABEL: every day at 04:17, log at $LOG"
+    echo "check now: node --env-file=.env scripts/renew-cert.ts --check"
+    ;;
+esac

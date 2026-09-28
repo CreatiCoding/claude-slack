@@ -1,0 +1,32 @@
+{
+  "name": "claude-slack",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Drive your real Claude Code terminal sessions from Slack: one thread per session.",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --env-file=.env src/index.ts",
+    "dev": "node --watch --env-file=.env src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import ./test/isolate.ts --test --test-force-exit --test-timeout=15000 test/",
+    "logs": "node scripts/logs.ts",
+    "install-hooks": "node scripts/install-hooks.ts",
+    "uninstall-hooks": "node scripts/install-hooks.ts --remove"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@slack/bolt": "^5.1.0",
+    "zod": "^4.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.0",
+    "playwright": "^1.63.0",
+    "typescript": "^7.0.2"
+  },
+  "bin": {
+    "claude-slack": "bin/claude-slack"
+  }
+}

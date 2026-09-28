@@ -1,0 +1,121 @@
+{
+  "display_information": {
+    "name": "Claude Code",
+    "description": "Bridge to local Claude Code terminal sessions"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Claude Code",
+      "always_online": true
+    },
+    "agent_view": {
+      "agent_description": "Controls Claude Code sessions running on my machine. One thread = one session."
+    },
+    "app_home": {
+      "home_tab_enabled": true,
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "slash_commands": [
+      {
+        "command": "/ccnew",
+        "description": "새 Claude Code 세션",
+        "usage_hint": "[경로] [프롬프트]",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-new",
+        "description": "새 Claude Code 세션",
+        "usage_hint": "[경로] [프롬프트]",
+        "should_escape": false
+      },
+      {
+        "command": "/ccresume",
+        "description": "이전 세션 재개",
+        "usage_hint": "[id]",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-resume",
+        "description": "이전 세션 재개",
+        "usage_hint": "[id]",
+        "should_escape": false
+      },
+      {
+        "command": "/cclist",
+        "description": "실행 중인 세션",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-list",
+        "description": "실행 중인 세션",
+        "should_escape": false
+      },
+      {
+        "command": "/cchistory",
+        "description": "보관된 세션 목록",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-history",
+        "description": "보관된 세션 목록",
+        "should_escape": false
+      },
+      {
+        "command": "/cchelp",
+        "description": "명령 안내",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-help",
+        "description": "명령 안내",
+        "should_escape": false
+      },
+      {
+        "command": "/ccrefresh",
+        "description": "세션 새로고침 (스킬·플러그인 반영)",
+        "should_escape": false
+      },
+      {
+        "command": "/claude-code-refresh",
+        "description": "세션 새로고침 (스킬·플러그인 반영)",
+        "should_escape": false
+      }
+    ]
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "chat:write",
+        "channels:history",
+        "groups:history",
+        "reactions:write",
+        "users:read",
+        "assistant:write",
+        "commands",
+        "canvases:write",
+        "files:read",
+        "files:write"
+      ],
+      "user": [
+        "chat:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels",
+        "message.groups",
+        "agent_session_stopped",
+        "app_home_opened"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "org_deploy_enabled": false,
+    "socket_mode_enabled": true,
+    "token_rotation_enabled": false
+  }
+}

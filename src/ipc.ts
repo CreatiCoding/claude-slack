@@ -1,0 +1,76 @@
+import net from 'node:net'
+import { EventEmitter } from 'node:events'
+import { unlinkSync, existsSync } from 'node:fs'
+
+/**
+ * Newline-delimited JSON over a unix socket. One Conn per socket; emits
+ * 'message' with the parsed object, 'close' when the peer goes away.
+ */
+export class Conn extends EventEmitter {
+  socket: net.Socket
+  private buffer = ''
+
+  constructor(socket: net.Socket) {
+    super()
+    this.socket = socket
+    socket.setEncoding('utf8')
+    socket.on('data', (chunk: string) => {
+      this.buffer += chunk
+      let idx: number
+      while ((idx = this.buffer.indexOf('\n')) >= 0) {
+        const line = this.buffer.slice(0, idx).trim()
+        this.buffer = this.buffer.slice(idx + 1)
+        if (!line) continue
+        try {
+          this.emit('message', JSON.parse(line))
+        } catch {
+          this.emit('error', new Error(`bad ipc line: ${line.slice(0, 200)}`))
+        }
+      }
+    })
+    socket.on('close', () => this.emit('close'))
+    socket.on('error', (err) => this.emit('error', err))
+    // Avoid unhandled 'error' crashes when nobody listens.
+    this.on('error', () => {})
+  }
+
+  send(obj: unknown): void {
+    if (this.socket.destroyed) return
+    this.socket.write(JSON.stringify(obj) + '\n')
+  }
+
+  close(): void {
+    this.socket.end()
+  }
+}
+
+export function listen(path: string, onConn: (conn: Conn) => void): net.Server {
+  if (existsSync(path)) {
+    // Stale socket from a previous run. If a broker is still alive we
+    // will fail to bind below, which is the right outcome.
+    try {
+      unlinkSync(path)
+    } catch {}
+  }
+  const server = net.createServer((socket) => onConn(new Conn(socket)))
+  server.listen(path)
+  return server
+}
+
+export function connect(path: string, timeoutMs = 2000): Promise<Conn> {
+  return new Promise((resolve, reject) => {
+    const socket = net.createConnection(path)
+    const timer = setTimeout(() => {
+      socket.destroy()
+      reject(new Error('ipc connect timeout'))
+    }, timeoutMs)
+    socket.once('connect', () => {
+      clearTimeout(timer)
+      resolve(new Conn(socket))
+    })
+    socket.once('error', (err) => {
+      clearTimeout(timer)
+      reject(err)
+    })
+  })
+}

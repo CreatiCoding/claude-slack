@@ -1,0 +1,34 @@
+#!/bin/sh
+# Issue (or renew) the Let's Encrypt certificate for the admin page's domain.
+# DNS-01 through acme-dns: Route53 only needs the one-time CNAME
+#   _acme-challenge.<CLAUDE_SLACK_WEB_DOMAIN> -> <uuid>.auth.acme-dns.io
+# so no AWS key is stored here. Run: sh scripts/issue-cert
+# The domain comes from the environment, else from CLAUDE_SLACK_WEB_DOMAIN in the repo's .env.
+set -e
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+DOMAIN=${CLAUDE_SLACK_WEB_DOMAIN:-$(sed -n 's/^CLAUDE_SLACK_WEB_DOMAIN=//p' "$ROOT/.env" 2>/dev/null | tail -1)}
+[ -n "$DOMAIN" ] || { echo "CLAUDE_SLACK_WEB_DOMAIN 가 없습니다. .env 에 넣으세요 (.env.example 참고)." >&2; exit 1; }
+ACME="$HOME/.acme.sh/acme.sh"
+[ -x "$ACME" ] || { echo "acme client not found at $ACME" >&2; exit 1; }
+
+if ! "$ACME" --issue --dns dns_acmedns -d "$DOMAIN" --server letsencrypt --home "$HOME/.acme.sh" --dnssleep 10 --force; then
+  # First run for a name: acme-dns has just registered a challenge host but Route53 does not point at it yet.
+  CONF="$HOME/.acme.sh/${DOMAIN}_ecc/${DOMAIN}.conf"
+  SUB=$(sed -n "s/^ACMEDNS_SUBDOMAIN=//p; s/^SAVED_ACMEDNS_SUBDOMAIN=//p" "$CONF" 2>/dev/null | head -1 | tr -d "'\"")
+  if [ -n "$SUB" ]; then
+    echo >&2
+    echo "Route53 에 CNAME 을 하나 추가한 뒤 이 스크립트를 다시 실행하세요:" >&2
+    echo "  이름: _acme-challenge.$DOMAIN" >&2
+    echo "  유형: CNAME" >&2
+    echo "  값:   $SUB.auth.acme-dns.io" >&2
+  fi
+  exit 1
+fi
+
+# Copy the result where the broker reads it (mode 600: the key is private).
+OUT="$HOME/.claude-slack/tls"
+mkdir -p "$OUT" && chmod 700 "$OUT"
+"$ACME" --install-cert --ecc -d "$DOMAIN" --home "$HOME/.acme.sh" \
+  --fullchain-file "$OUT/fullchain.pem" --key-file "$OUT/key.pem"
+chmod 600 "$OUT/key.pem"
+echo "ok: $OUT/fullchain.pem"
