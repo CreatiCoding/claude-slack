@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { SlackApi, InMsg, InAction, InStop, InCommand, InView } from './slack.ts'
 import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
-import { DialogDriver, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
+import { DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, type TranscriptEvent } from './transcript.ts'
@@ -27,6 +27,8 @@ import { ThreadLinks } from './thread-links.ts'
 import { countUserMessages, deleteRecentSession, listRecentSessions, readFirstMessage, type RecentSession } from './sessions-list.ts'
 import { countArchives, deleteArchive, listArchives, renameArchive, type SessionArchive } from './archive.ts'
 import { PurgeService } from './purge.ts'
+import { EventLog, type EventBody, type SessionEvent } from './events.ts'
+import { AsyncLocalStorage } from 'node:async_hooks'
 
 export type { Session } from './session.ts'
 
@@ -40,6 +42,31 @@ function imagesDir(): string {
 }
 
 /** What the admin page renders. Plain data, no Slack or tmux objects. */
+/** One row of the web app's session list. */
+export interface WebSession {
+  pid: number
+  thread: string
+  cwd: string
+  title?: string
+  state: SessionState
+  waiting?: string
+  waitingSince?: number
+  model?: string
+  effort?: string
+  permissionMode?: string
+  contextLabel?: string
+  startedAt: number
+  /** Messages held until the running tool finishes. */
+  held: number
+  /** Runs in a tmux pane, so keys and the screen are available. */
+  canKeys: boolean
+  /** "전부 허용": the broker answers every permission request with allow. */
+  autoAllow: boolean
+  lastSeq: number
+  lastAt: number
+  preview?: string
+}
+
 export interface AdminState {
   channelId: string
   live: Array<{
@@ -100,6 +127,8 @@ const ORPHAN_SCAN_TTL_MS = 30_000
 export interface BrokerConfig {
   /** Where the pinned rows are kept. Tests use a temp file. */
   pinsPath?: string
+  /** Where the web app's session events are kept (one file per thread). */
+  eventsDir?: string
   /** Draw terminal screens as pictures (default on); text when off or when rendering fails. */
   screenImages?: boolean
   /** Renders a screen with colours to its pictures (one, or the conversation and its side panel). Tests replace it so no browser starts; a single Buffer is one picture. */
@@ -263,6 +292,8 @@ interface CommandContext {
 interface CommandSpec {
   /** A user may type this after `:`. Without it the command is internal: panel buttons only. */
   user?: boolean
+  /** Works without a tmux pane: it changes the broker's own handling, not the terminal. */
+  noPane?: boolean
   run: (c: CommandContext) => Promise<void>
 }
 
@@ -273,7 +304,7 @@ const HELP = [
   '• 세션 제어: `:esc` 중단 · `:screen` 화면(`:screen raw` 전체) · `:status` 상태 · `:answer 2` 번호 응답 · `:key Down Enter` 키 입력 · `:type 텍스트` 타이핑 · `:canvas` 기록을 캔버스로 · `:refresh` 세션 다시 열기(스킬·플러그인 반영) · `:kill` Slack에서 띄운 세션 종료',
   '• 도구가 도는 중에 보낸 메시지는 붙잡았다가 도구가 끝나면 전달합니다. 바로 보내려면 안내의 *지금 보내기* 또는 `:now`.',
   '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달',
-  '• 권한 요청은 버튼으로, 또는 `yes abcde` / `no abcde` 로 답합니다.',
+  '• 권한 요청은 버튼으로, 또는 `yes abcde` / `no abcde` 로 답합니다. `:auto on` 이면 브로커가 모든 권한 요청을 바로 허용하고 무엇을 허용했는지 스레드에 남깁니다(`:auto off` 로 끔).',
 ].join('\n')
 
 const SLASH_HELP = '`/ccnew [경로] [프롬프트]` 새 세션 (인자 없으면 폼) · `/ccresume [id]` 이전 세션 재개 · `/cclist` 실행 중 세션 · `/cchistory` 보관된 세션 · `/ccrefresh` 세션 새로고침 · `/cchelp` 이 안내. 풀네임은 `/claude-code-new` 처럼 씁니다.'
@@ -297,6 +328,19 @@ export class Broker {
   private earlyTranscripts = new Map<string, string>()
   private cfg: BrokerConfig
   private slack: SlackApi
+  /**
+   * The same Slack client, but what it posts is not copied into the web app's event log. For
+   * messages the web app gets in a better shape from their own event (answers, the plan, the
+   * person's own message) and would otherwise show twice.
+   */
+  private quietSlack: SlackApi
+  private mirrorOff = new AsyncLocalStorage<boolean>()
+  /** Session events for the web app, one numbered log per thread. */
+  readonly events: EventLog
+  /** Which thread a message the broker posted lives in, so its edits, deletions and reactions reach the right log. */
+  private msgThread = new Map<string, string>()
+  private changeListeners = new Set<() => void>()
+  private changeTimer?: ReturnType<typeof setTimeout>
   private tmux: TmuxLike
   private confirmDialogs: (pane: string, done?: () => boolean) => Promise<string[]>
   /** The only thing that presses dialog keys. */
@@ -352,6 +396,8 @@ export class Broker {
       this.threadLinks.note(o.threadTs, ts)
       return ts
     }
+    this.events = new EventLog(cfg.eventsDir)
+    this.quietSlack = this.installMirror(slack)
     this.tmux = tmux
     this.confirmDialogs = confirmDialogs
     this.dialogs = new DialogDriver(tmux, (m) => this.logAt('INFO', 'dialog', m))
@@ -361,6 +407,162 @@ export class Broker {
     this.revive = new ReviveStore(cfg.revivePath)
     this.wasAlive = this.revive.taken()
     this.recordedAtStart = [...this.wasAlive]
+  }
+
+  // ------------------------------------------------------------ web mirror
+
+  /**
+   * Copy what the broker does in a session's thread into that thread's event log: posts, edits,
+   * deletions, reactions, ephemeral notes. Cards keep their Slack blocks, so the web app draws the
+   * same buttons and a press goes through {@link handleAction} exactly as a Slack click does.
+   * Returns a client whose calls are not copied (see {@link quietSlack}).
+   */
+  private installMirror(slack: SlackApi): SlackApi {
+    const isPanel = (blocks?: unknown[]) => !!blocks?.some((b) => typeof (b as { block_id?: unknown }).block_id === 'string' && isPanelBlockId((b as { block_id: string }).block_id))
+    let n = 0
+    const wrap = <K extends keyof SlackApi>(name: K, after: (args: Parameters<Extract<SlackApi[K], (...a: never[]) => unknown>>, result: unknown) => void) => {
+      const orig = slack[name] as unknown
+      if (typeof orig !== 'function') return
+      ;(slack as unknown as Record<string, unknown>)[name] = async (...args: never[]) => {
+        const result = await (orig as (...a: never[]) => Promise<unknown>).apply(slack, args)
+        if (!this.mirrorOff.getStore()) {
+          try {
+            after(args as never, result)
+          } catch (err) {
+            this.logAt('WARN', 'web', `mirror ${String(name)} failed: ${describeError(err)}`)
+          }
+        }
+        return result
+      }
+    }
+    wrap('post', ([o], ts) => {
+      if (!o.threadTs || typeof ts !== 'string' || ts === o.threadTs || isPanel(o.blocks)) return
+      this.noteMsg(ts, o.threadTs)
+      this.mirror(o.threadTs, { type: 'msg', ts, text: o.text, ...(o.blocks ? { blocks: o.blocks } : {}) })
+    })
+    wrap('update', ([ts, text, blocks]) => {
+      const thread = this.msgThread.get(ts)
+      if (thread) this.mirror(thread, { type: 'msg_update', ts, text, ...(blocks ? { blocks } : {}) })
+    })
+    wrap('delete', ([ts]) => {
+      const thread = this.msgThread.get(ts)
+      if (thread) this.mirror(thread, { type: 'msg_delete', ts })
+    })
+    wrap('react', ([ts, name]) => {
+      const thread = this.msgThread.get(ts)
+      if (thread) this.mirror(thread, { type: 'react', ts, name, on: true })
+    })
+    wrap('unreact', ([ts, name]) => {
+      const thread = this.msgThread.get(ts)
+      if (thread) this.mirror(thread, { type: 'react', ts, name, on: false })
+    })
+    wrap('postEphemeral', ([, text, threadTs, blocks]) => {
+      if (threadTs) this.mirror(threadTs, { type: 'msg', ts: `eph-${Date.now()}-${++n}`, text, ephemeral: true, ...(blocks ? { blocks } : {}) })
+    })
+    wrap('uploadFiles', ([o], ok) => {
+      if (ok) this.mirror(o.threadTs, { type: 'msg', ts: `up-${Date.now()}-${++n}`, text: o.text ?? '', files: o.paths })
+    })
+    const off = this.mirrorOff
+    return new Proxy(slack, {
+      get(target, prop, receiver) {
+        const v = Reflect.get(target, prop, receiver) as unknown
+        if (typeof v !== 'function') return v
+        return (...args: unknown[]) => off.run(true, () => (v as (...a: unknown[]) => unknown).apply(target, args))
+      },
+    })
+  }
+
+  private noteMsg(ts: string, thread: string): void {
+    this.msgThread.set(ts, thread)
+    if (this.msgThread.size > 5000) this.msgThread.delete(this.msgThread.keys().next().value!)
+  }
+
+  /** Into the log only for threads a session owns; a stray thread has no page to show it on. */
+  private mirror(thread: string, body: EventBody): void {
+    if (!this.registry.byThreadTs(thread)) return
+    this.emitEvent(thread, body)
+  }
+
+  private emitEvent(thread: string, body: EventBody): SessionEvent | undefined {
+    const ev = this.events.emit(thread, body)
+    this.changed()
+    return ev
+  }
+
+  /** Something the session list shows may have changed: tell the web app, at most a few times a second. */
+  private changed(): void {
+    if (this.changeTimer) return
+    this.changeTimer = setTimeout(() => {
+      this.changeTimer = undefined
+      for (const l of this.changeListeners) {
+        try {
+          l()
+        } catch {}
+      }
+    }, 250)
+    this.changeTimer.unref?.()
+  }
+
+  /** The web app listens here for "the session list changed". */
+  onChange(l: () => void): () => void {
+    this.changeListeners.add(l)
+    return () => this.changeListeners.delete(l)
+  }
+
+  /** The session list as the web app shows it: cheap enough to send on every change. */
+  webSessions(): WebSession[] {
+    return this.registry.live
+      .filter((s) => !s.ended)
+      .map((s) => ({
+        pid: s.pid,
+        thread: s.threadTs,
+        cwd: s.cwd,
+        title: s.manualTitle ?? s.title,
+        state: s.state,
+        waiting: s.waitingReason ? WAITING_LABEL[s.waitingReason] : undefined,
+        waitingSince: s.waitingSince,
+        model: s.model,
+        effort: s.effort,
+        permissionMode: s.permissionMode,
+        contextLabel: s.contextLabel,
+        startedAt: s.startedAt,
+        held: s.held?.length ?? 0,
+        canKeys: !!s.pane,
+        autoAllow: !!s.autoAllow,
+        lastSeq: this.events.last(s.threadTs),
+        lastAt: this.lastEventAt(s.threadTs) ?? s.startedAt,
+        preview: s.transcriptPath ? this.firstMessages.get(s.transcriptPath) : undefined,
+      }))
+  }
+
+  private lastEventAt(thread: string): number | undefined {
+    const last = this.events.last(thread)
+    return last ? this.events.since(thread, last - 1)[0]?.at : undefined
+  }
+
+  /** A message typed in the web app: shown in the thread as the web's, then handled exactly as a thread reply. */
+  async webSend(pid: number, raw: string): Promise<{ ok: boolean; note: string }> {
+    const session = this.registry.byPid(pid)
+    const text = raw.trim()
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    if (!text) return { ok: false, note: '보낼 내용이 없습니다.' }
+    const ts = await this.quietSlack.post({ threadTs: session.threadTs, text: `🌐 웹: ${text}` })
+    this.noteMsg(ts, session.threadTs)
+    this.emitEvent(session.threadTs, { type: 'user', ts, text, via: 'web' })
+    this.logAt('INFO', 'web', 'message', this.tag(session, { ts, chars: text.length }))
+    // Same routing as a thread reply. In the web app `/` needs no `:` in front: nothing intercepts it there.
+    if (text.startsWith(':')) await this.runThreadCommand(session, text.slice(1).trim())
+    else if (text.startsWith('/') || text.startsWith('!')) await this.runCommand(session, text)
+    else await this.inject(session, text, this.defaultRecipient, ts)
+    return { ok: true, note: '보냈습니다.' }
+  }
+
+  /** A button in the web app: the very handler a Slack click reaches, as the owner. */
+  async webAction(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }> {
+    if (!a.actionId || typeof a.value !== 'string') return { ok: false, note: '잘못된 버튼입니다.' }
+    const thread = a.messageTs ? this.msgThread.get(a.messageTs) : undefined
+    await this.handleAction({ user: this.defaultRecipient, channel: this.cfg.channelId, actionId: a.actionId, value: a.value, messageTs: a.messageTs ?? '', ...(thread ? { threadTs: thread } : {}), ...(a.blocks ? { blocks: a.blocks } : {}) })
+    return { ok: true, note: '눌렀습니다.' }
   }
 
   // ----------------------------------------------------------------- admin
@@ -617,6 +819,8 @@ export class Broker {
   /** Give a live session a new title everywhere it shows: root message, Slack session name, panel, Home tab. */
   private async applyTitle(session: Session, title: string): Promise<void> {
     session.title = title
+    // Claude Code's own title (ai-title) replaces `title` later; the web app keeps showing the one a person chose.
+    session.manualTitle = title
     await this.refreshRoot(session)
     if (session.statusCreated) await this.slack.renameSession(session.threadTs, title).catch((e) => this.logAt('WARN', 'slack', `rename failed: ${describeError(e)}`, this.tag(session)))
     this.schedulePanelRefresh(session)
@@ -695,6 +899,8 @@ export class Broker {
         ...(s.notify ? { notify: s.notify } : {}),
         ...(s.view ? { view: s.view } : {}),
         ...(s.title ? { title: s.title } : {}),
+        ...(s.manualTitle ? { manualTitle: s.manualTitle } : {}),
+        ...(s.autoAllow ? { autoAllow: true } : {}),
       })
     }
     this.offsets.flush()
@@ -827,6 +1033,8 @@ export class Broker {
     if (!rec) return
     session.notify = rec.notify ?? session.notify
     session.view = rec.view ?? session.view
+    session.autoAllow = rec.autoAllow ?? session.autoAllow
+    session.manualTitle = rec.manualTitle ?? session.manualTitle
     if (rec.title && !session.title) session.title = rec.title
     if (rec.holdNoticeTs) {
       if (rec.held?.length) session.holdNoticeTs = rec.holdNoticeTs
@@ -886,21 +1094,22 @@ export class Broker {
       // `notify` is the model asking for a push, as Remote Control's "notify me when the tests finish".
       const who = msg.notify && (session.notify ?? 'decisions') !== 'off' ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const text = who ? who + msg.text : msg.text
+      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}) })
       if (!msg.files?.length) {
-        for (const part of chunk(toMrkdwn(text))) await this.slack.post({ threadTs: session.threadTs, text: part })
+        for (const part of chunk(toMrkdwn(text))) await this.quietSlack.post({ threadTs: session.threadTs, text: part })
         return
       }
       // The caption rides on the upload so text and files land as one message; anything past the first chunk goes ahead of it.
       const parts = text.trim() ? chunk(toMrkdwn(text)) : []
       const caption = parts.pop()
-      for (const part of parts) await this.slack.post({ threadTs: session.threadTs, text: part })
+      for (const part of parts) await this.quietSlack.post({ threadTs: session.threadTs, text: part })
       try {
-        if (await this.slack.uploadFiles({ threadTs: session.threadTs, paths: msg.files, text: caption })) return
-        if (caption) await this.slack.post({ threadTs: session.threadTs, text: caption })
+        if (await this.quietSlack.uploadFiles({ threadTs: session.threadTs, paths: msg.files, text: caption })) return
+        if (caption) await this.quietSlack.post({ threadTs: session.threadTs, text: caption })
         await this.slack.post({ threadTs: session.threadTs, text: '⚠️ 파일을 올릴 권한이 없습니다. Slack 앱에 `files:write` 를 추가하고 재설치하세요.' })
       } catch (err) {
         this.logAt('WARN', 'slack', `file upload failed: ${describeError(err)}`, this.tag(session))
-        if (caption) await this.slack.post({ threadTs: session.threadTs, text: caption })
+        if (caption) await this.quietSlack.post({ threadTs: session.threadTs, text: caption })
         await this.slack.post({ threadTs: session.threadTs, text: `⚠️ 파일 업로드에 실패했습니다. ${describeError(err)}` })
       }
     } else if (msg.type === 'permission_request') {
@@ -912,6 +1121,7 @@ export class Broker {
       // 2. the last PreToolUse, for the tools that hook does cover.
       const recent = session.lastToolInput && session.lastToolInput.name === msg.toolName && Date.now() - session.lastToolInput.at < TOOL_INPUT_MATCH_MS ? session.lastToolInput.input : undefined
       const toolInput = parsePreview(msg.inputPreview) ?? recent
+      if (session.autoAllow) return this.autoAllowPermission(session, msg, toolInput)
       const { text, blocks } = permissionBlocksV2({ pid: session.pid, hasPane: !!session.pane, mention: this.mentionFor(session, 'decision'), toolInput, ...msg })
       const msgTs = await this.slack.post({ threadTs: session.threadTs, text, blocks })
       const key = `${session.pid}:${msg.requestId}`
@@ -1061,7 +1271,8 @@ export class Broker {
         session.lastInjected = undefined
         session.triggerTs = undefined
         // It is their own text, but a long paste on a phone pushes the answer off screen; keep the opening.
-        await post(text.length > PROMPT_MIRROR_MAX ? `⌨️ ${text.slice(0, PROMPT_MIRROR_MAX)}… _(+${text.length - PROMPT_MIRROR_MAX}자, 전체는 터미널에)_` : `⌨️ ${text}`)
+        const mirrorTs = await this.quietSlack.post({ threadTs: session.threadTs, text: text.length > PROMPT_MIRROR_MAX ? `⌨️ ${text.slice(0, PROMPT_MIRROR_MAX)}… _(+${text.length - PROMPT_MIRROR_MAX}자, 전체는 터미널에)_` : `⌨️ ${text}` })
+        this.emitEvent(session.threadTs, { type: 'user', ts: mirrorTs, text, via: 'terminal' })
         await this.beginTurn(session, this.defaultRecipient)
         break
       }
@@ -1172,7 +1383,8 @@ export class Broker {
     if (finalText && !echo && !turn?.rendered(finalText)) {
       const who = this.wantsMention(session, 'all') ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const parts = chunk(toMrkdwn(finalText))
-      for (const [i, part] of parts.entries()) await post(i === 0 ? who + part : part)
+      this.emitEvent(session.threadTs, { type: 'text', text: finalText })
+      for (const [i, part] of parts.entries()) await this.quietSlack.post({ threadTs: session.threadTs, text: i === 0 ? who + part : part })
     } else if (echo) this.logAt('DEBUG', 'stream', 'dropped tool-echo final text', this.tag(session, { text: finalText.trim() }))
 
     if (session.triggerTs) {
@@ -1251,6 +1463,7 @@ export class Broker {
         if (session.lastReplyText && ev.text.trim() === session.lastReplyText) break
         if (session.lastReplyText !== undefined && isToolEcho(ev.text)) break
         turn.text(ev.text)
+        this.emitEvent(session.threadTs, { type: 'text', text: ev.text })
         break
       case 'tool_use':
         if (ev.name === 'mcp__slack__reply') break
@@ -1260,6 +1473,7 @@ export class Broker {
           await this.showTodos(session, parseTodos(ev.input))
           break
         }
+        this.emitEvent(session.threadTs, { type: 'tool', id: ev.id, name: ev.name, title: activityLine(ev.name, ev.input, session.cwd).replace(/`/g, ''), ...(activityDetails(ev.name, ev.input) ? { detail: activityDetails(ev.name, ev.input) } : {}) })
         // Summary view: the answer and the decisions, no cards. The tool is still tracked as in flight.
         if (view === 'summary') {
           turn.taskStart(ev.id, activityLine(ev.name, ev.input, session.cwd).replace(/`/g, ''), { silent: true })
@@ -1275,6 +1489,7 @@ export class Broker {
         const denial = ev.isError ? classifierDenial(ev.output) : null
         if (denial) await this.reportDenial(session, ev.toolUseId, denial.reason)
         if (session.silentTools?.delete(ev.toolUseId)) break
+        this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 20_000) })
         turn.taskEnd(ev.toolUseId, ev.output, ev.isError)
         // The moment Claude Code itself would hand over a queued message.
         await this.releaseHeldIfIdle(session, 'tool result')
@@ -1305,10 +1520,11 @@ export class Broker {
     const text = todoList(todos)
     if (!text || text === session.lastTodoText) return
     session.lastTodoText = text
+    this.emitEvent(session.threadTs, { type: 'todos', todos: todos.map((t) => ({ content: t.content, status: t.status, ...(t.activeForm ? { activeForm: t.activeForm } : {}) })) })
     // Slack draws a plan block with its own agent styling; the text stays as the
     // notification body and as what is shown if the block is rejected.
     const plan = todoPlanBlock(todos)
-    session.todoTs = (await this.say(session, { ts: session.todoTs, text, blocks: plan ? [plan] : undefined })) ?? session.todoTs
+    session.todoTs = (await this.mirrorOff.run(true, () => this.say(session, { ts: session.todoTs, text, blocks: plan ? [plan] : undefined }))) ?? session.todoTs
   }
 
   /**
@@ -1357,7 +1573,7 @@ export class Broker {
     // A new turn means the person answered whatever was waited on.
     this.clearWaiting(session)
     await this.setStatus(session, 'processing')
-    session.turn = new TurnStream(this.slack, { threadTs: session.threadTs, recipient: session.recipient, flushMs: this.cfg.flushMs, heartbeatMs: this.cfg.heartbeatMs, log: (m) => this.logAt('INFO', 'stream', m, this.tag(session)) })
+    session.turn = new TurnStream(this.quietSlack, { threadTs: session.threadTs, recipient: session.recipient, flushMs: this.cfg.flushMs, heartbeatMs: this.cfg.heartbeatMs, log: (m) => this.logAt('INFO', 'stream', m, this.tag(session)) })
     session.stallShown = undefined
     session.quietTs = undefined
     this.noteActivity(session)
@@ -1547,6 +1763,17 @@ export class Broker {
     if (!dialog) return this.surfaceKeyedDialog(session, screen)
     const sig = `${dialog.question}|${dialog.options.map((o) => o.label).join('|')}`
     if (session.stallShown === sig) return true
+    // 전부 허용: a permission asked only in the terminal (no MCP request) is pressed "yes" here too.
+    // Only a yes/no proceed dialog; a question or a plan still goes to the person.
+    if (session.autoAllow && isProceedDialog(dialog)) {
+      const pressed = await this.dialogs.answerProceed(session.pane, 'allow')
+      if (pressed === 'answered') {
+        const what = [dialog.description, dialog.question].filter(Boolean).join('\n')
+        this.logAt('INFO', 'perm', 'auto-allowed a terminal dialog', this.tag(session, { question: truncate(dialog.question, 80) }))
+        await this.slack.post({ threadTs: session.threadTs, text: `⚡ 자동 허용 · 터미널 확인 창\n\`\`\`${truncate(what, 2500).replace(/```/g, "'''")}\`\`\`` })
+        return true
+      }
+    }
     session.stallShown = sig
     this.logAt('INFO', 'dialog', 'numbered dialog surfaced', this.tag(session, { question: truncate(dialog.question, 80), options: dialog.options.length }))
     const { text, blocks } = questionBlocks(
@@ -1623,6 +1850,7 @@ export class Broker {
     if (session.state !== state) {
       session.state = state
       this.schedulePanelRefresh(session, PANEL_REFRESH_FAST_MS)
+      this.emitEvent(session.threadTs, { type: 'status', state, ...(session.waitingReason ? { waiting: WAITING_LABEL[session.waitingReason] } : {}) })
     }
     try {
       await this.slack.setSessionStatus(session.threadTs, status, {
@@ -1843,6 +2071,8 @@ export class Broker {
       else if (!text.startsWith('!')) await this.slack.post({ threadTs, text: '이 스레드에 연결된 세션이 없습니다. 새 세션은 채널에 새 메시지로 시작하세요.' })
       return
     }
+    this.noteMsg(m.ts, threadTs)
+    this.emitEvent(threadTs, { type: 'user', ts: m.ts, text, via: 'slack' })
     const perm = PERMISSION_REPLY_RE.exec(text)
     if (perm) {
       await this.resolvePermission(session, perm[2]!.toLowerCase(), perm[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny', m.user)
@@ -2163,6 +2393,7 @@ export class Broker {
    * Debounced because a launch or an exit arrives as a burst.
    */
   private refreshHome(): void {
+    this.changed()
     if (this.homeTimer) return
     this.homeTimer = setTimeout(() => {
       this.homeTimer = undefined
@@ -2203,7 +2434,7 @@ export class Broker {
     await this.setStatus(session, session.turn ? 'processing' : 'active')
   }
 
-  private async resolvePermission(session: Session, requestId: string, behavior: 'allow' | 'deny', user: string, msgTs?: string): Promise<void> {
+  private async resolvePermission(session: Session, requestId: string, behavior: 'allow' | 'deny', user: string, msgTs?: string, record?: { text: string; blocks: unknown[] }): Promise<void> {
     const key = `${session.pid}:${requestId}`
     const pending = this.pendingPermissions.get(key)
     const waited = pending ? duration(Date.now() - pending.at) : undefined
@@ -2236,10 +2467,37 @@ export class Broker {
     this.clearReminder(key)
     this.pendingPermissions.delete(key)
     const label = `${behavior === 'allow' ? '✅ 허용' : '⛔ 거부'} · \`${requestId}\` · <@${user}>${terminalNote}`
-    if (ts) await this.slack.update(ts, label, [{ type: 'section', text: { type: 'mrkdwn', text: label } }])
+    // An automatic allow keeps what was allowed on the card: that record is the point of the mode.
+    if (ts && record) await this.slack.update(ts, record.text, terminalNote ? [...record.blocks, { type: 'context', elements: [{ type: 'mrkdwn', text: terminalNote.replace(/^ · /, '') }] }] : record.blocks)
+    else if (ts) await this.slack.update(ts, label, [{ type: 'section', text: { type: 'mrkdwn', text: label } }])
     else await this.slack.post({ threadTs: session.threadTs, text: label })
     if (!this.hasOpenPermission(session)) this.clearWaiting(session)
     if (session.turn) await this.setStatus(session, 'processing')
+  }
+
+  /**
+   * "전부 허용" mode: Claude Code still asks (its own permission mode is unchanged), and the broker
+   * answers yes at once through the same path as the 허용 button. The card stays in the thread,
+   * folded to what was allowed, so the mode leaves a record rather than a gap.
+   */
+  private async autoAllowPermission(session: Session, msg: { requestId: string; toolName: string; description: string; inputPreview: string }, toolInput: unknown): Promise<void> {
+    const { blocks } = permissionBlocksV2({ pid: session.pid, hasPane: !!session.pane, toolInput, ...msg })
+    const detail = (blocks as Array<{ type: string }>).filter((b) => b.type !== 'actions' && b.type !== 'context').slice(1)
+    const head = `⚡ 자동 허용 · *${msg.toolName}* · \`${msg.requestId}\`${msg.description ? ` · ${truncate(msg.description, 200)}` : ''}`
+    const record = { text: `⚡ 자동 허용 · ${msg.toolName} · ${msg.requestId}`, blocks: [{ type: 'section', text: { type: 'mrkdwn', text: head } }, ...detail] }
+    const msgTs = await this.slack.post({ threadTs: session.threadTs, ...record })
+    this.logAt('INFO', 'perm', 'auto-allowed', this.tag(session, { req: msg.requestId, tool: msg.toolName, preview: truncate(msg.inputPreview, 80) }))
+    await this.resolvePermission(session, msg.requestId, 'allow', this.defaultRecipient, msgTs, record)
+  }
+
+  /** Turn "전부 허용" on or off; turning it on also answers what is already waiting. */
+  async setAutoAllow(session: Session, on: boolean): Promise<void> {
+    session.autoAllow = on || undefined
+    this.logAt('INFO', 'perm', `auto-allow ${on ? 'on' : 'off'}`, this.tag(session))
+    await this.slack.post({ threadTs: session.threadTs, text: on ? '⚡ *전부 허용* 켬 · 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 여기에 남깁니다. 끄려면 `:auto off`' : '🔐 *전부 허용* 끔 · 권한 요청을 다시 버튼으로 묻습니다.' })
+    this.changed()
+    if (!on) return
+    for (const p of [...this.pendingPermissions.values()].filter((x) => x.pid === session.pid)) await this.resolvePermission(session, p.requestId, 'allow', this.defaultRecipient, p.msgTs)
   }
 
   // ------------------------------------------------------------ injection
@@ -2649,6 +2907,16 @@ export class Broker {
       },
     },
 
+    auto: {
+      user: true,
+      noPane: true,
+      run: async (c) => {
+        const want = c.arg.trim().toLowerCase()
+        if (!['on', 'off', '켬', '끔'].includes(want)) return void (await c.post(`현재 전부 허용: \`${c.session.autoAllow ? 'on' : 'off'}\`. 사용법: \`:auto on\` (권한 요청을 브로커가 바로 허용) · \`:auto off\``))
+        await this.setAutoAllow(c.session, want === 'on' || want === '켬')
+      },
+    },
+
     rename: {
       user: true,
       run: async (c) => {
@@ -2993,6 +3261,8 @@ export class Broker {
     const threadTs = session.threadTs
     const post = (text: string) => this.slack.post({ threadTs, text })
     if (cmd === '') return void (await post(HELP))
+    const early = this.commands[cmd.split(/\s+/)[0] ?? '']
+    if (early?.noPane && !session.pane) return early.run(this.ctx(session, cmd, user, messageTs))
     if (!session.pane) {
       const note = '이 세션은 tmux 밖에서 실행 중이라 키 조작을 할 수 없습니다. 메시지 전달은 됩니다.'
       return void (user ? await this.slack.postEphemeral(user, note, threadTs).catch(() => {}) : await post(note))
@@ -3097,6 +3367,7 @@ export class Broker {
     this.registry.remember(session)
     this.refreshHome()
     if (session.refreshing) return this.reopenForRefresh(session, carried)
+    this.emitEvent(session.threadTs, { type: 'end', why })
     await this.slack.post({ threadTs: session.threadTs, text: `⚫ 세션 ${why}` })
     if (session.rootTs) await this.slack.update(session.rootTs, this.rootText(session, '⚫', '종료됨'))
     if (session.panelTs) {

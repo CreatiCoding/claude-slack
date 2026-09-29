@@ -41,7 +41,7 @@ test('상태와 동작을 제공한다', async () => {
   const api = fakeApi()
   const s = await listening(api)
 
-  const page = await fetch(s.base + '/')
+  const page = await fetch(s.base + '/admin')
   assert.equal(page.status, 200)
   assert.match(page.headers.get('content-type') ?? '', /text\/html/)
 
@@ -127,7 +127,7 @@ test('TLS 인증서를 주면 HTTPS 로 응답한다', async () => {
 test('페이지의 스크립트는 문법 오류가 없다 (오류가 있으면 화면이 "불러오는 중" 에서 멈춘다)', async () => {
   const { Script } = await import('node:vm')
   const s = await listening(fakeApi())
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   const js = /<script[^>]*>([\s\S]*)<\/script>/.exec(html)?.[1]
   assert.ok(js, 'script tag')
   assert.doesNotThrow(() => new Script(js))
@@ -174,7 +174,7 @@ test('이어서 하기: JSON 본문으로 세션 id 를 받아 API 에 넘긴다
 test('표 UI: 탭·검색·정렬이 되고, 세 그룹이 같은 버튼 구성(해당 없는 것은 비활성화)을 갖는다', async () => {
   const { createContext, runInContext } = await import('node:vm')
   const s = await listening(fakeApi())
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   s.close()
   const js = /<script[^>]*>([\s\S]*)<\/script>/.exec(html)![1]!
   const els: Record<string, { textContent: string; innerHTML: string; value: string; style: Record<string, string> }> = {}
@@ -264,7 +264,7 @@ test('저장된 대화 삭제: JSON 본문으로 세션 id 를 받아 API 에 �
 test('브로커가 재시작 중일 때(502)는 표를 그대로 두고 자동 재연결 문구를 보여준다', async () => {
   const { createContext, runInContext } = await import('node:vm')
   const s = await listening(fakeApi())
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   s.close()
   const js = /<script[^>]*>([\s\S]*)<\/script>/.exec(html)![1]!
   const els: Record<string, { textContent: string; innerHTML: string; value: string; style: Record<string, string> }> = {}
@@ -298,7 +298,7 @@ test('브로커가 재시작 중일 때(502)는 표를 그대로 두고 자동 �
 test('잔재 탭: 끊긴 스레드가 표로 보이고, 정리 버튼이 앞에 있으며, 전체 탭에는 섞이지 않는다', async () => {
   const { createContext, runInContext } = await import('node:vm')
   const s = await listening(fakeApi())
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   s.close()
   const js = /<script[^>]*>([\s\S]*)<\/script>/.exec(html)![1]!
   const els: Record<string, { textContent: string; innerHTML: string; value: string; style: Record<string, string> }> = {}
@@ -413,7 +413,7 @@ test('상단 고정: 고정한 행은 어느 정렬에서도 맨 위에 오고, 
   assert.notEqual(noJson.status, 200, 'preflight-free writes are refused')
   assert.equal((await fetch(s.base + '/api/pin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ key: 's:a', pinned: true }) })).status, 200)
   assert.deepEqual(calls, [['s:a', true]])
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   s.close()
 
   const js = /<script[^>]*>([\s\S]*)<\/script>/.exec(html)![1]!
@@ -490,7 +490,7 @@ test('listenWithRetry: 주소가 아직 없으면(EADDRNOTAVAIL) 기다렸다가
 
 test('모바일 스타일: 값 없는 칸 숨김이 고정 카드에서도 이기고, 메뉴는 아래에서 올라오는 시트이며, 탭은 한 줄로 스크롤된다', async () => {
   const s = await listening(fakeApi())
-  const html = await (await fetch(s.base + '/')).text()
+  const html = await (await fetch(s.base + '/admin')).text()
   s.close()
   const css = /@media \(max-width:820px\) \{([\s\S]*?)\n  \}\n/.exec(html)?.[1] ?? ''
   assert.ok(css, '모바일 미디어 쿼리가 있다')
@@ -525,7 +525,7 @@ test('스레드 열기: 다리 페이지는 바로 오고, 링크는 따로 찾�
 
 test('버튼의 onclick 이 부르는 함수는 모두 window 에 노출되어 있다 (모듈 스크립트라 빠지면 눌러도 아무 일이 없다)', async () => {
   const s = await listening(fakeApi())
-  const page = await (await fetch(s.base + '/')).text()
+  const page = await (await fetch(s.base + '/admin')).text()
   const exposed = new Set([...page.matchAll(/window\.(\w+)\s*=/g)].map((m) => m[1]))
   const called = new Set([...page.matchAll(/(?:o\.\w+\s*=[^\n]*?|btn\([^\n]*?)["'](\w+)\(/g)].map((m) => m[1]))
   assert.ok(called.has('openLink') && called.has('showOrphan'), '핸들러를 찾아야 한다')
@@ -536,7 +536,7 @@ test('버튼의 onclick 이 부르는 함수는 모두 window 에 노출되어 �
 
 test('첫 화면: 상태가 페이지에 실려 오고, gzip 을 받을 수 있으면 압축해서 보낸다', async () => {
   const s = await listening(fakeApi())
-  const plain = await (await fetch(s.base + '/', { headers: { 'accept-encoding': 'identity' } })).text()
+  const plain = await (await fetch(s.base + '/admin', { headers: { 'accept-encoding': 'identity' } })).text()
   assert.match(plain, /const initial = \{.*"live":/, '첫 그림에 필요한 상태가 들어 있다')
   assert.doesNotMatch(plain, /\*INITIAL_STATE\*/)
   const zipped = await fetch(s.base + '/api/state', { headers: { 'accept-encoding': 'gzip' } })
@@ -547,7 +547,7 @@ test('첫 화면: 상태가 페이지에 실려 오고, gzip 을 받을 수 있�
 
 test('기록 보기는 별도 창이 아니라 페이지 안의 패널(iframe)로 열린다', async () => {
   const s = await listening(fakeApi())
-  const page = await (await fetch(s.base + '/')).text()
+  const page = await (await fetch(s.base + '/admin')).text()
   assert.match(page, /id="panel" hidden/)
   assert.match(page, /function showOrphan\(ts\) \{\n  openPanel\(/)
   assert.match(page, /function showArchive\(path\) \{\n  openPanel\(/)

@@ -14,7 +14,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
-import type { AdminState, Orphan, ThreadView } from './broker.ts'
+import type { AdminState, Orphan, ThreadView, WebSession } from './broker.ts'
+import type { SessionEvent } from './events.ts'
 
 export interface AdminApi {
   adminState(): Promise<AdminState>
@@ -37,7 +38,25 @@ export interface AdminApi {
   adminRenameArchive?(path: string, title: string): Promise<{ ok: boolean; note: string }>
   adminNew?(o: { cwd: string; prompt?: string }): Promise<{ ok: boolean; note: string }>
   adminScreen?(pid: number): Promise<{ ok: boolean; screen: string }>
+  // The web app (/app). Absent in older fakes: the routes then answer 404.
+  webSessions?(): WebSession[]
+  webSend?(pid: number, text: string): Promise<{ ok: boolean; note: string }>
+  webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
+  readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
+  onChange?(l: () => void): () => void
 }
+
+/** A comment line every so often keeps proxies and phones from calling an idle stream dead. */
+const SSE_PING_MS = 25_000
+/** The web app's files, served as they are: no build step. */
+const WEB_FILES: Record<string, string> = {
+  '/': 'index.html',
+  '/app': 'index.html',
+  '/web/app.js': 'app.js',
+  '/web/app.css': 'app.css',
+  '/web/markdown.js': 'markdown.js',
+}
+const WEB_TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' }
 
 export interface AdminOptions {
   host?: string
@@ -133,11 +152,56 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     if (!/^application\/json/i.test(String(req.headers['content-type'] ?? ''))) return send(res, 415, { error: 'content-type must be application/json' })
   }
 
-  if (req.method === 'GET' && url.pathname === '/') {
+  // The previous admin page, kept until the web app has everything it had.
+  if (req.method === 'GET' && url.pathname === '/admin') {
     // The state rides along in the page, so the first paint needs no second round trip.
     const state = await api.adminState().catch(() => undefined)
     const html = PAGE.replace('/*INITIAL_STATE*/null', state ? JSON.stringify(state).replace(/</g, '\\u003c') : 'null')
     return sendText(req, res, 'text/html; charset=utf-8', html)
+  }
+  const webFile = WEB_FILES[url.pathname]
+  if (req.method === 'GET' && webFile) {
+    const body = readFileSync(new URL(`./web/${webFile}`, import.meta.url), 'utf8')
+    return sendText(req, res, WEB_TYPES[webFile.split('.').pop()!]!, body)
+  }
+  // Live updates for the web app: the session list whenever it changes, and every session event as it happens.
+  // One way (server → page); anything the page does is a POST, answered on its own.
+  if (req.method === 'GET' && url.pathname === '/api/stream' && api.webSessions && api.events && api.onChange) {
+    res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' })
+    const write = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    res.write('retry: 2000\n\n')
+    write('sessions', api.webSessions())
+    const offChange = api.onChange(() => write('sessions', api.webSessions!()))
+    const offEvent = api.events.subscribe((thread, ev) => write('ev', { thread, ev }))
+    const ping = setInterval(() => res.write(`: ping ${Date.now()}\n\n`), SSE_PING_MS)
+    req.on('close', () => {
+      clearInterval(ping)
+      offChange()
+      offEvent()
+    })
+    return
+  }
+  if (req.method === 'GET' && url.pathname === '/api/events' && api.events) {
+    const thread = url.searchParams.get('thread') ?? ''
+    const after = Math.max(0, Number(url.searchParams.get('after') ?? 0) || 0)
+    return send(res, 200, { events: api.events.since(thread, after), last: api.events.last(thread) })
+  }
+  const sendTo = /^\/api\/session\/(\d+)\/send$/.exec(url.pathname)
+  if (req.method === 'POST' && sendTo && api.webSend) {
+    const body = await readJson(req)
+    const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''))
+    return send(res, result.ok ? 200 : 400, result)
+  }
+  if (req.method === 'POST' && url.pathname === '/api/action' && api.webAction) {
+    const body = await readJson(req)
+    const result = await api.webAction({
+      actionId: String(body.actionId ?? ''),
+      value: String(body.value ?? ''),
+      ...(typeof body.messageTs === 'string' ? { messageTs: body.messageTs } : {}),
+      ...(Array.isArray(body.blocks) ? { blocks: body.blocks } : {}),
+    })
+    log(`web action ${String(body.actionId ?? '')}: ${result.note}`)
+    return send(res, result.ok ? 200 : 400, result)
   }
   if (req.method === 'GET' && url.pathname === '/api/state') {
     return sendText(req, res, 'application/json; charset=utf-8', JSON.stringify(await api.adminState()))

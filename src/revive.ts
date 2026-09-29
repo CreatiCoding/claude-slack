@@ -31,6 +31,8 @@ export interface ReviveEntry {
   notify?: 'decisions' | 'on' | 'off'
   view?: 'summary' | 'normal' | 'verbose'
   title?: string
+  manualTitle?: string
+  autoAllow?: boolean
 }
 
 export class ReviveStore {

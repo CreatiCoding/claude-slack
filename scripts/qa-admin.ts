@@ -87,7 +87,7 @@ for (const [device, viewport] of [['desktop', { width: 1280, height: 800 }], ['p
   p.on('pageerror', (e) => errs.push(e.message))
   p.on('console', (m) => m.type() === 'error' && errs.push(m.text()))
   p.on('dialog', async (d) => { calls.push(`dialog:${d.type()}`); await d.accept(d.type() === 'prompt' ? '새이름' : undefined) })
-  await p.goto(base + '/')
+  await p.goto(base + '/admin')
   await p.waitForSelector('tr .cell-actions', { timeout: 10000 })
 
   check('첫 화면에 카드가 그려진다 (요청 1번)', (await p.locator('tbody tr').count()) === 5)

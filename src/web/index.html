@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#F3F1EA">
+<title>Claude</title>
+<link rel="stylesheet" href="/web/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <aside id="sidebar" class="sidebar" aria-label="세션 목록">
+    <div class="side-top">
+      <button id="btn-new" class="btn-new" type="button">＋ 새 세션</button>
+      <input id="search" class="search" type="search" placeholder="검색 (이름·첫 메시지·폴더)" autocomplete="off">
+    </div>
+    <nav id="list" class="list"></nav>
+    <div class="side-foot"><div id="conn" class="conn" role="status"></div><a id="old-admin" class="old-admin" href="/admin">이전 관리 화면 ↗</a></div>
+    <div id="resizer" class="resizer" title="끌어서 폭 조절 · 더블클릭하면 기본 폭"></div>
+  </aside>
+  <main id="main" class="main">
+    <header class="topbar">
+      <button id="btn-back" class="icon-btn back" type="button" aria-label="목록으로">‹</button>
+      <button id="title" class="title" type="button" title="이름 바꾸기"></button>
+      <span id="meta" class="meta"></span>
+      <button id="btn-auto" class="auto-toggle" type="button" hidden aria-pressed="false" title="켜면 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 대화에 남깁니다">⚡ 전부 허용</button>
+    </header>
+    <section id="empty" class="empty">왼쪽에서 세션을 고르세요.</section>
+    <section id="convo" class="convo" hidden>
+      <div id="scroller" class="scroller"><div id="log" class="log"></div></div>
+      <div id="jump" class="jump" hidden><button type="button">↓ 새 메시지</button></div>
+      <footer class="composer">
+        <div id="todos" class="todos" hidden></div>
+        <div id="held" class="held" hidden></div>
+        <div class="input-row">
+          <textarea id="input" rows="1" placeholder="메시지 보내기" enterkeyhint="send"></textarea>
+          <button id="btn-send" class="btn-send" type="button" aria-label="보내기">↑</button>
+        </div>
+      </footer>
+    </section>
+  </main>
+</div>
+<div id="toast" class="toast" role="status" hidden></div>
+<script type="module" src="/web/app.js"></script>
+</body>
+</html>

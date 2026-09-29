@@ -15,6 +15,8 @@ export interface Session {
   sessionId: string
   cwd: string
   threadTs: string
+  /** A name a person gave (`:rename`, the web app). Slack still follows Claude Code's ai-title; the web app shows this first. */
+  manualTitle?: string
   /** Bot-owned root message (terminal-started sessions). Editable. */
   rootTs?: string
   origin: 'terminal' | 'slack'
@@ -85,6 +87,8 @@ export interface Session {
   notify?: NotifyMode
   /** How much of a turn to mirror: no tool cards, the usual cards, or everything. */
   view?: ViewMode
+  /** "전부 허용" (`:auto on`): the broker allows every permission request itself and leaves a record card. */
+  autoAllow?: boolean
   /** The last PreToolUse seen, so a permission card can show the actual edit rather than a one-line preview. */
   lastToolInput?: { name: string; input: unknown; at: number }
   /** The stuck state already reported for this screen, so it is not posted twice. */
