@@ -135,3 +135,11 @@ test('7-5 "allow all edits during this session (shift+tab)" 는 other 로 분류
   assert.equal(classifyOption('Yes, allow all edits during this session (shift+tab)'), 'other')
   assert.equal(classifyOption('Allow all actions on example.com for this session'), 'allow-session')
 })
+
+test('실제 확인 중 발견: 재시작 직후 아직 다시 붙지 않은 세션에 누른 버튼은 "눌렀습니다"라고 거짓말하지 않는다', async () => {
+  const t = await setup()
+  const r = await t.broker.webAction({ actionId: 'ctl_btn_web', value: '4242:refresh now' })
+  assert.equal(r.ok, false)
+  assert.match(r.note, /아직 다시 붙지 않았/)
+  t.close()
+})

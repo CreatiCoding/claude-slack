@@ -905,6 +905,9 @@ export class Broker {
   /** A button in the web app: the very handler a Slack click reaches, as the owner. */
   async webAction(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }> {
     if (!a.actionId || typeof a.value !== 'string') return { ok: false, note: '잘못된 버튼입니다.' }
+    // Right after a broker restart the session may not be back yet: say so, rather than "눌렀습니다" for a press that went nowhere.
+    const target = decodeValue(a.value)?.pid
+    if (target && !this.registry.byPid(target)) return { ok: false, note: '세션이 아직 다시 붙지 않았어요. 잠시 뒤 다시 눌러 주세요.' }
     const thread = a.messageTs ? this.msgThread.get(a.messageTs) : undefined
     await this.handleAction({ user: this.defaultRecipient, channel: this.cfg.channelId, actionId: a.actionId, value: a.value, messageTs: a.messageTs ?? '', ...(thread ? { threadTs: thread } : {}), ...(a.blocks ? { blocks: a.blocks } : {}) })
     return { ok: true, note: '눌렀습니다.' }
