@@ -128,6 +128,9 @@ const api: AdminApi = {
     calls.push('clearArchives')
     return { ok: true, note: '지난 기록 1개를 지웠어요.' }
   },
+  async webSkills() {
+    return { direct: [{ name: 'publish-report', kind: 'skill', source: 'user', count: 5 }], auto: [{ name: 'kit:submit-commit', kind: 'skill', source: 'plugin', count: 2 }], other: [{ name: 'git:pr', kind: 'command', source: 'user', count: 0 }] }
+  },
   async webRefreshInfo(pid) {
     return pid === 12 ? { busy: true, tasks: [{ kind: 'bash', label: 'npm run dev' }, { kind: 'monitor', label: 'tail -f log' }] } : { busy: false, tasks: [] }
   },
@@ -308,6 +311,14 @@ for (const [label, size, phone] of [
   check(`${label}: 누르면 목록`, (await page.locator('.menu .mi', { hasText: '#2 둘째 PR' }).count()) === 1)
   await page.keyboard.press('Escape')
   check(`${label}: Slack 스레드 하나면 바로 링크`, (await page.locator('a.chip', { hasText: 'Slack 스레드' }).getAttribute('href')) === 'https://x.slack.com/archives/C1/p1000000100000001')
+  await page.locator('.chip', { hasText: '스킬' }).click()
+  await page.waitForSelector('.menu .mhead')
+  check(`${label}: 스킬 칩 메뉴는 직접/자동/그 밖으로`, (await page.locator('.menu .mhead').allTextContents()).join('|') === '직접 부른 스킬|자동으로 쓰인 스킬|그 밖의 스킬')
+  await page.locator('.menu .mi', { hasText: '/publish-report' }).click()
+  const val = await page.locator('#input').inputValue()
+  const caret = await page.locator('#input').evaluate((el: HTMLTextAreaElement) => el.selectionStart)
+  check(`${label}: 고르면 "/이름 " 을 채우고 커서는 끝`, val === '/publish-report ' && caret === val.length, `${val}|${caret}`)
+  await page.locator('#input').fill('')
   check(`${label}: 할 일 목록 입력칸 위`, (await page.locator('#todos').isVisible()) && ((await page.locator('#todos').textContent()) ?? '').includes('둘 하는 중'))
 
   // Send.

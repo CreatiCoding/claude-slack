@@ -204,6 +204,9 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       // Never the machine's own plugins or GitHub account.
       githubUser: 'test-user',
       pluginsDir: join(tmpdir(), `cs-plugins-${id}`),
+      skillUsagePath: join(tmpdir(), `cs-skill-usage-${id}.json`),
+      claudeProjectsDir: join(tmpdir(), `cs-projects-${id}`),
+      claudeDir: join(tmpdir(), `cs-claude-${id}`),
       processFacts: async () => ({}),
       webImagesDir: join(tmpdir(), `cs-web-images-${id}`),
       listSessions: () => [{ id: 'sess-1', cwd: '/home/u/proj', title: '테스트 수정', mtime: 1, when: '5분 전' }],

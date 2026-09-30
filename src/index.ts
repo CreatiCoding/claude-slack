@@ -58,6 +58,9 @@ const resumePurges = () => broker.resumePurges().catch((e) => log.warn('purge', 
 void resumePurges()
 setInterval(resumePurges, 5 * 60 * 1000).unref()
 
+// Skill call counts for the web app's "스킬" chip, ready before anyone asks.
+void broker.warmSkillUsage().catch((e) => log.warn('web', `스킬 사용 횟수를 세지 못했습니다: ${describeError(e)}`))
+
 if (cfg.web.enabled) {
   try {
     // Screen errors from phones and PCs get their own file, so they are found without digging through broker.log.

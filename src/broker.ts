@@ -36,6 +36,7 @@ import { branchPr, linksIn, repos, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
 import { sessionPlugins, type PluginLine } from './plugins.ts'
+import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
 import { execFile } from 'node:child_process'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
@@ -159,6 +160,11 @@ export interface BrokerConfig {
   homeDir?: string
   /** The GitHub account whose marketplaces count as the user's own (default: asked of gh once). */
   githubUser?: string
+  /** Skill call counts (default ~/.claude-slack/skill-usage.json) and the conversations counted (~/.claude/projects). */
+  skillUsagePath?: string
+  claudeProjectsDir?: string
+  /** Where ~/.claude is (tests use a temporary one). */
+  claudeDir?: string
   /** Where Claude Code keeps plugins (tests use a temporary one). */
   pluginsDir?: string
   /** How often a scheduled refresh looks again (default a minute). */
@@ -606,6 +612,23 @@ export class Broker {
    * The user's plugins as this process runs them, by key+pid (a refresh keeps the key; a key-only cache once
    * showed the old process's versions for half a minute). Worked out off the list's path, at most every 30s.
    */
+  private skillUsage?: SkillUsage
+  private skillUsageRun?: Promise<void>
+  /** Count skill calls now, so the first "스킬" chip is quick (about a second over all conversations, then ms). */
+  warmSkillUsage(): Promise<void> {
+    this.skillUsage ??= new SkillUsage({ statePath: this.cfg.skillUsagePath, projectsDir: this.cfg.claudeProjectsDir })
+    this.skillUsageRun ??= this.skillUsage.update().finally(() => (this.skillUsageRun = undefined))
+    return this.skillUsageRun
+  }
+  /** The "스킬" chip: what this session's folder can call, the person's own most-called first. */
+  async webSkills(pid: number): Promise<ReturnType<typeof skillMenu>> {
+    const s = this.registry.byPid(pid)
+    if (!s) return { direct: [], auto: [], other: [] }
+    await this.warmSkillUsage().catch(() => {})
+    const claudeDir = this.cfg.claudeDir
+    return skillMenu(availableSkills(s.cwd, { ...(this.cfg.homeDir ? { home: this.cfg.homeDir } : {}), ...(claudeDir ? { claudeDir } : {}) }), this.skillUsage!.counts())
+  }
+
   private pluginCache = new Map<string, { at: number; lines: PluginLine[]; busy?: boolean }>()
   private githubUser?: Promise<string | undefined>
   private pluginsFor(s: Session): PluginLine[] | undefined {

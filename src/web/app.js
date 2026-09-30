@@ -1694,11 +1694,30 @@ function renderComposerBits() {
   if (s.held) chip('play', `지금 보내기 (${s.held})`, () => command(s, 'sendnow'), { hot: true })
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', hasMouse ? '중단 · Esc' : '중단', () => command(s, 'esc'))
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
+  chip('spark', '스킬', (e) => pickSkill(s, e.currentTarget))
   chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('chat', '/btw', () => prefill(':btw '))
   chip('clipboard', '/compact', () => sendText(s, '/compact'))
   chip('search', '/context', () => sendText(s, '/context'))
   chip('refresh', '/clear', () => confirm('대화를 비울까요? (/clear)') && sendText(s, '/clear'))
+}
+/** "스킬": what this folder can call, the ones called by hand most often first. Picking fills "/name ". */
+async function pickSkill(s, chipEl) {
+  let m
+  try {
+    m = await api(`/api/session/${s.pid}/skills`)
+  } catch (err) {
+    return toast(err.message, 'err')
+  }
+  const item = (x) => ({ label: `/${x.name}`, icon: x.kind === 'command' ? 'terminal' : 'spark', end: x.count ? `${x.count}회` : '', run: () => prefill(`/${x.name} `) })
+  const items = [
+    ...(m.direct.length ? [{ head: '직접 부른 스킬' }, ...m.direct.map(item)] : []),
+    ...(m.auto.length ? ['sep', { head: '자동으로 쓰인 스킬' }, ...m.auto.map(item)] : []),
+    ...(m.other.length ? ['sep', { head: '그 밖의 스킬' }, ...m.other.map(item)] : []),
+  ].filter((x, i, a) => !(x === 'sep' && i === 0))
+  if (!items.length) return toast('이 폴더에서 쓸 수 있는 스킬이 없어요', 'err')
+  const r = chipEl.getBoundingClientRect()
+  openMenu({ x: r.left, y: r.top, above: true }, items)
 }
 async function pasteFromClipboard() {
   try {
@@ -1722,6 +1741,7 @@ function prefill(text) {
   input.value = text
   autosize()
   input.focus()
+  input.setSelectionRange(text.length, text.length)
 }
 async function command(s, cmd) {
   try {
@@ -1960,10 +1980,12 @@ function openMenu(at, items, { title } = {}) {
   }
   const place = () => {
     const r = menu.getBoundingClientRect()
-    const x = Math.min(at.x, innerWidth - r.width - 8)
-    const y = at.y + r.height > innerHeight - 8 ? Math.max(8, at.y - r.height) : at.y
-    menu.style.left = Math.max(8, x) + 'px'
+    // `end`: the menu's right edge at x (a button at the right). `above`: its bottom edge at y, opening upward.
+    const x = at.end ? at.x - r.width : Math.min(at.x, innerWidth - r.width - 8)
+    const y = at.above ? Math.max(8, at.y - 6 - r.height) : at.y + r.height > innerHeight - 8 ? Math.max(8, at.y - r.height) : at.y
+    menu.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px'
     menu.style.top = y + 'px'
+    if (at.above) menu.style.maxHeight = Math.max(160, at.y - 14) + 'px'
   }
   scrim.addEventListener('click', closeMenu)
   scrim.addEventListener('contextmenu', (e) => (e.preventDefault(), closeMenu()))

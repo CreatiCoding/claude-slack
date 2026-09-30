@@ -55,6 +55,7 @@ export interface AdminApi {
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
   webLive?(thread: string): Promise<string>
+  webSkills?(pid: number): Promise<{ direct: SkillRow[]; auto: SkillRow[]; other: SkillRow[] }>
   webRefreshInfo?(pid: number): Promise<{ busy: boolean; tasks: Array<{ kind: string; label: string }> }>
   webGroups?(): unknown
   webGroupOp?(o: never): { ok: boolean; note: string; id?: string }
@@ -89,6 +90,8 @@ export function sessionsDelta(sent: Map<string, string>, list: WebSession[]): { 
   for (const [k, v] of entries) sent.set(k, v)
   return { order, changed }
 }
+
+type SkillRow = { name: string; kind: string; source: string; count: number; description?: string }
 
 /** A comment line every so often keeps proxies and phones from calling an idle stream dead. */
 const SSE_PING_MS = 25_000
@@ -376,6 +379,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     log(`web clear archives: ${result.note}`)
     return send(res, 200, result)
   }
+  const skills = /^\/api\/session\/(\d+)\/skills$/.exec(url.pathname)
+  if (req.method === 'GET' && skills && api.webSkills) return send(res, 200, await api.webSkills(Number(skills[1])))
   const refreshInfo = /^\/api\/session\/(\d+)\/refresh-info$/.exec(url.pathname)
   if (req.method === 'GET' && refreshInfo && api.webRefreshInfo) return send(res, 200, await api.webRefreshInfo(Number(refreshInfo[1])))
   const links = /^\/api\/session\/(\d+)\/links$/.exec(url.pathname)
