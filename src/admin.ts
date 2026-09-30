@@ -54,6 +54,7 @@ export interface AdminApi {
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
+  webLive?(thread: string): Promise<string>
 }
 
 /**
@@ -89,7 +90,9 @@ const SSE_PING_MS = 25_000
  * events go down the stream; the rest the page learns from the list (lastSeq) and fetches when it
  * switches (after=seq). With several sessions running, every page used to receive everything.
  */
-const streams = new Map<string, { thread: string | null }>()
+const streams = new Map<string, { thread: string | null; live?: string; write?: (event: string, data: unknown, kind?: string) => void }>()
+/** How often the text being written is read off the screen for the pages watching that session. */
+const LIVE_MS = 1500
 /** The web app's files, served as they are: no build step. */
 const WEB_FILES: Record<string, string> = {
   '/': 'index.html',
@@ -149,6 +152,26 @@ export function listenWithRetry(
   server.listen(port, host, opts.onListening)
 }
 
+/**
+ * "쓰는 중": every 1.5s, for each session some page is looking at, read what is being written and send it
+ * to those pages when it changed. Nothing is stored; an empty text clears the page's preview.
+ */
+function startLive(api: AdminApi): void {
+  if (!api.webLive) return
+  const timer = setInterval(async () => {
+    const watched = new Set([...streams.values()].map((s) => s.thread).filter((t): t is string => !!t))
+    for (const thread of watched) {
+      const text = await api.webLive!(thread).catch(() => '')
+      for (const s of streams.values()) {
+        if (s.thread !== thread || s.live === text) continue
+        s.live = text
+        s.write?.('live', { thread, text })
+      }
+    }
+  }, LIVE_MS)
+  timer.unref?.()
+}
+
 export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Server | HttpsServer {
   const host = opts.host ?? '127.0.0.1'
   const token = opts.token
@@ -160,6 +183,7 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
   // What the web app costs: counted as it is sent, logged once a minute.
   const meter = new TrafficMeter((l) => log(`web ${l}`))
   meter.start()
+  startLive(api)
   const onRequest = (req: IncomingMessage, res: ServerResponse) => {
     handle(req, res, api, token, log, meter).catch((err) => {
       log(`admin request failed: ${err}`)
@@ -229,7 +253,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       if (delta) write('sessions_delta', delta)
     })
     const conn = randomBytes(8).toString('hex')
-    const me = { thread: null as string | null }
+    const me: { thread: string | null; live?: string; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
     write('hello', { conn })
     const offEvent = api.events.subscribe((thread, ev) => {
@@ -273,6 +297,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const stream = streams.get(String(body.conn ?? ''))
     if (!stream) return send(res, 404, { error: '모르는 연결입니다. 다시 연결하세요.' })
     stream.thread = typeof body.thread === 'string' && /^\d+\.\d+$/.test(body.thread) ? body.thread : null
+    stream.live = undefined
     res.writeHead(204)
     res.end()
     return

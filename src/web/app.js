@@ -216,6 +216,15 @@ function connect() {
     for (const s of changed) by.set(s.thread, s)
     applySessions(order.map((k) => by.get(k)).filter(Boolean))
   })
+  // What is being written right now (not stored): the activity box shows its last two lines.
+  es.addEventListener('live', (e) => {
+    const { thread: ts, text } = JSON.parse(e.data)
+    if (ts !== current || !view) return
+    view.live = text
+    view.liveAt ??= Date.now()
+    if (!text) view.liveAt = null
+    renderActivity()
+  })
   es.addEventListener('ev', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
@@ -633,8 +642,11 @@ function scrollToBottom() {
   scroller.scrollTop = scroller.scrollHeight
   $('jump').hidden = true
 }
+/** Is the view following the bottom? Set by the person's scrolling, not by content growing. */
+let stuck = true
 scroller.addEventListener('scroll', () => {
-  if (atBottom()) $('jump').hidden = true
+  stuck = atBottom()
+  if (stuck) $('jump').hidden = true
   if (scroller.scrollTop < 200 && view?.start > 0) showOlder()
 })
 $('jump').firstElementChild.addEventListener('click', scrollToBottom)
@@ -685,6 +697,9 @@ function apply(ev, live) {
     }
     case 'text':
       addRow('text', ev)
+      view.lastText = ev.text
+      view.live = ''
+      view.liveAt = null
       return
     case 'tool':
       view.tools.set(ev.id, addRow('tool', ev, { end: null, closed: false }))
@@ -1260,16 +1275,22 @@ function renderActivity() {
     box.dataset.key = ''
     return
   }
+  // Only this turn's tools: one left without a result from an earlier turn is not "running".
   let running = null
-  for (const t of view.tools.values()) if (!t.end && !t.closed) running = t
-  const since = running ? running.ev.at : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
+  for (const t of view.tools.values()) if (!t.end && !t.closed && t.ev.at >= (view.turnAt || 0)) running = t
+  // Text already in the timeline that the terminal still shows is not "being written".
+  const live = view.live && !(view.lastText && view.lastText.replace(/\s+/g, ' ').includes(view.live.replace(/\s+/g, ' ').slice(0, 60))) ? view.live : ''
+  const since = running ? running.ev.at : live && view.liveAt ? view.liveAt : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
   const secs = Math.max(0, Math.round((Date.now() - since) / 1000))
-  const key = running ? 'tool:' + running.ev.id : 'think'
+  const key = running ? 'tool:' + running.ev.id : live ? 'write' : 'think'
   if (box.dataset.key !== key) {
     box.dataset.key = key
+    typed = ''
     box.innerHTML = running
       ? `<div class="ahead" role="button">${icon('chevron')}<span class="txt"></span><span class="secs"></span></div>`
-      : `<div class="ahead">${icon('spark')}<span class="txt">생각 중…</span><span class="secs"></span></div>`
+      : live
+        ? `<div class="ahead">${icon('edit')}<span class="txt">쓰는 중…</span><span class="secs"></span></div><div class="tail"></div>`
+        : `<div class="ahead">${icon('spark')}<span class="txt">생각 중…</span><span class="secs"></span></div>`
     if (running) {
       box.querySelector('.txt').textContent = `도구 실행 중 · ${takeEmoji(running.ev.title).rest}`
       box.querySelector('.ahead').addEventListener('click', () => {
@@ -1284,7 +1305,40 @@ function renderActivity() {
   }
   box.hidden = false
   box.querySelector('.secs').textContent = `· ${secs}초`
+  if (live) typeInto(box.querySelector('.tail'), live)
 }
+
+// The preview types on: only the characters that are new since the last one, not the whole text again.
+// When the window slid (the start of the tail moved), find where the old tail's end sits in the new one.
+let typed = ''
+let typing = null
+function typeInto(el, target) {
+  if (!el) return
+  let keep = typed
+  if (!target.startsWith(keep)) {
+    const probe = keep.slice(-24)
+    const at = probe ? target.lastIndexOf(probe) : -1
+    keep = at >= 0 ? target.slice(0, at + probe.length) : ''
+  }
+  typed = keep
+  el.textContent = typed
+  cancelAnimationFrame(typing)
+  const step = () => {
+    if (typed.length >= target.length) return
+    typed = target.slice(0, typed.length + Math.max(1, Math.ceil((target.length - typed.length) / 20)))
+    el.textContent = typed
+    typing = requestAnimationFrame(step)
+  }
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) (typed = target), (el.textContent = typed)
+  else typing = requestAnimationFrame(step)
+}
+
+// Stuck to the bottom, stay there when something below grows late (a picture, the activity box).
+const stayDown = new ResizeObserver(() => {
+  if (view && stuck) scroller.scrollTop = scroller.scrollHeight
+})
+stayDown.observe($('log'))
+stayDown.observe($('activity'))
 setInterval(() => current && renderActivity(), 1000)
 
 // ------------------------------------------------------------------ composer: chips, waiting note, held

@@ -31,6 +31,7 @@ import { PurgeService } from './purge.ts'
 import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
 import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
+import { writingPreview } from './preview.ts'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -539,6 +540,17 @@ export class Broker {
   onChange(l: () => void): () => void {
     this.changeListeners.add(l)
     return () => this.changeListeners.delete(l)
+  }
+
+  /** What the session is writing right now (tail of the text on screen), or '' when it is not writing. */
+  async webLive(thread: string): Promise<string> {
+    const s = this.registry.byThreadTs(thread)
+    if (!s || s.ended || s.state !== 'busy' || !s.pane) return ''
+    try {
+      return writingPreview(await this.tmux.capture(s.pane))
+    } catch {
+      return ''
+    }
   }
 
   /** The session list as the web app shows it: cheap enough to send on every change. */

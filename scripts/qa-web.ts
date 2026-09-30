@@ -35,6 +35,7 @@ const imageStore = new ImageStore(mkdtempSync(join(tmpdir(), 'qa-img-')))
 const events = new EventLog(mkdtempSync(join(tmpdir(), 'qa-web-')))
 const calls: string[] = []
 const changes = new Set<() => void>()
+let liveText = ''
 const now = Date.now()
 const A = '1000.0001'
 const B = '2000.0002'
@@ -103,6 +104,9 @@ const api: AdminApi = {
     }, 200)
     changed()
     return { ok: true, note: '보냈습니다.' }
+  },
+  async webLive(thread) {
+    return thread === B && liveText ? liveText : ''
   },
   webFolders(path) {
     const p = path || '/Users/me/projects'
@@ -323,7 +327,18 @@ for (const [label, size, phone] of [
   // B is busy now: the activity box shows at the bottom.
   await page.waitForSelector('#activity:not([hidden])', { timeout: 3000 }).catch(() => {})
   check(`${label}: 작업 중이면 활동 상자`, await page.locator('#activity:not([hidden])').count() === 1)
+  // What is being written shows in the activity box (two lines, faded) and clears when the answer lands.
+  liveText = '지금 쓰는 중인 글의 앞부분이고\n이어지는 둘째 줄'
+  await page.waitForSelector('#activity .tail', { timeout: 5000 }).catch(() => {})
+  await page.waitForFunction(() => (document.querySelector('#activity .tail')?.textContent ?? '').includes('둘째 줄'), null, { timeout: 5000 }).catch(() => {})
+  check(`${label}: 쓰는 중 미리보기`, ((await page.locator('#activity .txt').textContent()) ?? '').includes('쓰는 중') && ((await page.locator('#activity .tail').textContent()) ?? '').includes('둘째 줄'))
   await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}-busy.png`) })
+  liveText = ''
+  events.emit(B, { type: 'text', text: '다 쓴 답' })
+  changed()
+  await page.waitForSelector('text=다 쓴 답')
+  await page.waitForTimeout(200)
+  check(`${label}: 답이 오면 미리보기는 지운다`, (await page.locator('#activity .tail').count()) === 0)
   if (phone) await page.goBack()
   await page.locator(`.row[data-thread="${A}"]`).click()
   await settle(page)
