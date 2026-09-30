@@ -107,6 +107,11 @@ const api: AdminApi = {
     changed()
     return { ok: true, note: '보냈습니다.' }
   },
+  async webLinks(pid) {
+    return pid === 11
+      ? { prs: [{ url: 'https://github.com/a/b/pull/1', label: '#1 첫 PR' }, { url: 'https://github.com/a/c/pull/2', label: '#2 둘째 PR' }], threads: [{ url: 'https://x.slack.com/archives/C1/p1000000100000001', label: '이 세션의 스레드' }] }
+      : { prs: [], threads: [] }
+  },
   async webLive(thread) {
     return thread === B && liveText ? liveText : ''
   },
@@ -245,6 +250,12 @@ for (const [label, size, phone] of [
   await page.locator('.hp-big').first().click()
   check(`${label}: 크게 보기`, (await page.locator('.hp-full iframe').count()) === 1)
   await page.keyboard.press('Escape')
+  await page.waitForSelector('.chip:has-text("PR 2")', { timeout: 3000 }).catch(() => {})
+  check(`${label}: PR 이 여러 개면 "PR 2" 칩`, (await page.locator('.chip', { hasText: 'PR 2' }).count()) === 1)
+  await page.locator('.chip', { hasText: 'PR 2' }).click()
+  check(`${label}: 누르면 목록`, (await page.locator('.menu .mi', { hasText: '#2 둘째 PR' }).count()) === 1)
+  await page.keyboard.press('Escape')
+  check(`${label}: Slack 스레드 하나면 바로 링크`, (await page.locator('a.chip', { hasText: 'Slack 스레드' }).getAttribute('href')) === 'https://x.slack.com/archives/C1/p1000000100000001')
   check(`${label}: 할 일 목록 입력칸 위`, (await page.locator('#todos').isVisible()) && ((await page.locator('#todos').textContent()) ?? '').includes('둘 하는 중'))
 
   // Send.

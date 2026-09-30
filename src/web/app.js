@@ -536,6 +536,8 @@ async function open(ts, { push = true } = {}) {
   }
   if (t.events.length) renderConvo(t.events)
   await subscribe(ts)
+  const opened = sessionOf(ts)
+  if (opened) loadLinks(opened)
   await catchUp(ts)
   scrollToBottom()
   markSeen(ts)
@@ -1471,9 +1473,20 @@ function renderComposerBits() {
     }
     chips.append(c)
   }
+  // PR and Slack thread: one link opens at once, several open a small list (above the chip on a PC, a sheet on a phone).
+  const linkChip = (ic, label, list, fallback) => {
+    if (!list?.length && !fallback) return
+    if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, null, { href: list?.[0]?.url ?? fallback })
+    chip(ic, `${label} ${list.length}`, (e) => {
+      const r = e.currentTarget.getBoundingClientRect()
+      openMenu({ x: r.left, y: r.top - 8 - Math.min(list.length, 8) * 34 }, list.map((l) => ({ label: l.label, icon: ic, run: () => window.open(l.url, '_blank', 'noopener') })))
+    })
+  }
+  const links = linkCache.get(s.pid)
+  linkChip('pr', 'PR', links?.prs)
+  linkChip('link', 'Slack 스레드', links?.threads, links ? undefined : withToken('/go/thread?ts=' + encodeURIComponent(s.thread)))
   if (s.held) chip('play', `지금 보내기 (${s.held})`, () => command(s, 'sendnow'), { hot: true })
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', '중단', () => command(s, 'esc'))
-  chip('link', 'Slack 스레드', null, { href: withToken('/go/thread?ts=' + encodeURIComponent(s.thread)) })
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
   chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('chat', '/btw', () => prefill(':btw '))
@@ -1491,6 +1504,13 @@ async function pasteFromClipboard() {
   } catch {
     toast('클립보드를 읽지 못했어요. 입력칸에 붙여넣어 보세요', 'err')
   }
+}
+const linkCache = new Map()
+async function loadLinks(s) {
+  try {
+    linkCache.set(s.pid, await api(`/api/session/${s.pid}/links`))
+    if (current === s.thread) renderComposerBits()
+  } catch {}
 }
 function prefill(text) {
   input.value = text

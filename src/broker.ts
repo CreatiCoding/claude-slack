@@ -32,6 +32,7 @@ import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
 import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
 import { writingPreview } from './preview.ts'
+import { branchPr, linksIn, repos, type Link } from './links.ts'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -540,6 +541,26 @@ export class Broker {
   onChange(l: () => void): () => void {
     this.changeListeners.add(l)
     return () => this.changeListeners.delete(l)
+  }
+
+  private linkCache = new Map<number, { at: number; value: { prs: Link[]; threads: Link[] } }>()
+  /** For the chips: the branch's PR (gh, in the folder and clones in it) or PRs mentioned; this thread and threads mentioned. */
+  async webLinks(pid: number): Promise<{ prs: Link[]; threads: Link[] }> {
+    const session = this.registry.byPid(pid)
+    if (!session) return { prs: [], threads: [] }
+    const cached = this.linkCache.get(pid)
+    if (cached && Date.now() - cached.at < 60_000) return cached.value
+    const last = this.events.last(session.threadTs)
+    const texts = this.events
+      .since(session.threadTs, Math.max(0, last - 2000))
+      .flatMap((e) => (e.type === 'user' || e.type === 'text' ? [e.text] : e.type === 'tool_end' ? [e.output] : []))
+    const fromGh = (await Promise.all(repos(session.cwd).slice(0, 5).map((r) => branchPr(r)))).filter((x): x is Link => !!x)
+    const prs = fromGh.length ? fromGh : linksIn(texts, 'pr').slice(-10).map((url) => ({ url, label: url.replace(/^https:\/\/github\.com\//, '').replace('/pull/', ' #') }))
+    const own = await this.adminThreadLink(session.threadTs).catch(() => undefined)
+    const threads = [...(own ? [{ url: own, label: '이 세션의 스레드' }] : []), ...linksIn(texts, 'slack').filter((u) => !own || !u.startsWith(own.split('?')[0]!)).slice(-10).map((url) => ({ url, label: url.replace(/^https:\/\/[\w-]+\.slack\.com\/archives\//, '') }))]
+    const value = { prs, threads }
+    this.linkCache.set(pid, { at: Date.now(), value })
+    return value
   }
 
   /** What the session is writing right now (tail of the text on screen), or '' when it is not writing. */

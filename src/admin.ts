@@ -55,6 +55,7 @@ export interface AdminApi {
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
   webLive?(thread: string): Promise<string>
+  webLinks?(pid: number): Promise<{ prs: Array<{ url: string; label: string }>; threads: Array<{ url: string; label: string }> }>
 }
 
 /**
@@ -329,6 +330,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       return send(res, result.ok ? 200 : 400, result)
     }
   }
+  const links = /^\/api\/session\/(\d+)\/links$/.exec(url.pathname)
+  if (req.method === 'GET' && links && api.webLinks) return send(res, 200, await api.webLinks(Number(links[1])))
   const fork = /^\/api\/session\/(\d+)\/fork$/.exec(url.pathname)
   if (req.method === 'POST' && fork && api.webFork) {
     const result = await api.webFork(Number(fork[1]))
