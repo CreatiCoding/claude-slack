@@ -261,7 +261,10 @@ export type OptionKind = 'allow-once' | 'allow-session' | 'allow-always' | 'deny
 export function classifyOption(label: string): OptionKind {
   if (ALWAYS_RE.test(label)) return 'allow-always'
   if (DENY_RE.test(label)) return 'deny'
-  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : SESSION_RE.test(label) && !MODE_SWITCH_RE.test(label) ? 'allow-session' : 'allow-once'
+  // "Yes, allow all edits during this session (shift+tab)" switches the session to acceptEdits: not an allow of
+  // this action at all. Other, so nothing picks it by kind (it was only safe by coming after a plain "Yes").
+  if (MODE_SWITCH_RE.test(label) && /\b(all|during|session)\b|shift\s*\+\s*tab/i.test(label)) return 'other'
+  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : SESSION_RE.test(label) ? 'allow-session' : 'allow-once'
   return 'other'
 }
 

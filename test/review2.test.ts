@@ -129,3 +129,9 @@ test('2 설정 모달은 launchModel 과 비교해, 바꾸지 않은 모델로 /
   s.conn.close()
   t.close()
 })
+
+test('7-5 "allow all edits during this session (shift+tab)" 는 other 로 분류한다', async () => {
+  const { classifyOption } = await import('../src/dialog.ts')
+  assert.equal(classifyOption('Yes, allow all edits during this session (shift+tab)'), 'other')
+  assert.equal(classifyOption('Allow all actions on example.com for this session'), 'allow-session')
+})

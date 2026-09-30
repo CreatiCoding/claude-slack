@@ -580,11 +580,20 @@ export class Broker {
 
   private linkCache = new Map<number, { at: number; value: { prs: Link[]; threads: Link[] } }>()
   /** For the chips: the branch's PR (gh, in the folder and clones in it) or PRs mentioned; this thread and threads mentioned. */
+  private linkInflight = new Map<number, Promise<{ prs: Link[]; threads: Link[] }>>()
   async webLinks(pid: number): Promise<{ prs: Link[]; threads: Link[] }> {
-    const session = this.registry.byPid(pid)
-    if (!session) return { prs: [], threads: [] }
     const cached = this.linkCache.get(pid)
     if (cached && Date.now() - cached.at < 60_000) return cached.value
+    // The same session asked twice at once (two tabs opening it): one lookup.
+    const running = this.linkInflight.get(pid)
+    if (running) return running
+    const p = this.lookLinks(pid).finally(() => this.linkInflight.delete(pid))
+    this.linkInflight.set(pid, p)
+    return p
+  }
+  private async lookLinks(pid: number): Promise<{ prs: Link[]; threads: Link[] }> {
+    const session = this.registry.byPid(pid)
+    if (!session) return { prs: [], threads: [] }
     const last = this.events.last(session.threadTs)
     const texts = this.events
       .since(session.threadTs, Math.max(0, last - 2000))

@@ -168,3 +168,32 @@ test('3 조각 경계에 걸린 한글 때문에 읽은 위치가 파일 크기�
   await again.update()
   assert.deepEqual(again.counts().direct, { 'publish-report': 1 }, '파일이 그대로면 다시 세지 않는다')
 })
+
+test('7-1 스킬 이름 뒤 경계는 ASCII 로만: "tap-review로 봐줘", "dove-log-analysis 스킬로"를 알아본다', async () => {
+  const w = usageWorld(u('tap-review로 봐줘') + sk('tap-review') + u('dove-log-analysis 스킬로 분석') + sk('kit:dove-log-analysis'))
+  const s = new SkillUsage({ statePath: w.statePath, projectsDir: w.projects })
+  await s.update()
+  assert.deepEqual(s.counts().direct, { 'tap-review': 1, 'kit:dove-log-analysis': 1 })
+})
+
+test('7-2 프로젝트 범위 플러그인: 세션 폴더와 위 폴더들의 .claude/settings(.local).json 의 enabledPlugins 도 읽고, 가까운 폴더가 끄면 끈 것', () => {
+  const home = mkdtempSync(join(tmpdir(), 'home-'))
+  const claude = join(home, '.claude')
+  const work = join(home, 'work')
+  const app = join(work, 'app')
+  mkdirSync(join(app, '.claude'), { recursive: true })
+  mkdirSync(join(work, '.claude'), { recursive: true })
+  const plug = (name: string) => {
+    const p = join(claude, 'plugins', 'cache', 'm', name, '1.0.0')
+    mkdirSync(join(p, 'skills', name + '-skill'), { recursive: true })
+    writeFileSync(join(p, 'skills', name + '-skill', 'SKILL.md'), '---\nname: x\n---')
+    return p
+  }
+  writeFileSync(join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'slack@m': [{ scope: 'project', projectPath: work, installPath: plug('slack') }], 'chapter@m': [{ scope: 'project', projectPath: app, installPath: plug('chapter') }], 'user-kit@m': [{ scope: 'user', installPath: plug('user-kit') }] } }))
+  writeFileSync(join(claude, 'settings.json'), JSON.stringify({ enabledPlugins: { 'user-kit@m': true } }))
+  writeFileSync(join(work, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'slack@m': true, 'user-kit@m': true } }))
+  writeFileSync(join(app, '.claude', 'settings.local.json'), JSON.stringify({ enabledPlugins: { 'chapter@m': true, 'user-kit@m': false } }))
+  const names = (cwd: string) => availableSkills(cwd, { home, claudeDir: claude }).filter((s) => s.source === 'plugin').map((s) => s.name).sort()
+  assert.deepEqual(names(app), ['chapter:chapter-skill', 'slack:slack-skill'], '가까운 app 이 user-kit 을 끈다')
+  assert.deepEqual(names(work), ['slack:slack-skill', 'user-kit:user-kit-skill'])
+})

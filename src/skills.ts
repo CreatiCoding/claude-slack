@@ -89,10 +89,25 @@ export function availableSkills(cwd: string, o: { home?: string; claudeDir?: str
   // Enabled plugins, from where they are installed.
   try {
     const installed = JSON.parse(readFileSync(join(claude, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins?: Record<string, Array<{ installPath?: string; scope?: string; projectPath?: string }>> }
+    // Enabled: the user's settings, then each folder's .claude/settings.json and settings.local.json from the top
+    // down to the session's folder; the nearest one that says something decides (false turns it off).
     let enabled: Record<string, boolean> | undefined
-    try {
-      enabled = (JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> }).enabledPlugins
-    } catch {}
+    const layer = (file: string) => {
+      try {
+        const e = (JSON.parse(readFileSync(file, 'utf8')) as { enabledPlugins?: Record<string, boolean> }).enabledPlugins
+        if (e) enabled = { ...(enabled ?? {}), ...e }
+      } catch {}
+    }
+    layer(join(claude, 'settings.json'))
+    const chain: string[] = []
+    for (let d = resolve(cwd); ; d = dirname(d)) {
+      if (d !== home) chain.unshift(d)
+      if (d === dirname(d) || d === dirname(home)) break
+    }
+    for (const d of chain) {
+      layer(join(d, '.claude', 'settings.json'))
+      layer(join(d, '.claude', 'settings.local.json'))
+    }
     for (const [id, entries] of Object.entries(installed.plugins ?? {})) {
       if (enabled && enabled[id] !== true) continue
       // A plugin installed for one project belongs only to sessions in that project's folder.
@@ -122,7 +137,7 @@ interface UsageState {
 }
 
 /** Bump when the counting rules change; older counts are dropped. 3: counts inflated by a split character are dropped. */
-const USAGE_VERSION = 3
+const USAGE_VERSION = 4
 /** Read a conversation this much at a time, letting the broker breathe in between. */
 const CHUNK = 1024 * 1024
 /** A name this short ("run", "docs", "loop") is an everyday word: only /name counts as calling it. */
@@ -130,8 +145,11 @@ const SHORT_NAME = 4
 
 const REMINDER_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/g
 const wordHash = (w: string) => createHash('sha1').update(w.toLowerCase()).digest('hex').slice(0, 8)
-/** Words, so "report" does not match "reporting": letters, digits and - _ : kept together. */
-const words = (text: string) => [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}_:\-]+/u).filter(Boolean))]
+/**
+ * Words as skill names are written: ASCII letters, digits and - _ : kept together, anything else separates. So
+ * "report" does not match "reporting", and "tap-review로" (Korean right after the name) still says tap-review.
+ */
+const words = (text: string) => [...new Set(text.toLowerCase().split(/[^a-z0-9_:\-]+/).filter(Boolean))]
 
 /** The person's own words in a transcript entry, or undefined when it is not theirs. */
 function ownText(entry: { type?: string; isMeta?: boolean; isCompactSummary?: boolean; message?: { content?: unknown } }): string | undefined {

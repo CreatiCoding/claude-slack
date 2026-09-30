@@ -273,3 +273,16 @@ test('4-4 QR: 토큰이 없으면 외부 주소 그대로; 알려진 벡터로 �
   const vectors = JSON.parse(readFileSync(new URL('./fixtures/qr-vectors.json', import.meta.url), 'utf8')) as Array<{ text: string; rows: string[] }>
   for (const v of vectors) assert.deepEqual(qrMatrix(v.text).map((r) => r.join('')), v.rows, v.text)
 })
+
+test('7-4 QR: 토큰은 있는데 외부 주소가 없고 localhost 로 열렸으면 localhost QR 대신 안내', async () => {
+  const server = createAdminServer(fakeApi(), { port: 0, token: 'T' })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'T' }, body: '{}' })
+    const body = (await r.json()) as { url?: string; local?: boolean }
+    assert.equal(body.local, true, JSON.stringify(body))
+  } finally {
+    server.close()
+  }
+})

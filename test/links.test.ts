@@ -82,3 +82,19 @@ setTimeout(() => console.log(JSON.stringify({ title: 't', number: n, state: 'OPE
   assert.equal(calls(404), 1, '실패는 1분 기억')
   assert.ok(_prStateCount() <= 500)
 })
+
+test('7-3 branchPr: 같은 저장소를 동시에 물으면 gh 는 한 번', async () => {
+  const { branchPr } = await import('../src/links.ts')
+  const { mkdtempSync, writeFileSync, chmodSync, readFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'gh-'))
+  const log = join(dir, 'calls')
+  const gh = join(dir, 'gh')
+  writeFileSync(gh, `#!/usr/bin/env node
+require('fs').appendFileSync(${JSON.stringify(log)}, 'call\\n')
+setTimeout(() => console.log(JSON.stringify({ url: 'https://github.com/a/b/pull/3', title: 't', number: 3, state: 'OPEN' })), 200)
+`)
+  chmodSync(gh, 0o755)
+  const got = await Promise.all([branchPr(dir, gh), branchPr(dir, gh), branchPr(dir, gh)])
+  assert.ok(got.every((g) => g?.number === 3))
+  assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1)
+})

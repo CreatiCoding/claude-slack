@@ -319,7 +319,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   if (req.method === 'POST' && url.pathname === '/api/qr-code') {
     const proto = req.headers['x-forwarded-proto'] ?? ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http')
     const origin = (opts?.publicUrl ?? `${proto}://${req.headers.host ?? 'localhost'}`).replace(/\/+$/, '')
-    if (!token) return send(res, 200, { url: origin + '/', local: !opts?.publicUrl && /^(localhost|127\.|\[?::1)/.test(String(req.headers.host ?? '')) })
+    // Opened as localhost with no outside address: a QR a phone cannot use. Say so instead, token or not.
+    if (!opts?.publicUrl && /^(localhost|127\.|\[?::1)/.test(String(req.headers.host ?? ''))) return send(res, 200, { url: origin + '/', local: true })
+    if (!token) return send(res, 200, { url: origin + '/' })
     for (const [c, at] of qrCodes) if (Date.now() - at > QR_CODE_MS) qrCodes.delete(c)
     if (qrCodes.size > 100) qrCodes.delete(qrCodes.keys().next().value!)
     const code = randomBytes(16).toString('hex')

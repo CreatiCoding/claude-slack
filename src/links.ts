@@ -48,8 +48,16 @@ export function repos(folder: string): string[] {
   return found
 }
 
-/** The open PR of the checked-out branch in one repository, if gh knows one. */
+const branchInflight = new Map<string, Promise<Link | undefined>>()
+/** The open PR of the checked-out branch in one repository, if gh knows one. The same repo asked twice at once is one gh call. */
 export function branchPr(repo: string, gh = 'gh'): Promise<Link | undefined> {
+  const running = branchInflight.get(repo)
+  if (running) return running
+  const p = branchPrOnce(repo, gh).finally(() => branchInflight.delete(repo))
+  branchInflight.set(repo, p)
+  return p
+}
+function branchPrOnce(repo: string, gh: string): Promise<Link | undefined> {
   return new Promise((resolve) =>
     execFile(gh, ['pr', 'view', '--json', 'url,title,number,state'], { cwd: repo, timeout: 8000 }, (err, out) => {
       if (err) return resolve(undefined)

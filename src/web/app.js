@@ -349,7 +349,13 @@ function renderEmpty() {
  * minutes, so the QR is redrawn every four.
  */
 let qrTimer = null
+let qrDrawing = false
 async function drawQr() {
+  // One at a time, one chain: calls that overlapped each started their own four-minute chain, and a hidden tab
+  // kept making login codes. Hidden: stop; shown again: draw once more.
+  if (qrDrawing) return
+  if (document.visibilityState !== 'visible') return void (qrTimer = null)
+  qrDrawing = true
   const box = $('qr-box')
   clearTimeout(qrTimer)
   try {
@@ -363,8 +369,11 @@ async function drawQr() {
     if (r.expiresAt) qrTimer = setTimeout(drawQr, 4 * 60_000)
   } catch {
     box.innerHTML = ''
+  } finally {
+    qrDrawing = false
   }
 }
+document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && !qrTimer && $('qr-box').firstChild && drawQr())
 function renderConn() {
   renderEmpty()
   const el = $('conn')
