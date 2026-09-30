@@ -64,6 +64,7 @@ events.emit(A, { type: 'user', ts: '1000.1', text: '테스트 돌려 줘 https:/
 events.emit(A, { type: 'text', text: '## 결과\n\n- **통과** 286개\n- 링크: https://example.com/x.\n\n| 이름 | 값 |\n|---|---|\n| a | `1` |\n\n```ts\nconst a = 1\n```' })
 events.emit(A, { type: 'tool', id: 't1', name: 'Bash', title: '💻 npm test https://example.com/t', detail: 'npm test' })
 events.emit(A, { type: 'tool_end', id: 't1', ok: true, output: 'ok 286', images: [imageStore.put(A, png(40, 24), 'image/png')!] })
+events.emit(A, { type: 'text', text: '표를 그렸어요\n\n````html\n<!doctype html><html><head><meta http-equiv="refresh" content="0;url=https://evil.example"></head><body><h1 id="h">안녕 HTML</h1><script>document.getElementById("h").textContent = "스크립트가 돌았다"</script><a href="https://example.com">링크</a></body></html>\n````' })
 events.emit(A, { type: 'text', text: '큰 스크린샷이에요', images: [imageStore.put(A, png(600, 400), 'image/png')!] })
 events.emit(A, { type: 'todos', todos: [{ content: '하나', status: 'completed' }, { content: '둘', status: 'in_progress', activeForm: '둘 하는 중' }, { content: '셋', status: 'pending' }] })
 events.emit(B, { type: 'msg', ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) })
@@ -189,7 +190,7 @@ for (const [label, size, phone] of [
   const page = await ctx.newPage()
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push(m.text()))
+  page.on('console', (m) => m.type() === 'error' && !/Failed to load resource|Blocked script execution .* sandboxed/.test(m.text()) && errors.push(m.text()))
   await page.goto(base + '/')
   await page.waitForSelector('.row')
   check(`${label}: 목록에 떠 있는 세션들`, (await page.locator('.row[data-thread]').count()) >= 3)
@@ -202,7 +203,8 @@ for (const [label, size, phone] of [
   await page.waitForSelector('.item.text')
   await settle(page)
   check(`${label}: 제목`, (await page.locator('#title').textContent()) === '알파 작업')
-  check(`${label}: 마크다운 제목·표·코드`, (await page.locator('.item.text .md-h').count()) === 1 && (await page.locator('.item.text table').count()) === 1 && (await page.locator('.item.text pre').count()) === 1)
+  const answer = page.locator('.item.text', { hasText: '통과' }).first()
+  check(`${label}: 마크다운 제목·표·코드`, (await answer.locator('.md-h').count()) === 1 && (await answer.locator('table').count()) === 1 && (await answer.locator('pre').count()) === 1)
   const userLink = await page.locator('.item.user a').first().getAttribute('href')
   check(`${label}: 내 메시지 속 주소가 링크, 끝 ). 빠짐`, userLink === 'https://example.com/a', String(userLink))
   const textLink = await page.locator('.item.text a').first().getAttribute('href')
@@ -229,6 +231,20 @@ for (const [label, size, phone] of [
   check(`${label}: 누르면 페이지 안에서 크게 보기`, await page.locator('.viewer').count() === 1)
   await page.keyboard.press('Escape')
   check(`${label}: Esc 로 닫힘`, await page.locator('.viewer').count() === 0)
+  // ```html (here with a 4-backtick fence) is drawn in a sandboxed frame: no scripts, no refresh, links outside.
+  await page.waitForFunction(() => (document.querySelector('.htmlprev iframe') as HTMLIFrameElement | null)?.contentDocument?.getElementById('h'), null, { timeout: 3000 }).catch(() => {})
+  const frameText = await page.evaluate(() => (document.querySelector('.htmlprev iframe') as HTMLIFrameElement).contentDocument?.getElementById('h')?.textContent)
+  check(`${label}: HTML 블럭을 그린다(스크립트 없이)`, frameText === '안녕 HTML', String(frameText))
+  const frameAttrs = await page.evaluate(() => {
+    const f = document.querySelector('.htmlprev iframe') as HTMLIFrameElement
+    const d = f.contentDocument!
+    return { sandbox: f.getAttribute('sandbox'), csp: d.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content'), refresh: !!d.querySelector('meta[http-equiv="refresh"]'), base: d.querySelector('base')?.getAttribute('target') }
+  })
+  check(`${label}: 샌드박스·CSP·base·refresh 제거`, frameAttrs.sandbox === 'allow-same-origin' && /script-src 'none'/.test(frameAttrs.csp ?? '') && !frameAttrs.refresh && frameAttrs.base === '_blank', JSON.stringify(frameAttrs))
+  check(`${label}: 코드 칸은 숨기고 "코드 보기"`, (await page.locator('.htmlprev + .codebox, .codebox[hidden]').count()) >= 1)
+  await page.locator('.hp-big').first().click()
+  check(`${label}: 크게 보기`, (await page.locator('.hp-full iframe').count()) === 1)
+  await page.keyboard.press('Escape')
   check(`${label}: 할 일 목록 입력칸 위`, (await page.locator('#todos').isVisible()) && ((await page.locator('#todos').textContent()) ?? '').includes('둘 하는 중'))
 
   // Send.

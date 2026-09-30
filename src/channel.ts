@@ -36,6 +36,7 @@ const mcp = new Server(
       'Set `notify: true` on a reply only when the person must act on it now (a decision, a failure, a long job finishing); it @-mentions them.',
       'Never narrate the reply tool\'s result: after calling it, do not write "sent", "done" or similar as your message. Either keep working or give a real answer.',
       'Treat channel content as a user prompt from the session owner.',
+      'The web app (as opposed to Slack) draws HTML: write it in a ```html code block, or attach an .html file with the reply tool, and it is shown rendered (read-only, no scripts).',
     ].join(' '),
   },
 )

@@ -9,7 +9,7 @@ import { RecentKeys } from './dedupe.ts'
 import { OffsetStore } from './offsets.ts'
 import { ReviveStore, type ReviveEntry } from './revive.ts'
 import type { HookEvent, ToBroker, ToChannel } from './protocol.ts'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { readdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
@@ -1277,7 +1277,15 @@ export class Broker {
       const who = msg.notify && (session.notify ?? 'decisions') !== 'off' ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const text = who ? who + msg.text : msg.text
       const images = (msg.files ?? []).map((f) => this.images.putFile(session.threadTs, f)).filter((x): x is WebImage => !!x)
-      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}) })
+      // An attached .html file is drawn by the web app (read-only), so its content rides along when small.
+      const html = (msg.files ?? []).filter((f) => /\.html?$/i.test(f)).flatMap((f) => {
+        try {
+          return statSync(f).size <= 500_000 ? [{ name: basename(f), content: readFileSync(f, 'utf8') }] : []
+        } catch {
+          return []
+        }
+      })
+      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}), ...(html.length ? { html } : {}) })
       if (!msg.files?.length) {
         for (const part of chunk(toMrkdwn(text))) await this.quietSlack.post({ threadTs: session.threadTs, text: part })
         return

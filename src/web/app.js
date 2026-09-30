@@ -826,9 +826,19 @@ function draw(row) {
     case 'text': {
       const el = document.createElement('div')
       el.className = 'item text'
-      const pictured = new Set((row.ev.images || []).map((im) => im.name))
+      const pictured = new Set([...(row.ev.images || []).map((im) => im.name), ...(row.ev.html || []).map((h) => h.name)])
       const others = (row.ev.files || []).map((f) => f.split('/').pop()).filter((n) => !pictured.has(n))
-      el.innerHTML = `<div class="md">${md(row.ev.text)}</div>${imagesHtml(row.ev.images)}${others.length ? `<div class="files">${icon('attach')} ${others.map(esc).join(', ')}</div>` : ''}`
+      const whole = isHtmlDocument(row.ev.text)
+      el.innerHTML = `<div class="md">${whole ? '' : md(row.ev.text)}</div>${imagesHtml(row.ev.images)}${others.length ? `<div class="files">${icon('attach')} ${others.map(esc).join(', ')}</div>` : ''}`
+      // HTML is drawn, read-only: an answer that is a whole document, each ```html block, each attached .html.
+      if (whole) el.firstElementChild.append(htmlPreview(row.ev.text, row.ev.text))
+      for (const pre of el.querySelectorAll('pre[data-lang="html"]')) {
+        const box = pre.closest('.codebox')
+        const code = pre.querySelector('code').textContent
+        box.before(htmlPreview(code, null, box))
+        box.hidden = true
+      }
+      for (const h of row.ev.html || []) el.firstElementChild.after(htmlPreview(h.content, h.content, null, h.name))
       el.append(timeEl(row.ev.at))
       return el
     }
@@ -1052,6 +1062,79 @@ function openViewer(src) {
   box.querySelector('.close').addEventListener('pointerdown', (e) => e.stopPropagation())
   box.querySelector('.close').addEventListener('click', close)
   document.body.append(box)
+}
+
+// ---- HTML preview: a sandboxed frame (no scripts, same origin only so its height can be measured), a CSP
+// that allows nothing but inline styles and data: images, links opening outside, no meta refresh. The frame
+// is written into rather than given srcdoc: some app web views block navigating it to about:srcdoc.
+const isHtmlDocument = (t) => /^\s*(<!doctype html|<html[\s>])/i.test(t || '')
+const CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'"><base target="_blank">`
+function safeHtml(html) {
+  const body = String(html).replace(/<meta[^>]+http-equiv\s*=\s*["']?refresh[^>]*>/gi, '')
+  const doctype = /^\s*<!doctype[^>]*>/i.exec(body)
+  // The policy must come before anything it governs: right after the doctype.
+  return doctype ? doctype[0] + CSP + body.slice(doctype[0].length) : CSP + body
+}
+function writeFrame(frame, html, zoom = 1) {
+  const doc = frame.contentDocument
+  if (!doc) return
+  doc.open()
+  doc.write(safeHtml(html))
+  doc.close()
+  if (zoom !== 1) doc.documentElement.style.zoom = String(zoom)
+  const fit = () => (frame.style.height = Math.min(4000, Math.max(60, doc.documentElement.scrollHeight || doc.body?.scrollHeight || 0)) + 'px')
+  fit()
+  for (const img of doc.images) img.addEventListener('load', fit)
+  setTimeout(fit, 300)
+}
+function htmlPreview(html, code, codeBox, name) {
+  const wrap = document.createElement('div')
+  wrap.className = 'htmlprev'
+  wrap.innerHTML = `<div class="hp-bar">${icon('globe')}<span>${esc(name || 'HTML 미리보기')}</span><button class="linkish hp-code" type="button">코드 보기</button><button class="linkish hp-big" type="button">크게 보기</button></div>`
+  const frame = document.createElement('iframe')
+  frame.setAttribute('sandbox', 'allow-same-origin')
+  frame.setAttribute('referrerpolicy', 'no-referrer')
+  frame.title = name || 'HTML 미리보기'
+  wrap.append(frame)
+  // Written once it is in the page (an iframe has no document before that).
+  requestAnimationFrame(() => writeFrame(frame, html))
+  let codeEl = codeBox
+  wrap.querySelector('.hp-code').addEventListener('click', (e) => {
+    if (!codeEl) {
+      codeEl = document.createElement('div')
+      codeEl.innerHTML = codeBoxHtml(esc(code ?? html))
+      codeEl = codeEl.firstElementChild
+      codeEl.hidden = true
+      wrap.after(codeEl)
+    }
+    codeEl.hidden = !codeEl.hidden
+    e.target.textContent = codeEl.hidden ? '코드 보기' : '코드 숨기기'
+  })
+  wrap.querySelector('.hp-big').addEventListener('click', () => openHtmlViewer(html, name))
+  return wrap
+}
+function openHtmlViewer(html, name) {
+  const box = document.createElement('div')
+  box.className = 'hp-full'
+  box.innerHTML = `<div class="hp-bar">${icon('globe')}<span>${esc(name || 'HTML 미리보기')}</span><button class="icon-btn hp-minus" type="button" aria-label="작게">−</button><span class="hp-zoom">100%</span><button class="icon-btn hp-plus" type="button" aria-label="크게">+</button><button class="icon-btn hp-close" type="button" aria-label="닫기">${icon('close')}</button></div>`
+  const frame = document.createElement('iframe')
+  frame.setAttribute('sandbox', 'allow-same-origin')
+  frame.setAttribute('referrerpolicy', 'no-referrer')
+  box.append(frame)
+  document.body.append(box)
+  let zoom = 1
+  const draw = () => {
+    writeFrame(frame, html, zoom)
+    frame.style.height = '100%'
+    box.querySelector('.hp-zoom').textContent = Math.round(zoom * 100) + '%'
+  }
+  draw()
+  box.querySelector('.hp-minus').addEventListener('click', () => ((zoom = Math.max(0.3, zoom - 0.1)), draw()))
+  box.querySelector('.hp-plus').addEventListener('click', () => ((zoom = Math.min(3, zoom + 0.1)), draw()))
+  const close = () => (box.remove(), removeEventListener('keydown', onKey))
+  const onKey = (e) => e.key === 'Escape' && close()
+  addEventListener('keydown', onKey)
+  box.querySelector('.hp-close').addEventListener('click', close)
 }
 
 const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${inner}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
