@@ -17,6 +17,10 @@ export interface Session {
   threadTs: string
   /** A name a person gave (`:rename`, the web app). Slack still follows Claude Code's ai-title; the web app shows this first. */
   manualTitle?: string
+  /** "끝나면 새로고침": when it was asked for; the refresh runs once the session is idle and its background work ended. */
+  refreshAfter?: number
+  /** Background work that a refresh cut off, told to the relaunched session first. */
+  interrupted?: Array<{ kind: string; label: string }>
   /** How often each dialog was surfaced lately, so one that keeps coming back is explained once instead of carded forever. */
   dialogSeen?: Map<string, { n: number; at: number }>
   /** Bot-owned root message (terminal-started sessions). Editable. */

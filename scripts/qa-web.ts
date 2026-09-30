@@ -128,6 +128,9 @@ const api: AdminApi = {
     calls.push('clearArchives')
     return { ok: true, note: '지난 기록 1개를 지웠어요.' }
   },
+  async webRefreshInfo(pid) {
+    return pid === 12 ? { busy: true, tasks: [{ kind: 'bash', label: 'npm run dev' }, { kind: 'monitor', label: 'tail -f log' }] } : { busy: false, tasks: [] }
+  },
   async webLinks(pid) {
     return pid === 11
       ? { prs: [{ url: 'https://github.com/a/b/pull/1', label: '#1 첫 PR' }, { url: 'https://github.com/a/c/pull/2', label: '#2 둘째 PR' }], threads: [{ url: 'https://x.slack.com/archives/C1/p1000000100000001', label: '이 세션의 스레드' }] }
@@ -402,6 +405,24 @@ for (const [label, size, phone] of [
   check(`${label}: 허용은 Slack 과 같은 action 으로`, calls.some((c) => c === 'action:perm_allow_abcde:12:abcde:2000.5'), calls.join(' | '))
   check(`${label}: 답한 카드는 결과로 접힘`, (await page.locator('.card.decision').count()) === 0 && (await page.locator('.folded').count()) >= 1)
   check(`${label}: ⌘↵ 로 메시지가 보내지지 않음`, !calls.some((c) => c.startsWith('send:12')))
+  // Refresh while working: a choice, with the background work that would be cut; "끝나면" is the default.
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '새로고침' }).click()
+  await page.waitForSelector('.choice-sheet')
+  check(`${label}: 작업 중 새로고침은 두 선택지와 끊길 작업`, ((await page.locator('.choice-sheet').textContent()) ?? '').includes('백그라운드 작업 2개') && (await page.locator('.choice-sheet .btn.primary').textContent()) === '끝나면 새로고침')
+  await page.locator('.choice-sheet .btn.primary').click()
+  await page.waitForTimeout(200)
+  check(`${label}: 끝나면 새로고침 → refresh later`, calls.some((c) => c.startsWith('action:ctl_btn_web:12:refresh later')), calls.join(' | '))
+  sessions = sessions.map((x) => (x.thread === B ? { ...x, refreshAfter: true } : x))
+  changed()
+  await page.waitForSelector('.refresh-plan', { timeout: 3000 }).catch(() => {})
+  check(`${label}: 헤더에 "끝나면 새로고침해요 · 취소"`, ((await page.locator('.refresh-plan').textContent()) ?? '').includes('끝나면 새로고침해요'))
+  await page.locator('.refresh-plan button').click()
+  await page.waitForTimeout(200)
+  check(`${label}: 취소 → refresh cancel`, calls.some((c) => c.startsWith('action:ctl_btn_web:12:refresh cancel')))
+  sessions = sessions.map((x) => (x.thread === B ? { ...x, refreshAfter: undefined } : x))
+  changed()
+
   // B is busy now: the activity box shows at the bottom.
   await page.waitForSelector('#activity:not([hidden])', { timeout: 3000 }).catch(() => {})
   check(`${label}: 작업 중이면 활동 상자`, await page.locator('#activity:not([hidden])').count() === 1)

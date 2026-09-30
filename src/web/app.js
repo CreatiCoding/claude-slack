@@ -737,6 +737,17 @@ function renderHeader() {
   if (current) {
     $('badge').innerHTML = s ? badgeHtml(s) + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
     $('meta').textContent = s ? [s.model, s.effort, s.permissionMode, s.contextLabel].filter(Boolean).join(' · ') : ''
+    // A reserved refresh is shown where the session's state is, with a way to take it back.
+    let plan = $('subbar').querySelector('.refresh-plan')
+    if (s?.refreshAfter) {
+      if (!plan) {
+        plan = document.createElement('span')
+        plan.className = 'refresh-plan'
+        plan.innerHTML = `${icon('refresh')}<span>끝나면 새로고침해요</span><button class="linkish" type="button">취소</button>`
+        plan.querySelector('button').addEventListener('click', () => command(sessionOf(current), 'refresh cancel'))
+        $('subbar').append(plan)
+      }
+    } else plan?.remove()
   }
   const waiting = sessions.filter((x) => x.state === 'waiting').length
   document.title = waiting ? `(${waiting}) 응답 대기 · Claude` : 'Claude'
@@ -1949,7 +1960,7 @@ function sessionItems(s) {
       ],
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
-    { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
+    { label: '새로고침', icon: 'refresh', run: () => refreshSession(s) },
     {
       label: `그룹: ${groups.groups.find((g) => g.items.includes(s.thread))?.name ?? '없음'}`,
       icon: 'folder',
@@ -1995,6 +2006,35 @@ async function forkSession(s) {
   } catch (err) {
     toast(err.message, 'err')
   }
+}
+/**
+ * A refresh ends the Claude process and reopens the conversation; background commands, Monitors and agents it
+ * started die with it. While it works (or has such work), offer "끝나면 새로고침" (default) or "지금 새로고침".
+ */
+async function refreshSession(s) {
+  let info = { busy: s.state === 'busy', tasks: [] }
+  try {
+    info = await api(`/api/session/${s.pid}/refresh-info`)
+  } catch {}
+  if (!info.busy && !info.tasks.length) return command(s, 'refresh now')
+  const scrim = document.createElement('div')
+  scrim.className = 'scrim dim'
+  const el = document.createElement('div')
+  el.className = 'menu sheet choice-sheet'
+  el.setAttribute('role', 'dialog')
+  el.setAttribute('aria-modal', 'true')
+  const kinds = { bash: '명령', monitor: 'Monitor', agent: '에이전트' }
+  const list = info.tasks.map((t) => `<li>${esc(kinds[t.kind] ?? t.kind)}: ${esc(t.label)}</li>`).join('')
+  el.innerHTML = `<div class="ns-head"><h2>새로고침</h2></div>
+    <p class="hint">${info.busy ? '지금 작업 중이에요. ' : ''}${info.tasks.length ? `지금 하면 백그라운드 작업 ${info.tasks.length}개가 끊겨요.` : ''}</p>
+    ${list ? `<ul class="bg-list">${list}</ul>` : ''}
+    <div class="choice-actions"><button class="btn primary" type="button" data-x="later">끝나면 새로고침</button><button class="btn" type="button" data-x="now">지금 새로고침</button></div>`
+  const close = () => (scrim.remove(), el.remove())
+  scrim.addEventListener('click', close)
+  el.querySelector('[data-x="later"]').addEventListener('click', () => (close(), command(s, 'refresh later')))
+  el.querySelector('[data-x="now"]').addEventListener('click', () => (close(), command(s, 'refresh now')))
+  document.body.append(scrim, el)
+  el.querySelector('[data-x="later"]').focus()
 }
 async function toggleAuto(s) {
   const on = !s.autoAllow

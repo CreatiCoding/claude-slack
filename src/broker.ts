@@ -34,6 +34,7 @@ import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.t
 import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, repos, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
+import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -71,6 +72,8 @@ export interface WebSession {
   canKeys: boolean
   /** "전부 허용": the broker answers every permission request with allow. */
   autoAllow: boolean
+  /** "끝나면 새로고침" is waiting for the work to end. */
+  refreshAfter?: boolean
   lastSeq: number
   lastAt: number
   preview?: string
@@ -150,6 +153,10 @@ export interface BrokerConfig {
   trashDir?: string
   /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
   homeDir?: string
+  /** How often a scheduled refresh looks again (default a minute). */
+  refreshCheckMs?: number
+  /** When a process started and how many shells it has open (tests fake it). */
+  processFacts?: (pid: number) => Promise<{ startedAt?: number; shells?: number }>
   /** Does a conversation's folder still exist (tests fake it). */
   folderExists?: (path: string) => boolean
   /** Draw terminal screens as pictures (default on); text when off or when rendering fails. */
@@ -587,7 +594,25 @@ export class Broker {
   }
 
   /** The session list as the web app shows it: cheap enough to send on every change. */
+  /** Last rows shown, so a session being refreshed keeps its line (name and place) as "뜨는 중". */
+  private lastRows = new Map<string, WebSession>()
+  private refreshFailed = new Map<string, number>()
   webSessions(): WebSession[] {
+    const rows = this.liveRows()
+    for (const r of rows) this.lastRows.set(r.thread, r)
+    const shown = new Set(rows.map((r) => r.thread))
+    const kept: WebSession[] = []
+    for (const [thread, row] of this.lastRows) {
+      if (shown.has(thread)) continue
+      const failedAt = this.refreshFailed.get(thread)
+      if (this.waking.has(thread) || this.pendingLaunches.has(thread)) kept.push({ ...row, state: 'starting', waiting: undefined, permission: undefined, held: 0 })
+      else if (failedAt && Date.now() - failedAt < 10 * 60_000) kept.push({ ...row, state: 'ended', waiting: undefined, permission: undefined })
+      else this.lastRows.delete(thread)
+    }
+    return [...rows, ...kept]
+  }
+
+  private liveRows(): WebSession[] {
     return this.registry.live
       .filter((s) => !s.ended)
       .map((s) => ({
@@ -606,6 +631,7 @@ export class Broker {
         held: s.held?.length ?? 0,
         canKeys: !!s.pane,
         autoAllow: !!s.autoAllow,
+        ...(s.refreshAfter ? { refreshAfter: true } : {}),
         lastSeq: this.events.last(s.threadTs),
         lastAt: this.lastEventAt(s.threadTs) ?? s.startedAt,
         preview: s.transcriptPath ? this.firstMessages.get(s.transcriptPath) : undefined,
@@ -1674,6 +1700,7 @@ export class Broker {
     this.clearWaiting(session)
     session.stuckShown = undefined
     await this.setStatus(session, 'active')
+    void this.maybeRunScheduledRefresh(session)
   }
 
   /** A subagent's report, without the harness framing, in as many messages as it takes (within reason). */
@@ -2266,6 +2293,67 @@ export class Broker {
    * conversation again. The thread keeps one status line — the old panel goes,
    * because its buttons address a pid that no longer exists.
    */
+  private bgTrackers = new Map<string, BackgroundTracker>()
+  /** Background work this session's process started and has not finished (by key+pid: a refresh keeps the key). */
+  async backgroundTasks(session: Session): Promise<BackgroundTask[]> {
+    if (!session.transcriptPath) return []
+    const k = `${session.key}:${session.pid}:${session.transcriptPath}`
+    let tr = this.bgTrackers.get(k)
+    if (!tr) this.bgTrackers.set(k, (tr = new BackgroundTracker(session.transcriptPath)))
+    tr.scan()
+    const facts = await (this.cfg.processFacts ?? processFacts)(session.pid).catch(() => ({}) as { startedAt?: number; shells?: number })
+    return tr.open({ now: Date.now(), processStart: facts.startedAt, shells: facts.shells })
+  }
+
+  /** What the web app shows before a refresh: is it working, and what background work would be cut. */
+  async webRefreshInfo(pid: number): Promise<{ busy: boolean; tasks: Array<{ kind: string; label: string }> }> {
+    const s = this.registry.byPid(pid)
+    if (!s || s.ended) return { busy: false, tasks: [] }
+    const tasks = await this.backgroundTasks(s).catch(() => [])
+    return { busy: s.state === 'busy' || !!s.turn, tasks: tasks.map((t) => ({ kind: t.kind, label: t.label })) }
+  }
+
+  /** "끝나면 새로고침": kept by the broker, run the moment the session is idle and its background work is over. */
+  private async scheduleRefresh(s: Session, c: CommandContext): Promise<void> {
+    if (!s.sessionId) return void (await c.ack('⚠️ 아직 세션 id를 몰라 새로고침할 수 없습니다.'))
+    s.refreshAfter = Date.now()
+    this.logAt('INFO', 'session', 'refresh scheduled for when the work ends', this.tag(s))
+    await c.post('⏳ 작업이 끝나면 새로고침합니다. 그동안 보낸 메시지는 붙잡아 두었다가 다시 연 세션에 넘깁니다.')
+    this.changed()
+    this.armRefreshCheck()
+    await this.maybeRunScheduledRefresh(s)
+  }
+  private async cancelScheduledRefresh(s: Session, c: CommandContext): Promise<void> {
+    if (!s.refreshAfter) return void (await c.ack('예약된 새로고침이 없습니다.'))
+    s.refreshAfter = undefined
+    this.logAt('INFO', 'session', 'scheduled refresh cancelled', this.tag(s))
+    await c.post('↩️ 새로고침 예약을 취소했습니다.')
+    this.changed()
+    // What was held for the relaunch goes now, as it would have without the reservation.
+    await this.releaseHeldIfIdle(s, 'refresh cancelled', { drain: true })
+  }
+  private async maybeRunScheduledRefresh(s: Session): Promise<void> {
+    if (!s.refreshAfter || s.ended || s.refreshing || s.turn || s.state !== 'idle' || s.waitingReason || !s.pane) return
+    const tasks = await this.backgroundTasks(s).catch(() => [])
+    if (tasks.length || !s.refreshAfter || s.turn) return
+    this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))
+    await this.runCommand(s, 'refresh now')
+  }
+  private refreshTimer?: ReturnType<typeof setInterval>
+  /** Background work ends with a notification (a turn), but not always: look once a minute too. */
+  private armRefreshCheck(): void {
+    this.refreshTimer ??= setInterval(() => {
+      const waiting = this.registry.live.filter((x) => x.refreshAfter && !x.ended)
+      if (!waiting.length) {
+        clearInterval(this.refreshTimer)
+        this.refreshTimer = undefined
+        return
+      }
+      for (const x of waiting) void this.maybeRunScheduledRefresh(x)
+    }, this.cfg.refreshCheckMs ?? 60_000)
+    this.refreshTimer.unref?.()
+  }
+
   /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
   private settingsArgs(session: Session): string[] {
     const model = session.model && /^[\w.\[\]-]+$/.test(session.model) && !session.model.startsWith('<') ? session.model : undefined
@@ -2276,6 +2364,12 @@ export class Broker {
   private async reopenForRefresh(session: Session, carried: HeldMessage[]): Promise<void> {
     session.refreshing = false
     const threadTs = session.threadTs
+    // Background work the old process had running died with it: say so before anything else reaches the new one.
+    if (session.interrupted?.length) {
+      const list = session.interrupted.map((t) => `- ${t.kind === 'agent' ? '에이전트' : t.kind === 'monitor' ? 'Monitor' : '백그라운드 명령'}: ${t.label}`).join('\n')
+      carried = [{ text: `[새로고침] 세션을 다시 열면서 백그라운드 작업이 끊겼어요.\n${list}\n필요한 것만 다시 걸고, 걸었으면 짧게 알려 줘요.`, user: session.recipient || this.defaultRecipient, ts: threadTs }, ...carried]
+      session.interrupted = undefined
+    }
     if (session.holdNoticeTs) {
       await this.slack.delete(session.holdNoticeTs).catch(() => {})
       session.holdNoticeTs = undefined
@@ -2286,6 +2380,8 @@ export class Broker {
     } catch (err) {
       this.waking.delete(threadTs)
       this.logAt('ERROR', 'session', `refresh relaunch failed: ${describeError(err)}`, this.tag(session))
+      this.refreshFailed.set(threadTs, Date.now())
+      this.changed()
       await this.slack.post({ threadTs, text: `❌ 세션을 다시 열지 못했습니다. ${describeError(err)}` }).catch(() => {})
       return
     }
@@ -2835,6 +2931,8 @@ export class Broker {
     // Claude Code queues a message for the whole turn, tool or no tool, and hands it over
     // between tool calls or at the end. A session waiting on a person (permission, question)
     // is the exception: the message is probably the answer, and nothing runs to be cut short.
+    // A refresh is waiting for the work to end: hold it for the relaunched session, even between tools.
+    if (session.refreshAfter) return this.hold(session, { text, user, ts }, running)
     if (session.turn && session.state !== 'waiting') return this.hold(session, { text, user, ts }, running)
     await this.deliver(session, text, user, ts)
   }
@@ -2878,7 +2976,7 @@ export class Broker {
    * tailer's queue is what is running us, and waiting on it would never end).
    */
   private async releaseHeldIfIdle(session: Session, why: string, opts: { drain?: boolean } = {}): Promise<void> {
-    if (!session.held?.length) return
+    if (!session.held?.length || session.refreshAfter) return
     if (session.turn) {
       if (opts.drain) await session.tailer?.drain()
       if (session.turn?.inFlight.length) return
@@ -3119,6 +3217,8 @@ export class Broker {
     const timer = setTimeout(() => {
       const gaveUpOn = this.pendingLaunches.get(threadTs!)
       if (!this.pendingLaunches.delete(threadTs!)) return
+      if (gaveUpOn?.resumeId) this.refreshFailed.set(threadTs!, Date.now())
+      this.changed()
       this.slack.update(statusTs, '⚠️ 세션이 연결되지 않았습니다', [{ type: 'section', text: { type: 'mrkdwn', text: '⚠️ *세션이 연결되지 않았습니다.* tmux 창을 직접 확인해 보세요: `tmux attach -t claude-slack`' } }]).catch(() => {})
       // Whatever was waiting has nowhere to go now, and silently dropping it is
       // how someone ends up wondering why their message was never answered.
@@ -3412,9 +3512,17 @@ export class Broker {
 
     refresh: {
       user: true,
+      noPane: true,
       run: async (c) => {
         const s = c.session
+        const mode = c.arg.trim()
+        if (mode === 'cancel') return this.cancelScheduledRefresh(s, c)
+        if (mode === 'later') return this.scheduleRefresh(s, c)
+        if (!c.pane) return void (await c.ack('이 세션은 tmux 밖에서 실행 중이라 새로고침할 수 없습니다.'))
         if (!s.sessionId) return void (await c.ack('⚠️ 아직 세션 id를 몰라 새로고침할 수 없습니다. 잠시 뒤에 다시 해보세요.'))
+        s.refreshAfter = undefined
+        // What dies with the process, so the relaunched session is told first thing.
+        s.interrupted = await this.backgroundTasks(s).catch(() => [])
         // Hold anything typed from here until the replacement is up: the process
         // is about to go, and the thread should not look like it swallowed a message.
         this.waking.set(s.threadTs, [])

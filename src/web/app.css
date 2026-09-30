@@ -408,3 +408,11 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .pm-name { font-weight: 600; }
 .pm-where { font-size: var(--fs-s); color: var(--muted); }
 @media (max-width: 899px) { .perm-modal { top: auto; bottom: 0; transform: translateX(-50%); width: 100%; border-radius: 14px 14px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); } }
+
+/* refresh choice and reservation */
+.choice-sheet { padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+.choice-sheet .hint { margin: 0; font-size: var(--fs-m); color: var(--text-2); }
+.bg-list { margin: 0; padding-left: 1.2em; font-size: var(--fs-s); color: var(--muted); max-height: 30vh; overflow-y: auto; }
+.choice-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.refresh-plan { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: var(--fs-s); }
+.refresh-plan .ic { width: 13px; height: 13px; }

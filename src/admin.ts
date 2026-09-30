@@ -55,6 +55,7 @@ export interface AdminApi {
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
   webLive?(thread: string): Promise<string>
+  webRefreshInfo?(pid: number): Promise<{ busy: boolean; tasks: Array<{ kind: string; label: string }> }>
   webGroups?(): unknown
   webGroupOp?(o: never): { ok: boolean; note: string; id?: string }
   webDefaultPrompt?(): string
@@ -375,6 +376,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     log(`web clear archives: ${result.note}`)
     return send(res, 200, result)
   }
+  const refreshInfo = /^\/api\/session\/(\d+)\/refresh-info$/.exec(url.pathname)
+  if (req.method === 'GET' && refreshInfo && api.webRefreshInfo) return send(res, 200, await api.webRefreshInfo(Number(refreshInfo[1])))
   const links = /^\/api\/session\/(\d+)\/links$/.exec(url.pathname)
   if (req.method === 'GET' && links && api.webLinks) return send(res, 200, await api.webLinks(Number(links[1])))
   const fork = /^\/api\/session\/(\d+)\/fork$/.exec(url.pathname)
