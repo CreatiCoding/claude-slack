@@ -175,7 +175,7 @@ for (const [label, size, phone] of [
   check(`${label}: 도구 줄 펼치면 출력`, ((await page.locator('.tool .detail').textContent()) ?? '').includes('ok 286'))
   check(`${label}: 도구가 읽은 작은 그림은 이벤트에 실린 채로`, ((await page.locator('.tool .img img').first().getAttribute('src')) ?? '').startsWith('data:image/png'))
   await page.waitForFunction(() => (document.querySelector('.text .img img') as HTMLImageElement | null)?.complete && (document.querySelector('.text .img img') as HTMLImageElement).naturalWidth > 0, null, { timeout: 5000 }).catch(() => {})
-  check(`${label}: 큰 그림은 참조로 받아 그린다`, await page.locator('.text .img img').evaluate((i: HTMLImageElement) => i.naturalWidth > 0 && i.src.includes('/api/image/')))
+  check(`${label}: 큰 그림은 참조로 받아 그린다`, await page.locator('.text .img img').evaluate((i: HTMLImageElement) => i.naturalWidth > 0 && (i.src.startsWith('blob:') || i.src.includes('/api/image/'))))
   const box = await page.locator('.text .img').boundingBox()
   check(`${label}: 그림 틀은 실제 비율대로 (600×400)`, !!box && Math.abs(box.width / box.height - 1.5) < 0.05, JSON.stringify(box))
   await page.locator('.text .img').click()
@@ -198,6 +198,21 @@ for (const [label, size, phone] of [
     await page.locator('#input').type('줄2')
     check(`${label}: Shift+Enter 는 줄바꿈`, (await page.locator('#input').inputValue()) === '줄1\n줄2')
     await page.locator('#input').fill('')
+  }
+
+  // A reload draws what the page kept, asks only for what came after it, and does not fetch a picture again.
+  if (!phone) {
+    await page.waitForTimeout(1300) // the timeline is kept a second after the last change
+    const asked: string[] = []
+    const onReq = (r: { url(): string }) => asked.push(r.url())
+    page.on('request', onReq)
+    await page.reload()
+    await page.waitForSelector('.text .img img[src^="blob:"]', { timeout: 5000 }).catch(() => {})
+    page.off('request', onReq)
+    const ev = asked.filter((u) => u.includes('/api/events'))
+    check(`${label}: 새로고침하면 둔 것부터 그리고 after=seq 로 빠진 것만`, ev.length >= 1 && ev.every((u) => !/after=0\b/.test(u)), ev.join(' '))
+    check(`${label}: 받은 그림은 다시 받지 않는다(IndexedDB)`, !asked.some((u) => u.includes('/api/image/')), asked.filter((u) => u.includes('/api/image/')).join(' '))
+    check(`${label}: 연결 전에도 목록이 보인다(localStorage)`, await page.evaluate(() => !!localStorage.getItem('sessions-cache')))
   }
 
   // A picture to send: picked, shown small, removable, sent with the message.

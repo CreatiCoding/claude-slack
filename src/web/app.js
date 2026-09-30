@@ -4,6 +4,7 @@
 // exactly what a click in Slack runs.
 import { esc, linkify, md, mrkdwn } from './markdown.js'
 import { icon, takeEmoji, toolIcon } from './icons.js'
+import { getImage, loadTimeline, putImage, saveTimeline } from './idb.js'
 
 const $ = (id) => document.getElementById(id)
 const params = new URLSearchParams(location.search)
@@ -172,6 +173,7 @@ function connect() {
 }
 function applySessions(list) {
   sessions = list
+  store.set('sessions-cache', list)
   for (const s of sessions) if (!(s.thread in seen)) seen[s.thread] = s.lastSeq // a session seen for the first time counts as read
   store.set('seen', seen)
   renderList()
@@ -249,8 +251,14 @@ function addEvents(ts, evs, { live = false } = {}) {
   if (ts === current) {
     renderConvo(fresh, { live })
     markSeen(ts)
+    keepTimeline(ts)
   }
   renderList()
+}
+let keepTimer = null
+function keepTimeline(ts) {
+  clearTimeout(keepTimer)
+  keepTimer = setTimeout(() => saveTimeline(ts, thread(ts).events), 1000)
 }
 
 function markSeen(ts) {
@@ -448,6 +456,15 @@ async function open(ts, { push = true } = {}) {
   loadDraft()
   renderPending()
   const t = thread(ts)
+  // After a reload: draw what the page kept, then fetch only what came after it.
+  if (!t.events.length) {
+    const kept = await loadTimeline(ts)
+    if (current !== ts) return
+    if (kept.length && !t.events.length) {
+      t.events = kept
+      t.last = kept.at(-1).seq
+    }
+  }
   if (t.events.length) renderConvo(t.events)
   await subscribe(ts)
   await catchUp(ts)
@@ -807,7 +824,7 @@ function imagesHtml(images) {
       const w = im.w || 320
       const h = im.h || 240
       const src = im.data || ''
-      return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 480)}px)" data-full="${esc(im.data ? '' : im.src)}" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}"`} decoding="async"></button>`
+      return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 480)}px)" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}" data-key="${esc(`${current}:${im.id}`)}"`} decoding="async"></button>`
     })
     .join('')}</div>`
 }
@@ -817,11 +834,27 @@ const lazy = new IntersectionObserver(
       if (!e.isIntersecting) continue
       const img = e.target
       lazy.unobserve(img)
-      if (img.dataset.src) img.src = img.dataset.src
+      if (img.dataset.src) loadPicture(img)
     }
   },
   { root: $('scroller'), rootMargin: '800px 0px' },
 )
+/** A referenced picture: from the page's cache when it has it, else fetched once and kept. */
+async function loadPicture(img) {
+  const key = img.dataset.key
+  try {
+    let blob = key ? await getImage(key) : undefined
+    if (!blob) {
+      const r = await fetch(img.dataset.src)
+      if (!r.ok) throw new Error(String(r.status))
+      blob = await r.blob()
+      if (key) putImage(key, blob)
+    }
+    img.src = URL.createObjectURL(blob)
+  } catch {
+    img.src = img.dataset.src
+  }
+}
 new MutationObserver((muts) => {
   for (const m of muts) for (const n of m.addedNodes) if (n.querySelectorAll) for (const img of n.querySelectorAll('img[data-src]')) lazy.observe(img)
 }).observe($('log'), { childList: true, subtree: true })
@@ -1528,6 +1561,9 @@ addEventListener('keydown', (e) => {
 })
 
 // ------------------------------------------------------------------ start
+// Draw the last known list before the stream answers, so a reload never starts empty.
+sessions = store.get('sessions-cache', [])
+renderList()
 connect()
 renderConn()
 loadSideLists()
