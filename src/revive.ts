@@ -35,6 +35,8 @@ export interface ReviveEntry {
   autoAllow?: boolean
   model?: string
   launchModel?: string
+  /** "끝나면 새로고침" was reserved at this time. */
+  refreshAfter?: number
   effort?: string
 }
 

@@ -889,7 +889,7 @@ export class Broker {
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
     if (!session.sessionId) return { ok: false, note: '대화 id 를 아직 모릅니다. 첫 메시지 뒤에 다시 해 보세요.' }
     this.logAt('INFO', 'launch', 'fork', this.tag(session))
-    const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: ['--fork-session'], fork: { fromThread: session.threadTs, transcript: session.transcriptPath } })
+    const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: [...this.settingsArgs(session), '--fork-session'], fork: { fromThread: session.threadTs, transcript: session.transcriptPath } })
     return thread ? { ok: true, note: '복제한 세션을 띄웁니다.', thread } : { ok: false, note: '세션을 띄우지 못했습니다.' }
   }
 
@@ -1139,7 +1139,7 @@ export class Broker {
       if (!ended) return { ok: false, note: '끝난 세션 정보가 사라졌습니다. 목록을 새로고침하세요.' }
       // The old panel's buttons address a pid that no longer exists.
       if (ended.panelTs) await this.slack.delete(ended.panelTs).catch(() => {})
-      await this.launchSession({ cwd: ended.cwd, prompt: '', resumeId: orphan.sessionId, user: this.defaultRecipient, threadTs: ts, rootTs: ended.rootTs })
+      await this.launchSession({ cwd: ended.cwd, prompt: '', resumeId: orphan.sessionId, user: this.defaultRecipient, threadTs: ts, rootTs: ended.rootTs, extraArgs: this.settingsArgs(ended) })
     }
     this.orphanScan = undefined
     return { ok: true, note: '그 스레드에서 대화를 이어서 다시 엽니다.' }
@@ -1266,6 +1266,7 @@ export class Broker {
         ...(s.autoAllow ? { autoAllow: true } : {}),
         ...(s.model ? { model: s.model } : {}),
         ...(s.launchModel ? { launchModel: s.launchModel } : {}),
+        ...(s.refreshAfter ? { refreshAfter: s.refreshAfter } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
       })
     }
@@ -1344,6 +1345,10 @@ export class Broker {
     }
     if (pending?.rootTs) session.rootTs = pending.rootTs
 
+    // The record before the session can be found: a hook arriving right after registration (a permission
+    // dialog) must already see 전부 허용 and the rest.
+    if (!existing) this.restoreFromRecord(session)
+    this.refreshFailed.delete(session.threadTs)
     this.registry.add(session)
     this.logAt('INFO', 'session', `attached (${session.origin})`, this.tag(session, { pid: session.pid, key: session.key.slice(0, 8), pane: session.pane }))
     this.refreshHome()
@@ -1360,8 +1365,7 @@ export class Broker {
       // Broker restarted under a live session: reuse the panel already in the thread instead of stacking a new one,
       // and recover what the panel shows from the terminal and the transcript.
       if (!session.panelTs) session.panelTs = await this.findPanelInThread(session.threadTs)
-      // The record first: what it restores (전부 허용 above all) decides how a dialog already on screen is handled.
-      this.restoreFromRecord(session)
+      // The record is already back (above): what it restores (전부 허용 above all) decides how a dialog on screen is handled.
       await this.restoreSessionFacts(session)
       const panel = controlPanel(this.panelState(session))
       try {
@@ -1386,7 +1390,8 @@ export class Broker {
     if (opening) {
       const last = waiting.at(-1)
       await this.deliver(session, opening, last?.user ?? this.defaultRecipient, last?.ts ?? pending!.threadTs)
-      for (const q of waiting) if (q.ts !== last?.ts) await this.slack.react(q.ts, 'eyes').catch(() => {})
+      // The "끊긴 작업" note rides with the thread's own ts: it is not a message to react to.
+      for (const q of waiting) if (q.ts !== last?.ts && q.ts !== session.threadTs) await this.slack.react(q.ts, 'eyes').catch(() => {})
     }
     // Held messages that survived a broker restart wait for the tool that was running, as they did before.
     if (session.held?.length) await this.releaseHeldIfIdle(session, 'restart', { drain: true })
@@ -1407,6 +1412,10 @@ export class Broker {
     session.manualTitle = rec.manualTitle ?? session.manualTitle
     session.model ??= rec.model
     session.launchModel ??= rec.launchModel
+    if (rec.refreshAfter && !session.refreshAfter) {
+      session.refreshAfter = rec.refreshAfter
+      this.armRefreshCheck()
+    }
     session.effort ??= rec.effort
     if (rec.title && !session.title) session.title = rec.title
     if (rec.holdNoticeTs) {
@@ -2359,7 +2368,7 @@ export class Broker {
     for (const e of revive) {
       this.revive.forget(e.key)
       await this.slack.post({ threadTs: e.threadTs, text: '🔄 재시작으로 끊긴 세션을 대화 그대로 이어서 다시 엽니다.' }).catch(() => {})
-      await this.launchSession({ cwd: e.cwd, prompt: '', resumeId: e.sessionId, user: e.recipient, threadTs: e.threadTs, rootTs: e.rootTs }).catch((err) =>
+      await this.launchSession({ cwd: e.cwd, prompt: '', resumeId: e.sessionId, user: e.recipient, threadTs: e.threadTs, rootTs: e.rootTs, extraArgs: this.settingsArgs(e) }).catch((err) =>
         this.logAt('ERROR', 'revive', `revive failed: ${describeError(err)}`, { t: e.threadTs }),
       )
     }
@@ -2393,6 +2402,7 @@ export class Broker {
   /** "끝나면 새로고침": kept by the broker, run the moment the session is idle and its background work is over. */
   private async scheduleRefresh(s: Session, c: CommandContext): Promise<void> {
     if (!s.sessionId) return void (await c.ack('⚠️ 아직 세션 id를 몰라 새로고침할 수 없습니다.'))
+    if (!s.pane) return void (await c.ack('⚠️ tmux 밖에서 띄운 세션이라 새로고침할 수 없습니다.'))
     s.refreshAfter = Date.now()
     this.logAt('INFO', 'session', 'refresh scheduled for when the work ends', this.tag(s))
     await c.post('⏳ 작업이 끝나면 새로고침합니다. 그동안 보낸 메시지는 붙잡아 두었다가 다시 연 세션에 넘깁니다.')
@@ -2410,11 +2420,26 @@ export class Broker {
     await this.releaseHeldIfIdle(s, 'refresh cancelled', { drain: true })
   }
   private async maybeRunScheduledRefresh(s: Session): Promise<void> {
-    if (!s.refreshAfter || s.ended || s.refreshing || s.turn || s.state !== 'idle' || s.waitingReason || !s.pane) return
-    const tasks = await this.backgroundTasks(s).catch(() => [])
-    if (tasks.length || !s.refreshAfter || s.turn) return
-    this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))
-    await this.runCommand(s, 'refresh now')
+    // Stopped with Esc it waits for an instruction: for a reserved refresh that is as good as idle.
+    const resting = s.state === 'idle' || (s.state === 'waiting' && s.waitingReason === 'instruction')
+    if (!s.refreshAfter || s.ended || s.refreshing || s.refreshChecking || s.turn || !resting || (s.waitingReason && s.waitingReason !== 'instruction')) return
+    if (!s.pane) {
+      // Not in tmux: it cannot be refreshed from here, so the reservation must not keep holding messages.
+      s.refreshAfter = undefined
+      await this.slack.post({ threadTs: s.threadTs, text: '⚠️ tmux 밖에서 띄운 세션이라 새로고침할 수 없어 예약을 취소했습니다.' }).catch(() => {})
+      this.changed()
+      return this.releaseHeldIfIdle(s, 'refresh impossible')
+    }
+    // Set before the first await: the turn's end and the one-minute look must not both get through.
+    s.refreshChecking = true
+    try {
+      const tasks = await this.backgroundTasks(s).catch(() => [])
+      if (tasks.length || !s.refreshAfter || s.turn || s.refreshing) return
+      this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))
+      await this.runCommand(s, 'refresh now')
+    } finally {
+      s.refreshChecking = false
+    }
   }
   private refreshTimer?: ReturnType<typeof setInterval>
   /** Background work ends with a notification (a turn), but not always: look once a minute too. */
@@ -2432,7 +2457,7 @@ export class Broker {
   }
 
   /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
-  private settingsArgs(session: Session): string[] {
+  private settingsArgs(session: { launchModel?: string; effort?: string }): string[] {
     // The model it was launched or switched with (opus[1m] keeps its 1M context); the transcript's name drops [1m].
     const chosen = session.launchModel
     const model = chosen && /^[\w.\[\]-]+$/.test(chosen) ? chosen : undefined
@@ -2482,7 +2507,7 @@ export class Broker {
     await this.slack.react(first.ts, 'eyes').catch(() => {})
     await this.slack.post({ threadTs: e.threadTs, text: '🔄 재시작으로 끊긴 세션을 대화 그대로 이어서 다시 엽니다. 준비되면 방금 메시지를 바로 전달하겠습니다.' }).catch(() => {})
     try {
-      await this.launchSession({ cwd: e.cwd, prompt: first.text, resumeId: e.sessionId, user: first.user, threadTs: e.threadTs, rootTs: e.rootTs })
+      await this.launchSession({ cwd: e.cwd, prompt: first.text, resumeId: e.sessionId, user: first.user, threadTs: e.threadTs, rootTs: e.rootTs, extraArgs: this.settingsArgs(e) })
     } catch (err) {
       this.logAt('ERROR', 'revive', `wake failed: ${describeError(err)}`, { t: e.threadTs })
     }
@@ -3057,7 +3082,7 @@ export class Broker {
    * tailer's queue is what is running us, and waiting on it would never end).
    */
   private async releaseHeldIfIdle(session: Session, why: string, opts: { drain?: boolean } = {}): Promise<void> {
-    if (!session.held?.length || session.refreshAfter) return
+    if (!session.held?.length || session.refreshAfter || session.refreshing) return
     if (session.turn) {
       if (opts.drain) await session.tailer?.drain()
       if (session.turn?.inFlight.length) return
@@ -3079,7 +3104,7 @@ export class Broker {
     }
     // One injection, as the launch prompt does: several in a row would cut each other short.
     const last = held.at(-1)!
-    for (const m of held) if (m.ts !== last.ts) await this.slack.unreact(m.ts, 'hourglass_flowing_sand').then(() => this.slack.react(m.ts, 'eyes')).catch(() => {})
+    for (const m of held) if (m.ts !== last.ts && m.ts !== session.threadTs) await this.slack.unreact(m.ts, 'hourglass_flowing_sand').then(() => this.slack.react(m.ts, 'eyes')).catch(() => {})
     // Still mid-turn (held only until the running tool finished): type it, so it is not labelled as external.
     const midTurn = !!session.turn && !!session.pane && session.state !== 'waiting' && (this.cfg.midTurnKeys ?? true)
     await this.deliver(session, held.map((m) => m.text).join('\n\n'), last.user, last.ts, midTurn ? 'keys' : 'channel')
@@ -3601,18 +3626,18 @@ export class Broker {
         if (mode === 'later') return this.scheduleRefresh(s, c)
         if (!c.pane) return void (await c.ack('이 세션은 tmux 밖에서 실행 중이라 새로고침할 수 없습니다.'))
         if (!s.sessionId) return void (await c.ack('⚠️ 아직 세션 id를 몰라 새로고침할 수 없습니다. 잠시 뒤에 다시 해보세요.'))
-        s.refreshAfter = undefined
-        // What dies with the process, so the relaunched session is told first thing.
-        s.interrupted = await this.backgroundTasks(s).catch(() => [])
-        // Hold anything typed from here until the replacement is up: the process
-        // is about to go, and the thread should not look like it swallowed a message.
+        // Hold anything typed from here until the replacement is up, and before the first await: a Stop or a
+        // PostToolUse in that gap must not hand held messages (or a new one) to the process about to go.
         this.waking.set(s.threadTs, [])
         s.refreshing = true
+        // What dies with the process, so the relaunched session is told first thing.
+        s.interrupted = await this.backgroundTasks(s).catch(() => [])
         this.logAt('INFO', 'session', 'refreshing on request', this.tag(s, { user: c.user }))
         await c.post(
           `🔄 세션을 다시 엽니다 — 대화는 그대로 이어지고, 새로 설치한 스킬·플러그인·MCP가 반영됩니다.${s.origin === 'terminal' ? ' (터미널에서 띄운 세션이라 tmux `claude-slack` 창으로 옮겨집니다)' : ''}`,
         )
         await this.tmux.killPane(c.pane)
+        s.refreshAfter = undefined
       },
     },
 
@@ -3738,8 +3763,10 @@ export class Broker {
       await c.ack('⏹️ 멈췄습니다. 다음 지시를 기다립니다.')
       this.markWaiting(session, 'instruction')
       await this.setStatus(session, 'suspended')
-      // Claude Code keeps what was queued and sends it right after Esc; so do we.
-      await this.releaseHeld(session, 'esc')
+      // Claude Code keeps what was queued and sends it right after Esc; so do we. Not when a refresh is reserved:
+      // those are for the relaunched session, and the stop may be what lets the refresh run now.
+      if (session.refreshAfter) void this.maybeRunScheduledRefresh(session)
+      else await this.releaseHeld(session, 'esc')
       return
     }
     if (!wasBusy && !/esc to interrupt/i.test(screen)) {
