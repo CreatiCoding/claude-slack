@@ -104,6 +104,15 @@ const api: AdminApi = {
     changed()
     return { ok: true, note: '보냈습니다.' }
   },
+  webFolders(path) {
+    const p = path || '/Users/me/projects'
+    return { ok: true, path: p, parent: '/Users/me', dirs: p.endsWith('projects') ? [{ name: 'alpha', git: true }, { name: 'beta', git: false }] : [] }
+  },
+  async adminNew(o) {
+    calls.push(`new:${o.cwd}:${o.model ?? ''}:${o.create ? 'create' : ''}:${o.prompt ?? ''}`)
+    if (o.cwd.endsWith('/nope') && !o.create) return { ok: false, missing: true, note: '폴더가 없어요' }
+    return { ok: true, note: '세션을 띄웁니다.', thread: A }
+  },
   webTrashInfo(pid) {
     calls.push(`trash-info:${pid}`)
     return { ok: true, note: '', folder: '/Users/me/p/alpha', repos: [{ path: '/Users/me/p/alpha', uncommitted: 2, unpushed: 1 }] }
@@ -333,6 +342,27 @@ for (const [label, size, phone] of [
   await page.locator('.menu .mi', { hasText: '전부 허용 끄기' }).click()
   await page.waitForFunction(() => !document.querySelector('#badge .badge.auto'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 끄기는 묻지 않고 :auto off`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto off')))
+  // 새 세션: folder browsing, model, a missing folder made only when asked.
+  if (phone) await page.goBack()
+  await page.locator(phone ? '#btn-new-big' : '#btn-new').click()
+  await page.waitForSelector('.newsess .ns-dirs .row')
+  await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}-new.png`) })
+  check(`${label}: 새 세션 화면(${phone ? '아래 시트' : '오른쪽 칸'})`, (await page.locator(phone ? '.newsess.sheet' : '#main .newsess').count()) === 1)
+  await page.locator('.ns-dirs .row', { hasText: 'alpha' }).click()
+  await page.waitForFunction(() => (document.querySelector('.ns-cwd') as HTMLInputElement).value.endsWith('/alpha'))
+  check(`${label}: 폴더를 눌러 들어간다`, (await page.locator('.ns-cwd').inputValue()) === '/Users/me/projects/alpha')
+  await page.locator('.ns-cwd').fill('/Users/me/projects/nope')
+  await page.locator('.ns-model').selectOption('sonnet')
+  await page.locator('.ns-prompt').fill('새 일')
+  await page.locator('.ns-start').click()
+  await page.waitForSelector('.ns-missing:not([hidden])')
+  check(`${label}: 없는 폴더면 알려 준다`, ((await page.locator('.ns-missing').textContent()) ?? '').includes('폴더가 없어요'))
+  page.once('dialog', (d) => d.accept())
+  await page.locator('.ns-missing .btn').click()
+  await page.waitForTimeout(300)
+  check(`${label}: 만들고 시작(모델 포함)`, calls.includes('new:/Users/me/projects/nope:sonnet:create:새 일'), calls.join(' | '))
+  check(`${label}: 시작하면 그 세션을 연다`, (await page.locator('.newsess').count()) === 0 && (await page.locator('#title').textContent()) === '알파 작업')
+
   // 폴더 버리고 종료: shows what would be lost first, then goes on only when confirmed.
   if (!phone) {
     let asked = ''

@@ -38,7 +38,8 @@ export interface AdminApi {
   adminPurgeOrphans?(): Promise<{ ok: boolean; note: string }>
   adminRename?(pid: number, title: string): Promise<{ ok: boolean; note: string }>
   adminRenameArchive?(path: string, title: string): Promise<{ ok: boolean; note: string }>
-  adminNew?(o: { cwd: string; prompt?: string }): Promise<{ ok: boolean; note: string }>
+  adminNew?(o: { cwd: string; prompt?: string; model?: string; effort?: string; create?: boolean }): Promise<{ ok: boolean; note: string; thread?: string; missing?: boolean }>
+  webFolders?(path?: string): { ok: boolean; note?: string; path?: string; parent?: string; dirs?: Array<{ name: string; git: boolean }> }
   adminScreen?(pid: number): Promise<{ ok: boolean; screen: string }>
   // The web app (/app). Absent in older fakes: the routes then answer 404.
   webSessions?(): WebSession[]
@@ -244,6 +245,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     return
   }
   if (req.method === 'GET' && url.pathname === '/api/options' && api.webOptions) return send(res, 200, api.webOptions())
+  if (req.method === 'GET' && url.pathname === '/api/folders' && api.webFolders) return send(res, 200, api.webFolders(url.searchParams.get('path') ?? undefined))
   // A picture by reference: only from the broker's own picture folder, named by content hash, so it never changes.
   const image = /^\/api\/image\/(\d+\.\d+)\/([0-9a-f]{20})$/.exec(url.pathname)
   if (req.method === 'GET' && image && api.images) {
@@ -463,7 +465,13 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   }
   if (req.method === 'POST' && url.pathname === '/api/session/new' && api.adminNew) {
     const body = await readJson(req)
-    const result = await api.adminNew({ cwd: String(body.cwd ?? ''), prompt: typeof body.prompt === 'string' ? body.prompt : '' })
+    const result = await api.adminNew({
+      cwd: String(body.cwd ?? ''),
+      prompt: typeof body.prompt === 'string' ? body.prompt : '',
+      ...(typeof body.model === 'string' && body.model ? { model: body.model } : {}),
+      ...(typeof body.effort === 'string' && body.effort ? { effort: body.effort } : {}),
+      ...(body.create === true ? { create: true } : {}),
+    })
     log(`admin new ${String(body.cwd ?? '')}: ${result.note}`)
     return send(res, result.ok ? 200 : 400, result)
   }

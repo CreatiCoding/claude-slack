@@ -85,7 +85,7 @@ async function api(path, body) {
   try {
     data = await r.json()
   } catch {}
-  if (!r.ok) throw new Error(data.note || data.error || `HTTP ${r.status}`)
+  if (!r.ok) throw Object.assign(new Error(data.note || data.error || `HTTP ${r.status}`), { data })
   return data
 }
 /** The broker is back: send what it refused while away, in order, once each. */
@@ -502,6 +502,7 @@ function viewArchive(a) {
 
 // ------------------------------------------------------------------ opening a session
 async function open(ts, { push = true } = {}) {
+  closeNewSession()
   if (current && current !== ts) saveDraft()
   current = ts
   $('app').classList.add('in-convo')
@@ -1665,8 +1666,108 @@ $('btn-more').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect()
   openMenu({ x: r.right - 240, y: r.bottom + 4 }, globalItems())
 })
+// ------------------------------------------------------------------ new session
+// A PC gets it as the right-hand pane (not a sheet), a phone as a sheet from the bottom.
+let newForm = null
+function closeNewSession() {
+  if (!newForm) return
+  newForm.close()
+  newForm = null
+}
 function newSession() {
-  location.href = withToken('/admin') // the new-session screen comes with item 19; until then the old page has it
+  closeNewSession()
+  closeMenu()
+  const el = document.createElement('section')
+  el.className = 'newsess'
+  el.innerHTML = `
+    <div class="ns-head"><h2>새 세션</h2><button class="icon-btn ns-close" type="button" aria-label="닫기">${icon('close')}</button></div>
+    <textarea class="ns-prompt" rows="4" placeholder="무엇을 할까요? (비워 두고 시작해도 돼요)"></textarea>
+    <label class="ns-label">폴더</label>
+    <div class="ns-path"><button class="icon-btn ns-up" type="button" aria-label="상위 폴더">${icon('up')}</button><input class="search ns-cwd" spellcheck="false" autocomplete="off"></div>
+    <div class="ns-dirs" role="listbox" aria-label="하위 폴더"></div>
+    <div class="ns-row">
+      <label>모델 <select class="ns-model"><option value="">기본</option>${options.models.map((m) => `<option value="${esc(m.value)}">${esc(m.label)}</option>`).join('')}</select></label>
+      <label>effort <select class="ns-effort"><option value="">기본</option>${options.efforts.map((e) => `<option>${esc(e)}</option>`).join('')}</select></label>
+    </div>
+    <div class="ns-missing" hidden></div>
+    <div class="ns-actions"><button class="btn primary ns-start" type="button">시작</button></div>`
+  const q = (c) => el.querySelector(c)
+  const cwdInput = q('.ns-cwd')
+  let parent = null
+  const browse = async (path) => {
+    let r
+    try {
+      r = await api('/api/folders' + (path ? '?path=' + encodeURIComponent(path) : ''))
+    } catch (err) {
+      return toast(err.message, 'err')
+    }
+    if (!r.ok) return toast(r.note, 'err')
+    cwdInput.value = r.path
+    parent = r.parent ?? null
+    q('.ns-up').disabled = !parent
+    const box = q('.ns-dirs')
+    box.innerHTML = r.dirs.length ? '' : '<div class="empty-note">하위 폴더가 없어요</div>'
+    for (const d of r.dirs) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'row'
+      b.innerHTML = `<span class="lead">${icon('folder')}</span><span class="name"></span>${d.git ? '<span class="badge idle">git</span>' : ''}`
+      b.querySelector('.name').textContent = d.name
+      b.addEventListener('click', () => browse(r.path + '/' + d.name))
+      box.append(b)
+    }
+    q('.ns-missing').hidden = true
+  }
+  q('.ns-up').addEventListener('click', () => parent && browse(parent))
+  cwdInput.addEventListener('keydown', (e) => e.key === 'Enter' && (e.preventDefault(), browse(cwdInput.value.trim())))
+  const start = async (create = false) => {
+    const body = { cwd: cwdInput.value.trim(), prompt: q('.ns-prompt').value, model: q('.ns-model').value, effort: q('.ns-effort').value, ...(create ? { create: true } : {}) }
+    q('.ns-start').disabled = true
+    try {
+      const r = await api('/api/session/new', body)
+      toast(r.note)
+      closeNewSession()
+      if (r.thread) open(r.thread)
+    } catch (err) {
+      if (err.data?.missing) {
+        const m = q('.ns-missing')
+        m.hidden = false
+        m.innerHTML = `<span>${icon('alert')} 폴더가 없어요</span>`
+        const make = document.createElement('button')
+        make.type = 'button'
+        make.className = 'btn'
+        make.textContent = '폴더를 만들고 시작'
+        make.addEventListener('click', () => confirm(`${cwdInput.value.trim()} 폴더를 만들고 시작할까요?`) && start(true))
+        m.append(make)
+      } else toast(err.message, 'err')
+    } finally {
+      q('.ns-start').disabled = false
+    }
+  }
+  q('.ns-start').addEventListener('click', () => start())
+  q('.ns-prompt').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && hasMouse && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+      e.preventDefault()
+      start()
+    }
+  })
+  q('.ns-close').addEventListener('click', closeNewSession)
+  if (isPhone()) {
+    const scrim = document.createElement('div')
+    scrim.className = 'scrim dim'
+    el.classList.add('menu', 'sheet')
+    scrim.addEventListener('click', closeNewSession)
+    document.body.append(scrim, el)
+    newForm = { close: () => (scrim.remove(), el.remove()) }
+  } else {
+    const hidden = [$('empty'), $('convo'), $('subbar')].map((x) => [x, x.hidden])
+    for (const [x] of hidden) x.hidden = true
+    $('main').append(el)
+    $('title').textContent = '새 세션'
+    newForm = { close: () => (el.remove(), hidden.forEach(([x, h]) => (x.hidden = h)), renderHeader()) }
+  }
+  browse('')
+  q('.ns-prompt').focus()
 }
 $('btn-new').addEventListener('click', newSession)
 $('btn-new-big').addEventListener('click', newSession)

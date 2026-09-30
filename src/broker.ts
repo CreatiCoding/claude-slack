@@ -9,7 +9,7 @@ import { RecentKeys } from './dedupe.ts'
 import { OffsetStore } from './offsets.ts'
 import { ReviveStore, type ReviveEntry } from './revive.ts'
 import type { HookEvent, ToBroker, ToChannel } from './protocol.ts'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { readdir, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
@@ -138,6 +138,8 @@ export interface BrokerConfig {
   webImagesDir?: string
   /** Where "폴더 버리고 종료" moves a folder (default ~/.Trash). */
   trashDir?: string
+  /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
+  homeDir?: string
   /** Does a conversation's folder still exist (tests fake it). */
   folderExists?: (path: string) => boolean
   /** Draw terminal screens as pictures (default on); text when off or when rendering fails. */
@@ -756,11 +758,38 @@ export class Broker {
   }
 
   /** Start a session from the admin page: the same launch as `/ccnew`, credited to the first allowed user. */
-  async adminNew(o: { cwd: string; prompt?: string }): Promise<{ ok: boolean; note: string }> {
-    const cwd = expandHome(o.cwd || this.cfg.defaultCwd)
-    if (!existsSync(cwd)) return { ok: false, note: `폴더가 없습니다: ${shortenHome(cwd)}` }
-    await this.launchSession({ cwd, prompt: (o.prompt ?? '').trim(), user: this.defaultRecipient })
-    return { ok: true, note: `${shortenHome(cwd)} 에서 세션을 띄웁니다. 스레드는 채널에 생깁니다.` }
+  async adminNew(o: { cwd: string; prompt?: string; model?: string; effort?: string; create?: boolean }): Promise<{ ok: boolean; note: string; thread?: string; missing?: boolean }> {
+    const cwd = resolve(expandHome(o.cwd || this.cfg.defaultCwd))
+    if (!existsSync(cwd)) {
+      // Made only when asked, and only under home: a typo must not create folders elsewhere on the machine.
+      if (!o.create) return { ok: false, missing: true, note: `폴더가 없어요: ${shortenHome(cwd)}` }
+      if (!cwd.startsWith((this.cfg.homeDir ?? homedir()) + '/')) return { ok: false, note: '홈 폴더 아래에만 만들 수 있어요.' }
+      mkdirSync(cwd, { recursive: true })
+      this.logAt('INFO', 'launch', 'folder created for a new session', { cwd: shortenHome(cwd) })
+    }
+    const model = MODEL_OPTIONS.some((m) => m.value === o.model) ? o.model : undefined
+    const effort = EFFORT_OPTIONS.includes(o.effort ?? '') ? o.effort : undefined
+    const extraArgs = [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+    const thread = await this.launchSession({ cwd, prompt: (o.prompt ?? '').trim(), user: this.defaultRecipient, extraArgs })
+    return { ok: true, note: `${shortenHome(cwd)} 에서 세션을 띄웁니다.`, ...(thread ? { thread } : {}) }
+  }
+
+  /** Folders to pick from for a new session: the subfolders of one folder under home, with which are git repositories. */
+  webFolders(path?: string): { ok: boolean; note?: string; path?: string; parent?: string; dirs?: Array<{ name: string; git: boolean }> } {
+    const home = this.cfg.homeDir ?? homedir()
+    const dir = resolve(expandHome(path || this.cfg.defaultCwd))
+    if (dir !== home && !dir.startsWith(home + '/')) return { ok: false, note: '홈 폴더 아래만 볼 수 있어요.' }
+    let names: string[]
+    try {
+      names = readdirSync(dir, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+        .map((d) => d.name)
+        .sort((a, b) => a.localeCompare(b))
+        .slice(0, 300)
+    } catch {
+      return { ok: false, note: '폴더를 읽지 못했어요.', path: dir }
+    }
+    return { ok: true, path: dir, ...(dir !== home ? { parent: resolve(dir, '..') } : {}), dirs: names.map((name) => ({ name, git: existsSync(join(dir, name, '.git')) })) }
   }
 
   /** Reopen a recent conversation (from the "이어서 하기" list) as a new Slack thread, as `/ccresume` does. */
