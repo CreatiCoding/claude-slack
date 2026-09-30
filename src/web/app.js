@@ -60,8 +60,27 @@ function thread(ts) {
 }
 const sessionOf = (ts) => sessions.find((s) => s.thread === ts)
 
+/**
+ * GET and POST to the broker. When the broker is away (restart, deploy) the proxy in front answers 502/503/504:
+ * the command never reached it, so it waits and is sent once the broker is back (within a minute). A network
+ * error is different: it may have arrived, and sending it again could run it twice, so it is only reported.
+ */
+const AWAY = new Set([502, 503, 504])
+const waitingCommands = []
 async function api(path, body) {
-  const r = await fetch(withToken(path), body === undefined ? { headers: authHeaders } : { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  let r
+  try {
+    r = await fetch(withToken(path), body === undefined ? { headers: authHeaders } : { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  } catch {
+    throw new Error(body === undefined ? '연결할 수 없어요' : '전달됐는지 확인할 수 없어요. 대화를 보고 필요하면 다시 보내 주세요')
+  }
+  if (AWAY.has(r.status) && body !== undefined) {
+    brokerAway()
+    return new Promise((resolve, reject) => {
+      const job = { path, body, resolve, reject, until: Date.now() + 60_000 }
+      waitingCommands.push(job)
+    })
+  }
   let data = {}
   try {
     data = await r.json()
@@ -69,6 +88,31 @@ async function api(path, body) {
   if (!r.ok) throw new Error(data.note || data.error || `HTTP ${r.status}`)
   return data
 }
+/** The broker is back: send what it refused while away, in order, once each. */
+async function flushWaiting() {
+  while (waitingCommands.length) {
+    const job = waitingCommands[0]
+    if (Date.now() > job.until) {
+      waitingCommands.shift()
+      job.reject(new Error('브로커가 돌아오지 않아 보내지 못했어요'))
+      continue
+    }
+    let r
+    try {
+      r = await fetch(withToken(job.path), { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(job.body) })
+    } catch {
+      return // still unreachable: try again on the next tick
+    }
+    if (AWAY.has(r.status)) return
+    waitingCommands.shift()
+    let data = {}
+    try {
+      data = await r.json()
+    } catch {}
+    r.ok ? job.resolve(data) : job.reject(new Error(data.note || data.error || `HTTP ${r.status}`))
+  }
+}
+setInterval(() => waitingCommands.length && flushWaiting(), 3000)
 
 function toast(text, kind = 'ok', ms = 2600) {
   const el = $('toast')
@@ -120,6 +164,12 @@ function applyTheme(t) {
 // ------------------------------------------------------------------ live connection
 let es = null
 let connected = false
+// A short gap is not worth a red line: say "끊겼어요" only after 8s, or 30s while the broker is restarting.
+let lostAt = 0
+let restarting = false
+function brokerAway() {
+  restarting = true
+}
 let connId = null
 async function subscribe(ts) {
   if (!connId) return
@@ -130,11 +180,15 @@ async function subscribe(ts) {
   }
 }
 function connect() {
+  if (!lostAt && !connected) lostAt = Date.now()
   if (es) es.close()
   es = new EventSource(withToken('/api/stream'))
   es.addEventListener('open', () => {
     connected = true
+    lostAt = 0
+    restarting = false
     renderConn()
+    flushWaiting()
   })
   // Each stream has an id; the page tells the broker which thread it shows, and only that thread's events come.
   es.addEventListener('hello', (e) => {
@@ -142,8 +196,11 @@ function connect() {
     if (current) subscribe(current).then(() => catchUp(current))
   })
   es.addEventListener('error', () => {
+    if (connected || !lostAt) lostAt = Date.now()
     connected = false
     renderConn()
+    // Is it the broker that is gone (the proxy answers) or the network? The first is a restart.
+    fetch(withToken('/api/options'), { headers: authHeaders }).then((r) => AWAY.has(r.status) && brokerAway(), () => {})
   })
   es.addEventListener('sessions', (e) => {
     metrics.recvBytes += e.data.length
@@ -203,9 +260,11 @@ document.addEventListener('visibilitychange', () => {
 addEventListener('online', () => connect())
 function renderConn() {
   const el = $('conn')
-  el.textContent = connected ? '' : '연결이 끊겼어요 · 다시 붙는 중…'
-  el.classList.toggle('bad', !connected)
+  const quiet = connected || (lostAt && Date.now() - lostAt < (restarting ? 30_000 : 8_000))
+  el.textContent = quiet ? '' : '연결이 끊겼어요 · 다시 붙는 중…'
+  el.classList.toggle('bad', !quiet)
 }
+setInterval(() => !connected && renderConn(), 1000)
 
 async function catchUp(ts) {
   const t = thread(ts)

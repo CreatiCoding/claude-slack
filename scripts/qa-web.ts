@@ -146,7 +146,7 @@ for (const [label, size, phone] of [
   const page = await ctx.newPage()
   const errors: string[] = []
   page.on('pageerror', (e) => errors.push(String(e)))
-  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
+  page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push(m.text()))
   await page.goto(base + '/')
   await page.waitForSelector('.row')
   check(`${label}: 목록에 세션 세 개`, (await page.locator('.row[data-thread]').count()) === 3)
@@ -213,6 +213,30 @@ for (const [label, size, phone] of [
     check(`${label}: 새로고침하면 둔 것부터 그리고 after=seq 로 빠진 것만`, ev.length >= 1 && ev.every((u) => !/after=0\b/.test(u)), ev.join(' '))
     check(`${label}: 받은 그림은 다시 받지 않는다(IndexedDB)`, !asked.some((u) => u.includes('/api/image/')), asked.filter((u) => u.includes('/api/image/')).join(' '))
     check(`${label}: 연결 전에도 목록이 보인다(localStorage)`, await page.evaluate(() => !!localStorage.getItem('sessions-cache')))
+  }
+
+  // The broker away for a moment (the proxy answers 502): the message waits and goes once it is back, once.
+  if (!phone) {
+    let refused = 0
+    await page.route('**/api/session/11/send*', (route) => (refused++ === 0 ? route.fulfill({ status: 502, body: 'Bad Gateway' }) : route.continue()))
+    const n0 = calls.filter((c) => c.startsWith('send:11:잠깐')).length
+    await page.locator('#input').fill('잠깐 끊겼을 때')
+    await page.locator('#input').press('Enter')
+    await page.waitForFunction(() => true)
+    await page.waitForTimeout(3500)
+    await page.unroute('**/api/session/11/send*')
+    check(`${label}: 브로커 없음(502)으로 거절된 명령은 돌아온 뒤 한 번 다시`, calls.filter((c) => c.startsWith('send:11:잠깐')).length === n0 + 1, calls.join(' | '))
+    check(`${label}: 그동안 빨간 줄을 띄우지 않는다`, ((await page.locator('#conn').textContent()) ?? '') === '')
+    // A network error may have reached the broker: reported, never sent again.
+    await page.route('**/api/session/11/send*', (route) => route.abort('failed'))
+    await page.locator('#input').fill('네트워크 오류')
+    await page.locator('#input').press('Enter')
+    await page.waitForSelector('#toast:not([hidden])', { timeout: 3000 }).catch(() => {})
+    check(`${label}: 네트워크 오류는 알리고`, ((await page.locator('#toast').textContent()) ?? '').includes('확인할 수 없어요'))
+    await page.unroute('**/api/session/11/send*')
+    await page.waitForTimeout(3500)
+    check(`${label}: 다시 보내지 않는다`, !calls.some((c) => c.startsWith('send:11:네트워크 오류')))
+    await page.locator('#input').fill('')
   }
 
   // A picture to send: picked, shown small, removable, sent with the message.
