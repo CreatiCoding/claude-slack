@@ -160,7 +160,14 @@ function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
   else delete document.documentElement.dataset.theme
   store.set('theme', t)
+  // iOS takes the bar colour and the keyboard's look from these, so they follow a theme picked in the menu too.
+  for (const m of document.querySelectorAll('meta[name="theme-color"]')) {
+    if (t === 'auto') m.content = m.media.includes('dark') ? '#1f1e1d' : '#f3f1ea'
+    else m.content = t === 'dark' ? '#1f1e1d' : '#f3f1ea'
+  }
+  document.querySelector('meta[name="color-scheme"]').content = t === 'auto' ? 'light dark' : t
 }
+applyTheme(store.get('theme', 'auto'))
 
 // ------------------------------------------------------------------ live connection
 let es = null
@@ -1913,6 +1920,7 @@ function sessionItems(s) {
       ],
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
+    { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
     {
       label: `그룹: ${groups.groups.find((g) => g.items.includes(s.thread))?.name ?? '없음'}`,
       icon: 'folder',
@@ -1924,7 +1932,6 @@ function sessionItems(s) {
       ],
     },
     { label: s.autoAllow ? '전부 허용 끄기' : '전부 허용 켜기', icon: 'bolt', on: s.autoAllow, run: () => toggleAuto(s) },
-    { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
     'sep',
     { label: '종료', icon: 'ended', danger: true, run: () => confirm(`"${nameOf(s)}" 세션을 종료할까요?`) && command(s, 'exit') },
     { label: '폴더 버리고 종료', icon: 'folder', danger: true, run: () => trashFolder(s) },
