@@ -16,6 +16,7 @@ import { readFileSync } from 'node:fs'
 import { gzipSync } from 'node:zlib'
 import type { AdminState, Orphan, ThreadView, WebSession } from './broker.ts'
 import type { SessionEvent } from './events.ts'
+import { pageMetricsLine, TrafficMeter } from './meter.ts'
 
 export interface AdminApi {
   adminState(): Promise<AdminState>
@@ -115,14 +116,17 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
     throw new Error(`admin: refusing to listen on ${host} without CLAUDE_SLACK_WEB_TOKEN — anyone who can reach it could end sessions (only loopback and Tailscale addresses may go without one)`)
   }
 
+  // What the web app costs: counted as it is sent, logged once a minute.
+  const meter = new TrafficMeter((l) => log(`web ${l}`))
+  meter.start()
   const onRequest = (req: IncomingMessage, res: ServerResponse) => {
-    handle(req, res, api, token, log).catch((err) => {
+    handle(req, res, api, token, log, meter).catch((err) => {
       log(`admin request failed: ${err}`)
       send(res, 500, { error: String(err) })
     })
   }
   const { tlsCert, tlsKey } = opts
-  if (!tlsCert || !tlsKey) return createServer(onRequest)
+  if (!tlsCert || !tlsKey) return Object.assign(createServer(onRequest), { meter })
 
   const read = () => ({ cert: readFileSync(tlsCert), key: readFileSync(tlsKey) })
   const server = createHttpsServer(read(), onRequest)
@@ -133,10 +137,10 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
       log(`admin: could not reload the TLS certificate: ${err}`)
     }
   }, TLS_RELOAD_MS).unref()
-  return server
+  return Object.assign(server, { meter })
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, token: string | undefined, log: (m: string) => void): Promise<void> {
+async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, token: string | undefined, log: (m: string) => void, meter: TrafficMeter): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   // A token, when configured, may travel as a header or as `?t=` so a phone can
   // just open a bookmarked link.
@@ -170,11 +174,15 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   // One way (server → page); anything the page does is a POST, answered on its own.
   if (req.method === 'GET' && url.pathname === '/api/stream' && api.webSessions && api.events && api.onChange) {
     res.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' })
-    const write = (event: string, data: unknown) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    const write = (event: string, data: unknown, kind = event) => {
+      const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+      meter.add(kind, Buffer.byteLength(frame))
+      res.write(frame)
+    }
     res.write('retry: 2000\n\n')
     write('sessions', api.webSessions())
     const offChange = api.onChange(() => write('sessions', api.webSessions!()))
-    const offEvent = api.events.subscribe((thread, ev) => write('ev', { thread, ev }))
+    const offEvent = api.events.subscribe((thread, ev) => write('ev', { thread, ev }, `ev:${ev.type}`))
     const ping = setInterval(() => res.write(`: ping ${Date.now()}\n\n`), SSE_PING_MS)
     req.on('close', () => {
       clearInterval(ping)
@@ -187,7 +195,18 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   if (req.method === 'GET' && url.pathname === '/api/events' && api.events) {
     const thread = url.searchParams.get('thread') ?? ''
     const after = Math.max(0, Number(url.searchParams.get('after') ?? 0) || 0)
-    return send(res, 200, { events: api.events.since(thread, after), last: api.events.last(thread) })
+    const body = JSON.stringify({ events: api.events.since(thread, after), last: api.events.last(thread) })
+    meter.add('events', Buffer.byteLength(body), `thread=${thread} after=${after}`)
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(body)
+    return
+  }
+  // A page's own numbers for its last minute (received, time to show, catch-ups, stalls, DOM size), into the log.
+  if (req.method === 'POST' && url.pathname === '/api/metrics') {
+    log(pageMetricsLine(await readJson(req)))
+    res.writeHead(204)
+    res.end()
+    return
   }
   const sendTo = /^\/api\/session\/(\d+)\/send$/.exec(url.pathname)
   if (req.method === 'POST' && sendTo && api.webSend) {

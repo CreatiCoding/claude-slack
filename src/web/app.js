@@ -78,6 +78,37 @@ function toast(text, kind = 'ok', ms = 2600) {
   toast.t = setTimeout(() => (el.hidden = true), ms)
 }
 
+// ------------------------------------------------------------------ measurement
+// Once a minute the page tells the broker what it received and what showing it cost, for the log.
+const metrics = { recvBytes: 0, recvEvents: 0, apply: { n: 0, sum: 0, max: 0 }, catchups: [], stalls: { n: 0, max: 0 } }
+const tabId = Math.random().toString(36).slice(2, 8)
+function noteApply(ms) {
+  metrics.apply.n++
+  metrics.apply.sum += ms
+  metrics.apply.max = Math.max(metrics.apply.max, ms)
+}
+// A timer that fires 200ms late means the main thread was blocked that long.
+;(() => {
+  let expect = performance.now() + 100
+  setInterval(() => {
+    const late = performance.now() - expect
+    expect = performance.now() + 100
+    if (late > 200 && document.visibilityState === 'visible') {
+      metrics.stalls.n++
+      metrics.stalls.max = Math.max(metrics.stalls.max, Math.round(late))
+    }
+  }, 100)
+})()
+setInterval(() => {
+  if (!metrics.recvEvents && !metrics.apply.n && !metrics.catchups.length && !metrics.stalls.n) return
+  const body = { tab: tabId, view: isPhone() ? 'phone' : 'pc', ...metrics, dom: document.getElementsByTagName('*').length }
+  metrics.recvBytes = metrics.recvEvents = 0
+  metrics.apply = { n: 0, sum: 0, max: 0 }
+  metrics.catchups = []
+  metrics.stalls = { n: 0, max: 0 }
+  api('/api/metrics', body).catch(() => {})
+}, 60_000)
+
 // ------------------------------------------------------------------ theme
 function applyTheme(t) {
   if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t
@@ -101,6 +132,8 @@ function connect() {
     renderConn()
   })
   es.addEventListener('sessions', (e) => {
+    metrics.recvBytes += e.data.length
+    metrics.recvEvents++
     sessions = JSON.parse(e.data)
     for (const s of sessions) if (!(s.thread in seen)) seen[s.thread] = s.lastSeq // a session seen for the first time counts as read
     store.set('seen', seen)
@@ -110,6 +143,8 @@ function connect() {
     renderActivity()
   })
   es.addEventListener('ev', (e) => {
+    metrics.recvBytes += e.data.length
+    metrics.recvEvents++
     const { thread: ts, ev } = JSON.parse(e.data)
     const t = threads.get(ts)
     if (!t || (!t.events.length && !t.loading && ts !== current)) return
@@ -135,14 +170,20 @@ async function catchUp(ts) {
   const t = thread(ts)
   if (t.loading) return t.loading
   t.loading = (async () => {
+    const started = performance.now()
+    let rounds = 0
+    let got = 0
     try {
       for (;;) {
         const { events } = await api(`/api/events?thread=${encodeURIComponent(ts)}&after=${t.last}`)
+        rounds++
         const fresh = events.filter((e) => e.seq > t.last)
         if (!fresh.length) break
+        got += fresh.length
         addEvents(ts, fresh)
         if (events.length < 1000) break
       }
+      metrics.catchups.push({ rounds, events: got, ms: Math.round(performance.now() - started) })
     } catch (err) {
       toast('대화를 불러오지 못했어요: ' + err.message, 'err')
     } finally {
@@ -476,6 +517,7 @@ function timeEl(at) {
 }
 
 function renderConvo(evs, { live = false } = {}) {
+  const t0 = performance.now()
   const follow = atBottom()
   const log = $('log')
   for (const ev of evs) {
@@ -487,6 +529,7 @@ function renderConvo(evs, { live = false } = {}) {
   renderActivity()
   if (follow) scrollToBottom()
   else if (evs.length) $('jump').hidden = false
+  noteApply(performance.now() - t0)
 }
 
 function renderEvent(ev, live) {
