@@ -1265,7 +1265,7 @@ export class Broker {
         ...(s.manualTitle ? { manualTitle: s.manualTitle } : {}),
         ...(s.autoAllow ? { autoAllow: true } : {}),
         ...(s.model ? { model: s.model } : {}),
-        ...(s.launchModel ? { launchModel: s.launchModel } : {}),
+        ...(s.launchModel ?? s.model ? { launchModel: s.launchModel ?? s.model } : {}),
         ...(s.refreshAfter ? { refreshAfter: s.refreshAfter } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
       })
@@ -1840,7 +1840,11 @@ export class Broker {
     if (ev.kind === 'model') {
       if (session.model !== ev.model) {
         session.model = ev.model
+        // /model typed in the terminal only shows here. Same family: the launch choice stands (opus[1m] keeps its
+        // [1m], which the transcript drops); another family: the choice is stale, the transcript's model is what runs.
+        if (session.launchModel && modelFamily(session.launchModel) && modelFamily(session.launchModel) !== modelFamily(ev.model)) session.launchModel = undefined
         this.schedulePanelRefresh(session)
+        this.changed()
       }
       return
     }
@@ -2461,9 +2465,10 @@ export class Broker {
   }
 
   /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
-  private settingsArgs(session: { launchModel?: string; effort?: string }): string[] {
-    // The model it was launched or switched with (opus[1m] keeps its 1M context); the transcript's name drops [1m].
-    const chosen = session.launchModel
+  private settingsArgs(session: { launchModel?: string; model?: string; effort?: string }): string[] {
+    // The model it was launched or switched with (opus[1m] keeps its 1M context; the transcript's name drops [1m]),
+    // else the one it runs now: better than falling back to the default.
+    const chosen = session.launchModel ?? (session as { model?: string }).model
     const model = chosen && /^[\w.\[\]-]+$/.test(chosen) ? chosen : undefined
     const effort = session.effort && EFFORT_OPTIONS.includes(session.effort) ? session.effort : undefined
     return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
@@ -2846,7 +2851,7 @@ export class Broker {
       const model = pick('model', 'model')?.selected_option?.value
       const effort = pick('effort', 'effort')?.selected_option?.value
       const mode = pick('mode', 'mode')?.selected_option?.value
-      if (model && model !== session.model) await this.runCommand(session, `model ${model}`, v.user)
+      if (model && model !== (session.launchModel ?? session.model)) await this.runCommand(session, `model ${model}`, v.user)
       if (effort && effort !== session.effort) await this.runCommand(session, `effort ${effort}`, v.user)
       if (mode && mode !== session.permissionMode) await this.runCommand(session, `mode ${mode}`, v.user)
       return
@@ -3799,6 +3804,12 @@ export class Broker {
   /** Type a Claude Code command straight into the terminal and show what it prints. */
   private async passThrough(c: CommandContext): Promise<void> {
     await this.tmux.typeLine(c.pane, c.cmd)
+    // "/model <x>" sent through as is: that is now the session's chosen model (a refresh must launch with it).
+    const picked = /^\/model\s+(\S+)\s*$/.exec(c.cmd)?.[1]
+    if (picked) {
+      c.session.launchModel = picked
+      this.changed()
+    }
     await c.ack(`→ ${c.cmd}`)
     if (/^\/(context|usage|cost|status|help|permissions)/.test(c.cmd)) {
       // These print into the TUI; wait for the output to finish drawing, then
@@ -3862,7 +3873,7 @@ export class Broker {
       origin: session.origin,
       hasPane: !!session.pane,
       window: session.window,
-      model: session.model,
+      model: session.launchModel ?? session.model,
       effort: session.effort,
       permissionMode: session.permissionMode,
       state: session.ended ? 'ended' : session.state,
@@ -3987,6 +3998,11 @@ function parsePreview(preview: string): Record<string, unknown> | undefined {
   } catch {
     return undefined
   }
+}
+
+/** opus / sonnet / haiku / fable, from an id or an alias (claude-opus-5-5, opus[1m]); undefined for default, opusplan. */
+function modelFamily(m: string): string | undefined {
+  return /\b(opus|sonnet|haiku|fable)\b|(?:^|-)(opus|sonnet|haiku|fable)(?:-|\[|$)/.exec(m)?.slice(1).find(Boolean)
 }
 
 function sleep(ms: number): Promise<void> {
