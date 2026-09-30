@@ -93,13 +93,17 @@ export class BackgroundTracker {
   }
 
   private line(line: string): void {
-    let entry: { type?: string; timestamp?: string; message?: { content?: unknown } }
+    let entry: { type?: string; timestamp?: string; message?: { content?: unknown }; content?: unknown; attachment?: { prompt?: unknown } }
     try {
       entry = JSON.parse(line)
     } catch {
       return
     }
     const at = Date.parse(entry.timestamp ?? '') || 0
+    // A finished task's notice is also written as a queue-operation (enqueue) or an attachment (queued_command),
+    // not only inside a person's message: those are where it usually is.
+    if (entry.type === 'queue-operation' && typeof entry.content === 'string') return this.notifications(entry.content)
+    if (entry.type === 'attachment' && typeof entry.attachment?.prompt === 'string') return this.notifications(entry.attachment.prompt)
     const content = entry.message?.content
     if (entry.type === 'assistant' && Array.isArray(content)) {
       for (const b of content as Block[]) {

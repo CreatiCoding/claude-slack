@@ -159,3 +159,19 @@ test('3-5 판정 세부: "moved to the background" 는 첫머리만, timeout_ms 
     mock.timers.reset()
   }
 })
+
+test('실제 기록 형식: 완료 알림은 queue-operation(enqueue)·attachment(queued_command) 줄로도 온다', () => {
+  const f = file()
+  appendFileSync(f, use('q1', 'Bash', { command: 'measure' }, 0))
+  appendFileSync(f, result('q1', 'Command running in background with ID: bq1. Output …', 0))
+  appendFileSync(f, use('q2', 'Bash', { command: 'other' }, 1))
+  appendFileSync(f, result('q2', 'Command running in background with ID: bq2. Output …', 1))
+  const bg = new BackgroundTracker(f)
+  bg.scan()
+  assert.equal(bg.open({ now: T0 + 5000 }).length, 2)
+  const notice = (id: string, tid: string) => `<task-notification>\n<task-id>${tid}</task-id>\n<tool-use-id>${id}</tool-use-id>\n<status>completed</status>\n</task-notification>`
+  appendFileSync(f, JSON.stringify({ type: 'queue-operation', operation: 'enqueue', timestamp: at(9), content: notice('q1', 'bq1') }) + '\n')
+  appendFileSync(f, JSON.stringify({ type: 'attachment', timestamp: at(9), attachment: { type: 'queued_command', prompt: notice('q2', 'bq2') } }) + '\n')
+  bg.scan()
+  assert.deepEqual(bg.open({ now: T0 + 10_000 }), [])
+})
