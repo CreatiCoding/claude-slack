@@ -247,3 +247,17 @@ test('2-8 예약한 새로고침은 브로커를 재시작해도 남는다; 2-9 
   assert.ok(!t3.broker.webSessions().some((r) => r.thread === th), JSON.stringify(t3.broker.webSessions()))
   t3.close()
 })
+
+test('3-4 세션이 끝나면 백그라운드 추적기(key+pid+path)를 지운다', async () => {
+  const t = await setup({ processFacts: async () => ({ startedAt: 0, shells: 0 }) })
+  const s = await shim(t.socketPath, { tmuxPane: '%73', sessionId: 's1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  await t.broker.webRefreshInfo(100)
+  const maps = t.broker as unknown as { bgTrackers: Map<string, unknown>; skillReaders: Map<string, unknown> }
+  assert.equal(maps.bgTrackers.size, 1)
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionEnd', reason: 'exit' }, t.transcript)
+  await until(() => t.broker.webSessions().length === 0, '끝남')
+  assert.equal(maps.bgTrackers.size, 0)
+  s.conn.close()
+  t.close()
+})

@@ -25,10 +25,13 @@ export interface BackgroundTask {
 
 /** On first read, only the end of a long conversation file. */
 const FIRST_READ_BYTES = 16 * 1024 * 1024
+/** A Monitor without timeout_ms stops after the tool's default. */
+const MONITOR_DEFAULT_MS = 300_000
 
 const STARTS: Array<{ re: RegExp; kind: BackgroundTask['kind'] }> = [
   { re: /^Command running in background with ID: (\S+?)\.?(?:\s|$)/, kind: 'bash' },
-  { re: /moved to the background \(ID: ([^)]+)\)/, kind: 'bash' },
+  // "Command did not complete within its 120s timeout and was moved to the background (ID: …)"
+  { re: /^Command [^\n]{0,120}?moved to the background \(ID: ([^)]+)\)/, kind: 'bash' },
   { re: /^Monitor started \(task (\S+?),/, kind: 'monitor' },
   { re: /^Async agent launched/, kind: 'agent' },
 ]
@@ -42,7 +45,9 @@ export class BackgroundTracker {
   private path: string
   private offset = -1
   private rest = ''
-  private uses = new Map<string, { name: string; input: Record<string, unknown> }>()
+  private started = false
+  /** Only a name tag per tool call still waiting for its result (never the input: a Write carries whole files). */
+  private uses = new Map<string, { name: string; label: string; timeoutMs?: number; taskId?: string }>()
   private tasks = new Map<string, BackgroundTask>()
 
   constructor(path: string) {
@@ -63,7 +68,10 @@ export class BackgroundTracker {
       this.offset = 0
       this.rest = ''
     }
-    if (size === this.offset) return
+    if (size === this.offset) {
+      this.started = true
+      return
+    }
     const fd = openSync(this.path, 'r')
     let chunk = ''
     try {
@@ -73,7 +81,9 @@ export class BackgroundTracker {
     } finally {
       closeSync(fd)
     }
-    const firstRead = this.rest === '' && this.offset > 0 && this.uses.size === 0 && this.tasks.size === 0
+    // Only the very first read can start mid-file (the last 16MB of a long file); a flag, not a guess.
+    const firstRead = !this.started && this.offset > 0
+    this.started = true
     this.offset = size
     const lines = (this.rest + chunk).split('\n')
     this.rest = lines.pop() ?? ''
@@ -94,30 +104,38 @@ export class BackgroundTracker {
     if (entry.type === 'assistant' && Array.isArray(content)) {
       for (const b of content as Block[]) {
         if (b.type !== 'tool_use' || !b.id) continue
-        this.uses.set(b.id, { name: String(b.name ?? ''), input: b.input ?? {} })
-        if (b.name === 'TaskStop') {
-          const id = String(b.input?.task_id ?? b.input?.shell_id ?? '')
-          for (const [k, t] of this.tasks) if (t.id === id) this.tasks.delete(k)
-        }
+        const input = b.input ?? {}
+        this.uses.set(b.id, {
+          name: String(b.name ?? ''),
+          label: String(input.description ?? input.command ?? input.prompt ?? b.name ?? '').replace(/\s+/g, ' ').slice(0, 120),
+          ...(typeof input.timeout_ms === 'number' ? { timeoutMs: input.timeout_ms } : {}),
+          ...(b.name === 'TaskStop' ? { taskId: String(input.task_id ?? input.shell_id ?? '') } : {}),
+        })
       }
       return
     }
     if (entry.type !== 'user') return
     this.notifications(textOf(content))
     if (!Array.isArray(content)) return
-    for (const b of content as Block[]) {
+    for (const b of content as Block[] & Array<{ is_error?: boolean }>) {
       if (b.type === 'text') continue
       if (b.type !== 'tool_result' || !b.tool_use_id) continue
-      const first = textOf(b.content).split('\n')[0]!.slice(0, 400)
+      const use = this.uses.get(b.tool_use_id)
+      // The result is in: the tag is no longer needed.
+      this.uses.delete(b.tool_use_id)
+      const text = textOf(b.content)
+      // A TaskStop ends its task only when it worked.
+      if (use?.name === 'TaskStop') {
+        if (!(b as { is_error?: boolean }).is_error && !/no task|not found|failed/i.test(text)) for (const [k, t] of this.tasks) if (t.id === use.taskId) this.tasks.delete(k)
+        continue
+      }
+      const first = text.split('\n')[0]!.slice(0, 400)
       const start = STARTS.find((s) => s.re.test(first))
       if (!start) continue
-      const use = this.uses.get(b.tool_use_id)
-      const input = use?.input ?? {}
-      const id = start.re.exec(first)?.[1] ?? /agentId: (\w+)/.exec(textOf(b.content))?.[1]
-      const minutes = /expires in (\d+)m/.exec(first)?.[1]
-      const timeout = typeof input.timeout_ms === 'number' ? input.timeout_ms : minutes ? Number(minutes) * 60_000 : undefined
-      const label = String(input.description ?? input.command ?? input.prompt ?? use?.name ?? start.kind).replace(/\s+/g, ' ').slice(0, 120)
-      this.tasks.set(b.tool_use_id, { toolUseId: b.tool_use_id, ...(id ? { id } : {}), kind: start.kind, label, startedAt: at, ...(start.kind === 'monitor' && timeout && at ? { expiresAt: at + timeout } : {}) })
+      const id = start.re.exec(first)?.[1] ?? /agentId: (\w+)/.exec(text)?.[1]
+      const timeout = use?.timeoutMs ?? MONITOR_DEFAULT_MS
+      const label = use?.label || start.kind
+      this.tasks.set(b.tool_use_id, { toolUseId: b.tool_use_id, ...(id ? { id } : {}), kind: start.kind, label, startedAt: at, ...(start.kind === 'monitor' && at ? { expiresAt: at + timeout } : {}) })
     }
   }
 
@@ -127,8 +145,12 @@ export class BackgroundTracker {
     for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
       const body = m[1]!
       const use = /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(body)?.[1]
+      const taskId = /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1]
       const status = /<status>([^<]+)<\/status>/.exec(body)?.[1]?.trim()
-      if (use && status && status !== 'running') this.tasks.delete(use)
+      if (!status || status === 'running') continue
+      // By the tool-use id first; a notice without one names the task.
+      if (use && this.tasks.has(use)) this.tasks.delete(use)
+      else if (taskId) for (const [k, t] of this.tasks) if (t.id === taskId) this.tasks.delete(k)
     }
   }
 
@@ -148,16 +170,23 @@ export class BackgroundTracker {
   }
 }
 
-/** When a process started (ps -o lstart), and how many `/bin/bash -c` children it has open. */
-export function processFacts(pid: number): Promise<{ startedAt?: number; shells?: number }> {
-  const run = (args: string[]) =>
-    new Promise<string>((resolve) => execFile('ps', args, { timeout: 5000 }, (err, out) => resolve(err ? '' : out)))
+/** Shells (bash, zsh, sh started with -c) that are children of `pid`, from `ps -A -o ppid=,command=`. Claude Code runs commands in $SHELL, zsh on a Mac. */
+export function countShells(ps: string, pid: number): number {
+  return ps
+    .split('\n')
+    .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
+    .filter((m) => m && Number(m[1]) === pid && /^(\S*\/)?(ba|z)?sh -c /.test(m[2]!)).length
+}
+
+/**
+ * When a process started (ps -o lstart), and how many shells it has open. ps runs with LC_ALL=C: lstart follows
+ * the locale, and a Korean date cannot be parsed.
+ */
+export function processFacts(pid: number, ps = 'ps'): Promise<{ startedAt?: number; shells?: number }> {
+  const env = { ...process.env, LC_ALL: 'C', LANG: 'C' }
+  const run = (args: string[]) => new Promise<string>((resolve) => execFile(ps, args, { timeout: 5000, env }, (err, out) => resolve(err ? '' : out)))
   return Promise.all([run(['-o', 'lstart=', '-p', String(pid)]), run(['-A', '-o', 'ppid=,command='])]).then(([lstart, all]) => {
     const startedAt = Date.parse(lstart.trim()) || undefined
-    const shells = all
-      .split('\n')
-      .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
-      .filter((m) => m && Number(m[1]) === pid && m[2]!.startsWith('/bin/bash -c')).length
-    return { ...(startedAt ? { startedAt } : {}), ...(all ? { shells } : {}) }
+    return { ...(startedAt ? { startedAt } : {}), ...(all ? { shells: countShells(all, pid) } : {}) }
   })
 }

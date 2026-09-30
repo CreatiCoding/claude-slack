@@ -3930,6 +3930,11 @@ export class Broker {
     session.conn?.close()
     session.conn = undefined
     this.offsets.forget(session.key)
+    // What was kept per process (background work, skill lines) goes with it.
+    const mine = `${session.key}:${session.pid}:`
+    for (const k of this.bgTrackers.keys()) if (k.startsWith(mine)) this.bgTrackers.delete(k)
+    for (const k of this.skillReaders.keys()) if (k.startsWith(mine)) this.skillReaders.delete(k)
+    this.pluginCache.delete(`${session.key}:${session.pid}`)
     // Ended on purpose, so it must not come back at the next start.
     this.revive.forget(session.key)
     this.registry.remember(session)
