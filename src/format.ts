@@ -585,3 +585,18 @@ export function todoPlanBlock(todos: Todo[]): unknown | null {
 export function alertBlock(text: string, level: 'info' | 'warning' | 'error' | 'success' = 'info'): unknown {
   return { type: 'alert', level, text: { type: 'plain_text', text: truncate(text, 900), emoji: true } }
 }
+
+/**
+ * A person's message as Claude Code recorded it vs. what was sent: a multi-line paste comes back wrapped in
+ * <pasted_content …>…</pasted_content>, and spacing may differ. Compared raw, the same message looked new and
+ * was shown again as typed in the terminal.
+ */
+export function normalizeMessage(text: string): string {
+  return text
+    .replace(/<\/?pasted_content\b[^>]*>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+export function sameMessage(a: string, b: string): boolean {
+  return normalizeMessage(a) === normalizeMessage(b)
+}

@@ -278,3 +278,70 @@ test('새 세션: 없는 폴더는 알려 주고, 만들라고 하면 홈 아래
   assert.equal(t.broker.webFolders('/etc').ok, false, '홈 밖은 보이지 않는다')
   t.close()
 })
+
+test('붙여넣은 여러 줄은 <pasted_content> 로 감싸여 돌아와도 같은 메시지로 본다(터미널 입력으로 한 번 더 뜨지 않게)', async () => {
+  const { sameMessage } = await import('../src/format.ts')
+  assert.ok(sameMessage('첫 줄\n둘째 줄\n\n셋째', '<pasted_content id="1">\n첫 줄\n둘째 줄\n셋째\n</pasted_content>'))
+  assert.ok(!sameMessage('첫 줄', '다른 줄'))
+  const t = await setup()
+  const s = await shim(t.socketPath, {})
+  await t.broker.webSend(100, '첫 줄\n둘째 줄')
+  await tick()
+  await hook(t.socketPath, 100, { hook_event_name: 'UserPromptSubmit', prompt: '<pasted_content>\n첫 줄\n둘째 줄 \n</pasted_content>' }, t.transcript)
+  const terminal = t.broker.events.since(s.ack, 0).filter((e) => e.type === 'user' && e.via === 'terminal')
+  assert.equal(terminal.length, 0, JSON.stringify(terminal))
+  s.conn.close()
+  t.close()
+})
+
+test('터미널 확인 창 카드: 질문 위의 도구·명령·설명을 코드 칸으로 보인다(창의 윗 테두리까지)', async () => {
+  const { parseDialog } = await import('../src/dialog.ts')
+  const screen = [
+    '⏺ 빌드 폴더를 지울게요.',
+    '',
+    '────────────────────────────────',
+    ' Bash command',
+    '',
+    '   rm -rf build',
+    '   Remove the build directory',
+    '',
+    ' Do you want to proceed?',
+    ' ❯ 1. Yes',
+    '   2. No',
+  ].join('\n')
+  const d = parseDialog(screen)!
+  assert.equal(d.question, 'Do you want to proceed?')
+  assert.equal(d.context, 'Bash command\n\n  rm -rf build\n  Remove the build directory')
+  assert.ok(!d.context!.includes('빌드 폴더'), '대화 줄 위로는 읽지 않는다')
+
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%61' })
+  t.tmux.screen = screen
+  await hook(t.socketPath, 100, { hook_event_name: 'Notification', notification_type: 'agent_needs_input', message: '확인' })
+  await until(() => t.slack.posts.some((p) => /선택을 기다립니다/.test(p.text)), '카드')
+  const card = JSON.stringify(t.slack.posts.find((p) => /선택을 기다립니다/.test(p.text))!.blocks)
+  assert.ok(card.includes('rm -rf build') && card.includes('```'), card)
+  s.conn.close()
+  t.close()
+})
+
+test('같은 확인 창이 되풀이되면(MCP 인증 메뉴처럼) 카드를 계속 올리지 않고 원인과 새로고침을 한 번 알린다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%71' })
+  const menu = ' notion MCP Server\n\n Status: ✘ failed\n\n ❯ 1. Authenticate\n   2. Reconnect\n   3. Disable\n'
+  const cards = () => t.slack.posts.filter((p) => /선택을 기다립니다/.test(p.text)).length
+  for (let i = 0; i < 4; i++) {
+    t.tmux.screen = menu
+    await hook(t.socketPath, 100, { hook_event_name: 'Notification', notification_type: 'agent_needs_input', message: 'mcp' })
+    // The dialog closes and comes back (a new turn resets what was shown).
+    await t.broker.handleSlackMessage({ user: 'U1', text: `다시 ${i}`, ts: `8.${i}`, threadTs: s.ack, channel: 'C1' })
+    await tick()
+  }
+  assert.equal(cards(), 2, '두 번까지는 카드')
+  const notes = t.slack.posts.filter((p) => /되풀이/.test(p.text))
+  assert.equal(notes.length, 1, '그 뒤로는 한 번만 알린다')
+  assert.match(notes[0]!.text, /MCP/)
+  assert.ok(JSON.stringify(notes[0]!.blocks).includes('100:refresh'), '새로고침 버튼')
+  s.conn.close()
+  t.close()
+})

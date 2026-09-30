@@ -19,6 +19,7 @@ import { DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHol
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
+import { normalizeMessage, sameMessage } from './format.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
@@ -1426,7 +1427,7 @@ export class Broker {
         const text = String(event.user_message ?? event.prompt ?? '')
         if (!text) break
         this.confirmInjected(session, text)
-        if (text === session.lastInjected) break
+        if (session.lastInjected !== undefined && sameMessage(text, session.lastInjected)) break
         // Claude Code injects some prompts itself (a Slack message, a finished
         // subagent, a system reminder). Those are not the user typing, so never
         // mirror them raw — at most say in one line what happened.
@@ -1940,18 +1941,45 @@ export class Broker {
     if (session.autoAllow && isProceedDialog(dialog)) {
       const pressed = await this.dialogs.answerProceed(session.pane, 'allow')
       if (pressed === 'answered') {
-        const what = [dialog.description, dialog.question].filter(Boolean).join('\n')
+        const what = [dialog.context, dialog.description, dialog.question].filter(Boolean).join('\n')
         this.logAt('INFO', 'perm', 'auto-allowed a terminal dialog', this.tag(session, { question: truncate(dialog.question, 80) }))
         await this.slack.post({ threadTs: session.threadTs, text: `⚡ 자동 허용 · 터미널 확인 창\n\`\`\`${truncate(what, 2500).replace(/```/g, "'''")}\`\`\`` })
         return true
       }
     }
     session.stallShown = sig
+    // The same dialog coming back again and again (an MCP server's Authenticate/Reconnect menu, say) is not
+    // a question to answer again: after two cards, say once why it repeats and what fixes it.
+    const seen = (session.dialogSeen ??= new Map()).get(sig) ?? { n: 0, at: Date.now() }
+    if (Date.now() - seen.at > 15 * 60_000) Object.assign(seen, { n: 0, at: Date.now() })
+    seen.n++
+    session.dialogSeen.set(sig, seen)
+    if (seen.n > 2) {
+      if (seen.n === 3) {
+        const mcp = dialog.options.some((o) => /^(Authenticate|Reconnect|Re-?authenticate)/i.test(o.label))
+        const why = mcp
+          ? 'MCP 서버 인증 메뉴가 되풀이됩니다. 설정 파일의 서버 주소와 실행 중인 세션이 쓰는 주소가 다르거나, 설정을 바꾼 뒤 세션을 다시 띄우지 않은 경우입니다. 설정은 세션을 다시 띄워야 반영됩니다.'
+          : '같은 확인 창이 되풀이됩니다. 답해도 다시 뜨는 창이라 카드를 더 올리지 않습니다. 설정을 바꿨다면 세션을 다시 띄워야 반영됩니다.'
+        this.logAt('WARN', 'dialog', 'dialog keeps coming back', this.tag(session, { question: truncate(dialog.question, 80), mcp }))
+        await this.slack.post({
+          threadTs: session.threadTs,
+          text: `⚠️ ${why}`,
+          blocks: [
+            { type: 'section', text: { type: 'mrkdwn', text: `⚠️ ${why}` } },
+            { type: 'actions', elements: [{ type: 'button', text: { type: 'plain_text', text: '🔄 새로고침 (다시 열기)' }, action_id: `ctl_btn_refresh_${session.pid}`, value: encodeValue(session.pid, 'refresh'), style: 'primary' }, { type: 'button', text: { type: 'plain_text', text: '🖥 화면' }, action_id: `ctl_btn_screen_${session.pid}`, value: encodeValue(session.pid, 'screen') }] },
+          ],
+        })
+      }
+      this.markWaiting(session, 'dialog')
+      return true
+    }
     this.logAt('INFO', 'dialog', 'numbered dialog surfaced', this.tag(session, { question: truncate(dialog.question, 80), options: dialog.options.length }))
+    // What is being confirmed goes above the question as a code box: the question alone is often just "Do you want to proceed?".
+    const about = [dialog.context ? '```' + truncate(dialog.context, 2500).replace(/```/g, "'''") + '```' : '', dialog.description ?? ''].filter(Boolean).join('\n')
     const { text, blocks } = questionBlocks(
       session.pid,
       [{ header: '터미널', question: dialog.question, options: dialog.options.map((o) => ({ label: o.label, description: o.description })) }],
-      dialog.description,
+      about || undefined,
       this.mentionFor(session, 'decision'),
     )
     await this.slack.post({ threadTs: session.threadTs, text, blocks })
@@ -2819,8 +2847,8 @@ export class Broker {
   private confirmInjected(session: Session, seen: string): void {
     const check = session.injectCheck
     if (!check) return
-    const head = check.text.slice(0, 200)
-    if (!seen.includes(head)) return
+    const head = normalizeMessage(check.text).slice(0, 200)
+    if (!normalizeMessage(seen).includes(head)) return
     if (check.timer) clearTimeout(check.timer)
     session.injectCheck = undefined
     this.logAt('DEBUG', 'inject', 'confirmed', this.tag(session, { ts: check.ts }))

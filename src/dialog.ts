@@ -22,6 +22,12 @@ export interface TerminalDialog {
   question: string
   /** Lines between the question and the options, if any. */
   description?: string
+  /**
+   * What is being asked about: the paragraphs above the question inside the dialog (the tool, the command,
+   * its description), read back up to the dialog's top border or the conversation. "Do you want to proceed?"
+   * alone does not say what would proceed.
+   */
+  context?: string
   /** Numbered options in screen order. */
   options: DialogOption[]
   /** Index into `options` of the line the ❯ cursor is on. */
@@ -101,20 +107,32 @@ export function parseDialog(screen: string): TerminalDialog | null {
     description: describeOption(lines, o.i, run[k + 1]?.i ?? o.i + MAX_OPTION_GAP),
   }))
 
+  // Up to 24 lines above the options, to the dialog's top border (a rule) or a conversation line (⏺ ❯),
+  // split into paragraphs at blank lines. The paragraph next to the options starts with the question.
   const lo = run[0]!.i
-  const above: string[] = []
-  for (let i = lo - 1; i >= 0 && above.length < 6; i--) {
-    const l = lines[i]!.replace(/^[\s│|]+/, '').trim()
-    if (!l || SEPARATOR_RE.test(l)) {
-      if (above.length) break
+  const paras: string[][] = [[]]
+  for (let i = lo - 1, seen = 0; i >= 0 && seen < 24; i--, seen++) {
+    const raw = lines[i]!
+    // Only a side border is taken off the left; the indentation under it is kept.
+    const l = raw.replace(/^\s*[│|]\s?/, '').replace(/[\s│|]+$/, '')
+    if (/^\s*[⏺❯●]/.test(raw) || (SEPARATOR_RE.test(l.trim()) && l.trim()) || /^[╭╰┌└]/.test(l.trim())) break
+    if (!l.trim()) {
+      if (paras[0]!.length) paras.unshift([])
       continue
     }
-    if (DIALOG_CHROME_RE.test(l)) continue
-    above.unshift(l)
+    if (DIALOG_CHROME_RE.test(l.trim())) continue
+    paras[0]!.unshift(l)
   }
+  const kept = paras.filter((p) => p.length)
+  const own = kept.at(-1) ?? []
+  // Keep relative indentation (a command under its heading), drop the margin all of them share.
+  const ctx = kept.slice(0, -1)
+  const pad = Math.min(...ctx.flat().map((x) => /^\s*/.exec(x)![0].length))
+  const context = ctx.map((p) => p.map((x) => x.slice(pad)).join('\n')).join('\n\n')
   return {
-    question: above[0] ?? '터미널이 선택을 기다립니다',
-    description: above.slice(1).join('\n') || undefined,
+    question: own[0]?.trim() ?? '터미널이 선택을 기다립니다',
+    description: own.slice(1).map((x) => x.trim()).join('\n') || undefined,
+    ...(context ? { context } : {}),
     options,
     selected: at - numbered.indexOf(run[0]!),
   }

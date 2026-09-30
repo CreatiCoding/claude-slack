@@ -292,7 +292,8 @@ export function stuckBlocks(pid: number, o: { text: string; actions: Array<'cont
 export function questionBlocks(pid: number, questions: Question[], intro?: string, mention?: string): { text: string; blocks: unknown[] } {
   const who = mention ? `<@${mention}> ` : ''
   const blocks: unknown[] = [{ type: 'section', text: { type: 'mrkdwn', text: `${who}❓ *Claude가 선택을 기다립니다*` } }]
-  if (intro) blocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: truncate(intro, 500) }] })
+  // A code box (what a terminal dialog is about) is kept whole in a section; a short note stays small.
+  if (intro) blocks.push(intro.includes('```') ? { type: 'section', text: { type: 'mrkdwn', text: intro.slice(0, 2900) } } : { type: 'context', elements: [{ type: 'mrkdwn', text: truncate(intro, 500) }] })
   questions.forEach((q, qi) => {
     blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*${q.header ? `[${q.header}] ` : ''}${truncate(q.question, 500)}*${q.multiSelect ? ' _(복수 선택: 번호를 차례로 누른 뒤 확정)_' : ''}` } })
     // Slack allows 25 elements in an actions block. Cutting the list silently

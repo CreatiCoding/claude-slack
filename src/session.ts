@@ -17,6 +17,8 @@ export interface Session {
   threadTs: string
   /** A name a person gave (`:rename`, the web app). Slack still follows Claude Code's ai-title; the web app shows this first. */
   manualTitle?: string
+  /** How often each dialog was surfaced lately, so one that keeps coming back is explained once instead of carded forever. */
+  dialogSeen?: Map<string, { n: number; at: number }>
   /** Bot-owned root message (terminal-started sessions). Editable. */
   rootTs?: string
   origin: 'terminal' | 'slack'
