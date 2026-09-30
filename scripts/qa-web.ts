@@ -42,7 +42,11 @@ changed()
 
 const api: AdminApi = {
   async adminState(): Promise<AdminState> {
-    return { channelId: 'C1', pins: [], live: [], recent: [], archives: [] } as AdminState
+    return {
+      channelId: 'C1', pins: [], live: [],
+      recent: [{ id: 'r1', cwd: '/Users/me/p/old', title: '지난 작업', mtime: now - 3600_000, when: '1시간 전', preview: '이어서 할 일' }],
+      archives: [{ path: '/tmp/a1.json', title: '보관된 것', cwd: '/p/alpha', sessionId: 'sa1', archivedAt: new Date(now - 86400_000).toISOString(), preview: '보관 첫 메시지', messages: 9 }],
+    } as unknown as AdminState
   },
   async adminKill() { return { ok: true, note: '' } },
   async adminPurge() { return { ok: true, note: '' } },
@@ -53,6 +57,7 @@ const api: AdminApi = {
     return { ok: true, note: '이름을 바꿨습니다.' }
   },
   webSessions: () => sessions,
+  webOptions: () => ({ models: [{ label: 'Opus', value: 'opus' }, { label: 'Sonnet', value: 'sonnet' }], efforts: ['low', 'high'], modes: [{ label: 'manual', value: 'default' }, { label: 'auto', value: 'auto' }] }),
   async webSend(pid, text) {
     calls.push(`send:${pid}:${text}`)
     const s = sessions.find((x) => x.pid === pid)!
@@ -110,8 +115,8 @@ for (const [label, size, phone] of [
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
   await page.goto(base + '/')
   await page.waitForSelector('.row')
-  check(`${label}: 목록에 세션 두 개`, (await page.locator('.row').count()) === 2)
-  check(`${label}: 응답 대기 배지`, (await page.locator('.row .badge').first().textContent()) === '권한 대기')
+  check(`${label}: 목록에 세션 두 개`, (await page.locator('.row[data-thread]').count()) === 2)
+  check(`${label}: 응답 대기 배지`, ((await page.locator('.row[data-thread] .badge').first().textContent()) ?? '').includes('권한 대기'))
   check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row .name').first().textContent()) ?? '') === '베타')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
 
@@ -126,6 +131,7 @@ for (const [label, size, phone] of [
   const textLink = await page.locator('.item.text a').first().getAttribute('href')
   check(`${label}: 답변 속 주소 끝 . 빠짐`, textLink === 'https://example.com/x', String(textLink))
   check(`${label}: 도구 줄 완료 배지`, (await page.locator('.tool .st').first().textContent()) === '완료')
+  check(`${label}: 도구 줄 앞 이모지 대신 SVG`, !((await page.locator('.tool .label').first().textContent()) ?? '').includes('💻') && (await page.locator('.tool .label svg').count()) >= 1)
   check(`${label}: 도구 출력은 펼치기 전엔 없음`, (await page.locator('.tool .detail').count()) === 0)
   // A link in the row opens the link only.
   const [popup] = await Promise.all([page.waitForEvent('popup').catch(() => null), page.locator('.tool .head a').click()])
@@ -156,17 +162,23 @@ for (const [label, size, phone] of [
   if (phone) await page.goBack()
   await page.locator('.row', { hasText: '베타' }).click()
   await page.waitForSelector('.card.decision')
-  check(`${label}: 권한 카드 버튼`, (await page.locator('.card.decision button').count()) === 2)
+  check(`${label}: 권한 카드 버튼`, (await page.locator('.card.decision button.btn').count()) === 2)
+  check(`${label}: 카드 제목 이모지 대신 아이콘`, !((await page.locator('.card.decision .ttl').textContent()) ?? '').includes('🔐') && (await page.locator('.card.decision .ttl svg').count()) === 1)
+  check(`${label}: 응답 기다리는 카드 안내`, ((await page.locator('#waiting-note').textContent()) ?? '').includes('1개'))
   check(`${label}: 카드 코드 속 링크`, (await page.locator('.card.decision pre a').getAttribute('href')) === 'https://example.com/docs')
   if (!phone) {
-    check(`${label}: 허용 버튼에 ⌘↵ 표시`, ((await page.locator('.card.decision button').first().textContent()) ?? '').includes('↵'))
+    check(`${label}: 허용 버튼에 ⌘↵ 표시`, ((await page.locator('.card.decision button.btn').first().textContent()) ?? '').includes('↵'))
     await page.locator('#input').focus()
     await page.keyboard.press('Meta+Enter')
   } else await page.locator('.card.decision button', { hasText: '허용' }).click()
   await page.waitForFunction(() => !document.querySelector('.card.decision'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 허용은 Slack 과 같은 action 으로`, calls.some((c) => c === 'action:perm_allow_abcde:12:abcde:2000.5'), calls.join(' | '))
-  check(`${label}: 답한 카드는 결과로 접힘`, (await page.locator('.card.decision').count()) === 0)
+  check(`${label}: 답한 카드는 결과로 접힘`, (await page.locator('.card.decision').count()) === 0 && (await page.locator('.folded').count()) >= 1)
   check(`${label}: ⌘↵ 로 메시지가 보내지지 않음`, !calls.some((c) => c.startsWith('send:12')))
+  // B is busy now: the activity box shows at the bottom.
+  await page.waitForSelector('#activity:not([hidden])', { timeout: 3000 }).catch(() => {})
+  check(`${label}: 작업 중이면 활동 상자`, await page.locator('#activity:not([hidden])').count() === 1)
+  await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}-busy.png`) })
   if (phone) await page.goBack()
   await page.locator('.row', { hasText: '알파' }).click()
   await settle(page)
@@ -175,13 +187,22 @@ for (const [label, size, phone] of [
 
   // 전부 허용 toggle: asks first, then runs the same `:auto on` command a thread would.
   page.once('dialog', (d) => d.accept())
-  await page.locator('#btn-auto').click()
-  await page.waitForFunction(() => document.getElementById('btn-auto')?.getAttribute('aria-pressed') === 'true', null, { timeout: 3000 }).catch(() => {})
+  await page.locator('#btn-more').click()
+  check(`${label}: 메뉴에 '이 세션' 항목`, (await page.locator('.menu .mhead', { hasText: '이 세션' }).count()) === 1)
+  await page.locator('.menu .mi', { hasText: '전부 허용 켜기' }).click()
+  await page.waitForSelector('#badge .badge.auto', { timeout: 3000 }).catch(() => {})
   check(`${label}: 전부 허용 켜기는 :auto on 명령`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto on')), calls.join(' | '))
-  check(`${label}: 켜진 표시(토글·목록 ⚡)`, (await page.locator('#btn-auto').getAttribute('aria-pressed')) === 'true' && (await page.locator('.row .auto').count()) === 1)
-  await page.locator('#btn-auto').click()
-  await page.waitForFunction(() => document.getElementById('btn-auto')?.getAttribute('aria-pressed') === 'false', null, { timeout: 3000 }).catch(() => {})
+  check(`${label}: 켜진 표시(상태 줄 배지)`, (await page.locator('#badge .badge.auto').count()) === 1)
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '전부 허용 끄기' }).click()
+  await page.waitForFunction(() => !document.querySelector('#badge .badge.auto'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 끄기는 묻지 않고 :auto off`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto off')))
+  // Settings submenu reaches the model command.
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '설정 (모델·권한)' }).click()
+  await page.locator('.menu .mi', { hasText: /^모델/ }).click()
+  await page.locator('.menu .mi', { hasText: 'Sonnet' }).click()
+  check(`${label}: 설정 › 모델 › Sonnet 은 model 명령`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:model sonnet')), calls.join(' | '))
 
   // Live: an event arriving while the page is open.
   const live = `실시간으로 온 답 ${label}`
@@ -194,6 +215,20 @@ for (const [label, size, phone] of [
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
   check(`${label}: 가로 스크롤 없음`, overflow <= 0, String(overflow))
   await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}.png`) })
+  if (!phone) {
+    // Sidebar collapses to a rail and back (⌘\), and the choice is kept.
+    await page.keyboard.press('Meta+Backslash')
+    check(`${label}: ⌘\\ 사이드바 접기`, await page.locator('#app.collapsed').count() === 1)
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+    await page.screenshot({ path: join(tmpdir(), 'qa-web-pc-dark-collapsed.png') })
+    await page.keyboard.press('Meta+Backslash')
+    await page.evaluate(() => { delete document.documentElement.dataset.theme })
+  } else {
+    await page.goBack()
+    await page.waitForTimeout(300)
+    await page.screenshot({ path: join(tmpdir(), 'qa-web-phone-list.png') })
+    check(`${label}: 폰 목록 줄에 마지막 메시지·폴더`, ((await page.locator('.row[data-thread] .sub.where').first().textContent()) ?? '').includes('/p/'))
+  }
   check(`${label}: 페이지 오류 없음`, errors.length === 0, errors.join(' | '))
   calls.length = 0
   // Reset B's card for the next viewport.

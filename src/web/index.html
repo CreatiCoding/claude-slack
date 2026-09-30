@@ -3,38 +3,53 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#F3F1EA">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f3f1ea" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1f1e1d" media="(prefers-color-scheme: dark)">
 <title>Claude</title>
+<script>
+  // Before the first paint, so a dark device never flashes the light theme.
+  try { var t = JSON.parse(localStorage.getItem('theme') || '"auto"'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t } catch (e) {}
+</script>
 <link rel="stylesheet" href="/web/app.css">
 </head>
 <body>
 <div id="app" class="app">
+  <header class="topbar">
+    <div class="left">
+      <button id="btn-back" class="icon-btn" type="button" aria-label="뒤로"></button>
+      <button id="btn-collapse" class="icon-btn" type="button" aria-label="사이드바 접기 (⌘\)" title="사이드바 접기 (⌘\)"></button>
+    </div>
+    <button id="title" class="title" type="button">Claude</button>
+    <div class="right"><button id="btn-more" class="icon-btn" type="button" aria-label="메뉴"></button></div>
+  </header>
   <aside id="sidebar" class="sidebar" aria-label="세션 목록">
     <div class="side-top">
-      <button id="btn-new" class="btn-new" type="button">＋ 새 세션</button>
-      <input id="search" class="search" type="search" placeholder="검색 (이름·첫 메시지·폴더)" autocomplete="off">
+      <button id="btn-new" class="side-new" type="button" title="새 세션"></button>
+      <input id="search" class="search" type="search" placeholder="검색" aria-label="이름·첫 메시지·폴더 검색" autocomplete="off">
+      <div id="conn" class="conn" role="status"></div>
     </div>
     <nav id="list" class="list"></nav>
-    <div class="side-foot"><div id="conn" class="conn" role="status"></div><a id="old-admin" class="old-admin" href="/admin">이전 관리 화면 ↗</a></div>
+    <div class="side-bottom"><button id="btn-new-big" class="btn primary" type="button">새 세션</button></div>
     <div id="resizer" class="resizer" title="끌어서 폭 조절 · 더블클릭하면 기본 폭"></div>
   </aside>
   <main id="main" class="main">
-    <header class="topbar">
-      <button id="btn-back" class="icon-btn back" type="button" aria-label="목록으로">‹</button>
-      <button id="title" class="title" type="button" title="이름 바꾸기"></button>
-      <span id="meta" class="meta"></span>
-      <button id="btn-auto" class="auto-toggle" type="button" hidden aria-pressed="false" title="켜면 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 대화에 남깁니다">⚡ 전부 허용</button>
-    </header>
+    <div id="subbar" class="subbar" hidden><span id="badge"></span><span id="meta" class="meta"></span></div>
     <section id="empty" class="empty">왼쪽에서 세션을 고르세요.</section>
     <section id="convo" class="convo" hidden>
-      <div id="scroller" class="scroller"><div id="log" class="log"></div></div>
-      <div id="jump" class="jump" hidden><button type="button">↓ 새 메시지</button></div>
+      <div id="scroller" class="scroller">
+        <div id="log" class="log"></div>
+        <div class="activity-wrap"><div id="activity" class="activity" hidden></div></div>
+      </div>
+      <div id="jump" class="jump" hidden><button type="button"></button></div>
       <footer class="composer">
         <div id="todos" class="todos" hidden></div>
-        <div id="held" class="held" hidden></div>
-        <div class="input-row">
+        <div id="waiting-note" class="waiting-note" hidden></div>
+        <div id="chips" class="chips"></div>
+        <div class="input-box">
+          <button id="btn-attach" class="icon-btn" type="button" aria-label="그림 첨부" hidden></button>
           <textarea id="input" rows="1" placeholder="메시지 보내기" enterkeyhint="send"></textarea>
-          <button id="btn-send" class="btn-send" type="button" aria-label="보내기">↑</button>
+          <button id="btn-send" class="send" type="button" aria-label="보내기" disabled></button>
         </div>
       </footer>
     </section>

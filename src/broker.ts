@@ -20,7 +20,7 @@ import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction,
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, type TranscriptEvent } from './transcript.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
-import { answeredBlocks, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
+import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
 import { ThreadLinks } from './thread-links.ts'
@@ -65,6 +65,8 @@ export interface WebSession {
   lastSeq: number
   lastAt: number
   preview?: string
+  /** The newest message in the thread (this broker run), and whether the person said it. */
+  last?: { text: string; mine: boolean }
 }
 
 export interface AdminState {
@@ -339,6 +341,8 @@ export class Broker {
   readonly events: EventLog
   /** Which thread a message the broker posted lives in, so its edits, deletions and reactions reach the right log. */
   private msgThread = new Map<string, string>()
+  /** The newest thing said in each thread, for the web list's second line. */
+  private lastTexts = new Map<string, { text: string; mine: boolean }>()
   private changeListeners = new Set<() => void>()
   private changeTimer?: ReturnType<typeof setTimeout>
   private tmux: TmuxLike
@@ -484,6 +488,7 @@ export class Broker {
   }
 
   private emitEvent(thread: string, body: EventBody): SessionEvent | undefined {
+    if (body.type === 'user' || body.type === 'text') this.lastTexts.set(thread, { text: body.text.replace(/\s+/g, ' ').trim().slice(0, 200), mine: body.type === 'user' })
     const ev = this.events.emit(thread, body)
     this.changed()
     return ev
@@ -532,7 +537,13 @@ export class Broker {
         lastSeq: this.events.last(s.threadTs),
         lastAt: this.lastEventAt(s.threadTs) ?? s.startedAt,
         preview: s.transcriptPath ? this.firstMessages.get(s.transcriptPath) : undefined,
+        ...(this.lastTexts.get(s.threadTs) ? { last: this.lastTexts.get(s.threadTs) } : {}),
       }))
+  }
+
+  /** The pickers' choices, the same lists the Slack settings modal offers. */
+  webOptions(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> } {
+    return { models: MODEL_OPTIONS, efforts: EFFORT_OPTIONS, modes: PERMISSION_MODES }
   }
 
   private lastEventAt(thread: string): number | undefined {

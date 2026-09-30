@@ -2,6 +2,13 @@
 // escaped first, then a small set of constructs is turned back into markup, so nothing in a message can
 // inject HTML.
 
+import { icon } from './icons.js'
+
+/** A code block with a copy button (shown on hover on a PC, always on a phone). */
+export function codeBox(inner, lang = '') {
+  return `<div class="codebox"><pre${lang ? ` data-lang="${esc(lang)}"` : ''}><code>${inner}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
+}
+
 export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
@@ -99,7 +106,7 @@ function blocks(text, opts) {
       // Slack writes ```code``` on one line too.
       const oneLine = /^\s*```(.+)```\s*$/.exec(line)
       if (oneLine) {
-        out.push(`<pre><code>${linkify(oneLine[1])}</code></pre>`)
+        out.push(codeBox(linkify(oneLine[1])))
         i++
         continue
       }
@@ -110,7 +117,7 @@ function blocks(text, opts) {
         if (rest.trim() && opts.slack) para.push(rest)
       }
       i++
-      out.push(`<pre${lang && !opts.slack ? ` data-lang="${esc(lang)}"` : ''}><code>${linkify(opts.slack && lang ? [lang, ...body].join('\n') : body.join('\n'))}</code></pre>`)
+      out.push(codeBox(linkify(opts.slack && lang ? [lang, ...body].join('\n') : body.join('\n')), opts.slack ? '' : lang))
       continue
     }
     if (!opts.slack && /^\s*\|.*\|\s*$/.test(line) && /^\s*\|?\s*:?-{2,}/.test(lines[i + 1] ?? '')) {

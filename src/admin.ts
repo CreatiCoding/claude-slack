@@ -40,6 +40,7 @@ export interface AdminApi {
   adminScreen?(pid: number): Promise<{ ok: boolean; screen: string }>
   // The web app (/app). Absent in older fakes: the routes then answer 404.
   webSessions?(): WebSession[]
+  webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
   webSend?(pid: number, text: string): Promise<{ ok: boolean; note: string }>
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
@@ -55,6 +56,7 @@ const WEB_FILES: Record<string, string> = {
   '/web/app.js': 'app.js',
   '/web/app.css': 'app.css',
   '/web/markdown.js': 'markdown.js',
+  '/web/icons.js': 'icons.js',
 }
 const WEB_TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' }
 
@@ -181,6 +183,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     })
     return
   }
+  if (req.method === 'GET' && url.pathname === '/api/options' && api.webOptions) return send(res, 200, api.webOptions())
   if (req.method === 'GET' && url.pathname === '/api/events' && api.events) {
     const thread = url.searchParams.get('thread') ?? ''
     const after = Math.max(0, Number(url.searchParams.get('after') ?? 0) || 0)
