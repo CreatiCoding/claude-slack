@@ -28,6 +28,7 @@ import { countUserMessages, deleteRecentSession, listRecentSessions, readFirstMe
 import { countArchives, deleteArchive, listArchives, renameArchive, type SessionArchive } from './archive.ts'
 import { PurgeService } from './purge.ts'
 import { EventLog, type EventBody, type SessionEvent } from './events.ts'
+import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export type { Session } from './session.ts'
@@ -131,6 +132,8 @@ export interface BrokerConfig {
   pinsPath?: string
   /** Where the web app's session events are kept (one file per thread). */
   eventsDir?: string
+  /** Where pictures shown in the web app are kept. */
+  webImagesDir?: string
   /** Draw terminal screens as pictures (default on); text when off or when rendering fails. */
   screenImages?: boolean
   /** Renders a screen with colours to its pictures (one, or the conversation and its side panel). Tests replace it so no browser starts; a single Buffer is one picture. */
@@ -339,6 +342,8 @@ export class Broker {
   private mirrorOff = new AsyncLocalStorage<boolean>()
   /** Session events for the web app, one numbered log per thread. */
   readonly events: EventLog
+  /** Pictures shown in the web app, kept under the broker's own folder. */
+  readonly images: ImageStore
   /** Which thread a message the broker posted lives in, so its edits, deletions and reactions reach the right log. */
   private msgThread = new Map<string, string>()
   /** The newest thing said in each thread, for the web list's second line. */
@@ -401,6 +406,7 @@ export class Broker {
       return ts
     }
     this.events = new EventLog(cfg.eventsDir)
+    this.images = new ImageStore(cfg.webImagesDir)
     this.quietSlack = this.installMirror(slack)
     this.tmux = tmux
     this.confirmDialogs = confirmDialogs
@@ -487,6 +493,13 @@ export class Broker {
     this.emitEvent(thread, body)
   }
 
+  /** A person's message for the web: `[Image attached: …]` lines become pictures, the rest stays text. */
+  private userEvent(thread: string, ts: string, raw: string, via: 'slack' | 'web' | 'terminal'): EventBody {
+    const { paths, text } = attachedImagePaths(raw)
+    const images = paths.map((p) => this.images.putFile(thread, p)).filter((x): x is WebImage => !!x)
+    return { type: 'user', ts, text: images.length ? text : raw, via, ...(images.length ? { images } : {}) }
+  }
+
   private emitEvent(thread: string, body: EventBody): SessionEvent | undefined {
     if (body.type === 'user' || body.type === 'text') this.lastTexts.set(thread, { text: body.text.replace(/\s+/g, ' ').trim().slice(0, 200), mine: body.type === 'user' })
     const ev = this.events.emit(thread, body)
@@ -552,14 +565,28 @@ export class Broker {
   }
 
   /** A message typed in the web app: shown in the thread as the web's, then handled exactly as a thread reply. */
-  async webSend(pid: number, raw: string): Promise<{ ok: boolean; note: string }> {
+  async webSend(pid: number, raw: string, pictures: Array<{ name?: string; type?: string; data: string }> = []): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
-    const text = raw.trim()
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
-    if (!text) return { ok: false, note: '보낼 내용이 없습니다.' }
-    const ts = await this.quietSlack.post({ threadTs: session.threadTs, text: `🌐 웹: ${text}` })
+    // Pictures from the page go where Slack attachments go, and reach Claude the same way: a path it can read.
+    const saved: string[] = []
+    for (const [i, p] of pictures.slice(0, 10).entries()) {
+      const buf = Buffer.from(String(p.data ?? '').replace(/^data:[^,]*,/, ''), 'base64')
+      const ext = /png/.test(p.type ?? '') ? 'png' : /webp/.test(p.type ?? '') ? 'webp' : /gif/.test(p.type ?? '') ? 'gif' : 'jpg'
+      if (!buf.length || !this.images.put(session.threadTs, buf, p.type)) continue
+      const dir = imagesDir()
+      mkdirSync(dir, { recursive: true })
+      const path = join(dir, `${Date.now()}-web-${i}.${ext}`)
+      await writeFile(path, buf)
+      saved.push(path)
+    }
+    const typed = raw.trim()
+    if (!typed && !saved.length) return { ok: false, note: '보낼 내용이 없습니다.' }
+    const text = [typed, ...saved.map((p) => `[Image attached: ${p}]`)].filter(Boolean).join('\n')
+    const ts = await this.quietSlack.post({ threadTs: session.threadTs, text: `🌐 웹: ${typed || '(그림)'}${saved.length ? ` · 그림 ${saved.length}장` : ''}` })
+    if (saved.length) await this.quietSlack.uploadFiles({ threadTs: session.threadTs, paths: saved }).catch(() => false)
     this.noteMsg(ts, session.threadTs)
-    this.emitEvent(session.threadTs, { type: 'user', ts, text, via: 'web' })
+    this.emitEvent(session.threadTs, this.userEvent(session.threadTs, ts, text, 'web'))
     this.logAt('INFO', 'web', 'message', this.tag(session, { ts, chars: text.length }))
     // Same routing as a thread reply. In the web app `/` needs no `:` in front: nothing intercepts it there.
     if (text.startsWith(':')) await this.runThreadCommand(session, text.slice(1).trim())
@@ -1105,7 +1132,8 @@ export class Broker {
       // `notify` is the model asking for a push, as Remote Control's "notify me when the tests finish".
       const who = msg.notify && (session.notify ?? 'decisions') !== 'off' ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const text = who ? who + msg.text : msg.text
-      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}) })
+      const images = (msg.files ?? []).map((f) => this.images.putFile(session.threadTs, f)).filter((x): x is WebImage => !!x)
+      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}) })
       if (!msg.files?.length) {
         for (const part of chunk(toMrkdwn(text))) await this.quietSlack.post({ threadTs: session.threadTs, text: part })
         return
@@ -1500,7 +1528,8 @@ export class Broker {
         const denial = ev.isError ? classifierDenial(ev.output) : null
         if (denial) await this.reportDenial(session, ev.toolUseId, denial.reason)
         if (session.silentTools?.delete(ev.toolUseId)) break
-        this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 20_000) })
+        const images = (ev.images ?? []).map((im) => this.images.put(session.threadTs, Buffer.from(im.data, 'base64'), im.mediaType)).filter((x): x is WebImage => !!x)
+        this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 20_000), ...(images.length ? { images } : {}) })
         turn.taskEnd(ev.toolUseId, ev.output, ev.isError)
         // The moment Claude Code itself would hand over a queued message.
         await this.releaseHeldIfIdle(session, 'tool result')
@@ -2083,7 +2112,7 @@ export class Broker {
       return
     }
     this.noteMsg(m.ts, threadTs)
-    this.emitEvent(threadTs, { type: 'user', ts: m.ts, text, via: 'slack' })
+    this.emitEvent(threadTs, this.userEvent(threadTs, m.ts, text, 'slack'))
     const perm = PERMISSION_REPLY_RE.exec(text)
     if (perm) {
       await this.resolvePermission(session, perm[2]!.toLowerCase(), perm[1]!.toLowerCase().startsWith('y') ? 'allow' : 'deny', m.user)

@@ -12,7 +12,7 @@ export type TranscriptEvent =
   | { kind: 'text'; text: string }
   | { kind: 'thinking' }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
-  | { kind: 'tool_result'; toolUseId: string; output: string; isError: boolean }
+  | { kind: 'tool_result'; toolUseId: string; output: string; isError: boolean; images?: Array<{ mediaType: string; data: string }> }
   | { kind: 'user'; text: string }
   | { kind: 'local'; text: string; isError: boolean }
   | { kind: 'title'; title: string }
@@ -51,11 +51,13 @@ export function parseTranscriptLine(line: string): TranscriptEvent[] {
       const out: TranscriptEvent[] = []
       for (const block of content as Array<Record<string, unknown>>) {
         if (block.type === 'tool_result') {
+          const images = resultImages(block.content)
           out.push({
             kind: 'tool_result',
             toolUseId: String(block.tool_use_id),
             output: flattenResult(block.content),
             isError: block.is_error === true,
+            ...(images.length ? { images } : {}),
           })
         } else if (block.type === 'text' && typeof block.text === 'string') {
           out.push({ kind: 'user', text: block.text })
@@ -71,6 +73,14 @@ export function parseTranscriptLine(line: string): TranscriptEvent[] {
 const LOCAL_OUTPUT_RE = /<(?:local-command|bash)-(stdout|stderr)>([\s\S]*?)<\/(?:local-command|bash)-\1>/g
 function localOutput(content: string): TranscriptEvent[] {
   return [...content.matchAll(LOCAL_OUTPUT_RE)].map((m): TranscriptEvent => ({ kind: 'local', text: m[2]!, isError: m[1] === 'stderr' }))
+}
+
+/** Pictures a tool returned (a Read of a png, a screenshot), as base64. */
+function resultImages(content: unknown): Array<{ mediaType: string; data: string }> {
+  if (!Array.isArray(content)) return []
+  return (content as Array<{ type?: string; source?: { type?: string; media_type?: string; data?: string } }>)
+    .filter((c) => c.type === 'image' && c.source?.type === 'base64' && typeof c.source.data === 'string')
+    .map((c) => ({ mediaType: String(c.source!.media_type ?? 'image/png'), data: c.source!.data! }))
 }
 
 function flattenResult(content: unknown): string {

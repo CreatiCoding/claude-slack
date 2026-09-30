@@ -11,6 +11,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import type { WebImage } from './images.ts'
 
 export const DEFAULT_EVENTS_DIR = process.env.CLAUDE_SLACK_EVENTS_DIR ?? join(homedir(), '.claude-slack', 'events')
 
@@ -22,11 +23,11 @@ const PAGE_BYTES = 1_000_000
 
 export type EventBody =
   /** Something a person said: typed in Slack, in the web app, or in the terminal. */
-  | { type: 'user'; ts: string; text: string; via: 'slack' | 'web' | 'terminal' }
+  | { type: 'user'; ts: string; text: string; via: 'slack' | 'web' | 'terminal'; images?: WebImage[] }
   /** Claude's answer text, as markdown. */
-  | { type: 'text'; text: string; files?: string[] }
+  | { type: 'text'; text: string; files?: string[]; images?: WebImage[] }
   | { type: 'tool'; id: string; name: string; title: string; detail?: string }
-  | { type: 'tool_end'; id: string; ok: boolean; output: string }
+  | { type: 'tool_end'; id: string; ok: boolean; output: string; images?: WebImage[] }
   | { type: 'todos'; todos: Array<{ content: string; status: string; activeForm?: string }> }
   /** A message the broker put in the thread (cards, notices, command output), with its Slack blocks so buttons work the same. */
   | { type: 'msg'; ts: string; text: string; blocks?: unknown[]; ephemeral?: boolean; files?: string[] }

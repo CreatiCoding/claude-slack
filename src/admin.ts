@@ -43,7 +43,8 @@ export interface AdminApi {
   // The web app (/app). Absent in older fakes: the routes then answer 404.
   webSessions?(): WebSession[]
   webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
-  webSend?(pid: number, text: string): Promise<{ ok: boolean; note: string }>
+  webSend?(pid: number, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
+  readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
@@ -237,6 +238,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     return
   }
   if (req.method === 'GET' && url.pathname === '/api/options' && api.webOptions) return send(res, 200, api.webOptions())
+  // A picture by reference: only from the broker's own picture folder, named by content hash, so it never changes.
+  const image = /^\/api\/image\/(\d+\.\d+)\/([0-9a-f]{20})$/.exec(url.pathname)
+  if (req.method === 'GET' && image && api.images) {
+    const file = await api.images.file(image[1]!, image[2]!)
+    if (!file) return send(res, 404, { error: '그림을 찾지 못했습니다.' })
+    const body = readFileSync(file.path)
+    meter.add('image', body.length, `thread=${image[1]}`)
+    res.writeHead(200, { 'content-type': file.type, 'content-length': body.length, 'cache-control': 'private, max-age=31536000, immutable' })
+    res.end(body)
+    return
+  }
   if (req.method === 'GET' && url.pathname === '/api/events' && api.events) {
     const thread = url.searchParams.get('thread') ?? ''
     const after = Math.max(0, Number(url.searchParams.get('after') ?? 0) || 0)
@@ -266,8 +278,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   }
   const sendTo = /^\/api\/session\/(\d+)\/send$/.exec(url.pathname)
   if (req.method === 'POST' && sendTo && api.webSend) {
-    const body = await readJson(req)
-    const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''))
+    // Pictures ride in this body (shrunk by the page first), so it may be larger than the others.
+    const body = await readJson(req, 24 * 1024 * 1024)
+    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
+    const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
   }
   if (req.method === 'POST' && url.pathname === '/api/action' && api.webAction) {
@@ -431,11 +445,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   send(res, 404, { error: 'not found' })
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, max = 64 * 1024): Promise<Record<string, unknown>> {
   let raw = ''
   for await (const chunk of req) {
     raw += chunk
-    if (raw.length > 64 * 1024) throw new Error('body too large')
+    if (raw.length > max) throw new Error('body too large')
   }
   try {
     return raw ? (JSON.parse(raw) as Record<string, unknown>) : {}

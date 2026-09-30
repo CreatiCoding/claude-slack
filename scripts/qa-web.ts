@@ -7,6 +7,30 @@ import { chromium, type Page } from 'playwright'
 import { createAdminServer, type AdminApi } from '../src/admin.ts'
 import type { AdminState, WebSession } from '../src/broker.ts'
 import { EventLog } from '../src/events.ts'
+import { ImageStore } from '../src/images.ts'
+import { deflateSync, crc32 } from 'node:zlib'
+
+/** A PNG of noise (incompressible), to get a picture of a given byte size. */
+function png(w: number, h: number): Buffer {
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4)
+    len.writeUInt32BE(data.length)
+    const td = Buffer.concat([Buffer.from(type), data])
+    const crc = Buffer.alloc(4)
+    crc.writeUInt32BE(crc32(td) >>> 0)
+    return Buffer.concat([len, td, crc])
+  }
+  const ihdr = Buffer.alloc(13)
+  ihdr.writeUInt32BE(w, 0)
+  ihdr.writeUInt32BE(h, 4)
+  ihdr[8] = 8
+  ihdr[9] = 2
+  const raw = Buffer.alloc((w * 3 + 1) * h)
+  for (let i = 0; i < raw.length; i++) raw[i] = (Math.random() * 256) | 0
+  for (let y = 0; y < h; y++) raw[y * (w * 3 + 1)] = 0
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
+}
+const imageStore = new ImageStore(mkdtempSync(join(tmpdir(), 'qa-img-')))
 
 const events = new EventLog(mkdtempSync(join(tmpdir(), 'qa-web-')))
 const calls: string[] = []
@@ -37,7 +61,8 @@ const permBlocks = (pid: number) => [
 events.emit(A, { type: 'user', ts: '1000.1', text: '테스트 돌려 줘 https://example.com/a).', via: 'slack' })
 events.emit(A, { type: 'text', text: '## 결과\n\n- **통과** 286개\n- 링크: https://example.com/x.\n\n| 이름 | 값 |\n|---|---|\n| a | `1` |\n\n```ts\nconst a = 1\n```' })
 events.emit(A, { type: 'tool', id: 't1', name: 'Bash', title: '💻 npm test https://example.com/t', detail: 'npm test' })
-events.emit(A, { type: 'tool_end', id: 't1', ok: true, output: 'ok 286' })
+events.emit(A, { type: 'tool_end', id: 't1', ok: true, output: 'ok 286', images: [imageStore.put(A, png(40, 24), 'image/png')!] })
+events.emit(A, { type: 'text', text: '큰 스크린샷이에요', images: [imageStore.put(A, png(600, 400), 'image/png')!] })
 events.emit(A, { type: 'todos', todos: [{ content: '하나', status: 'completed' }, { content: '둘', status: 'in_progress', activeForm: '둘 하는 중' }, { content: '셋', status: 'pending' }] })
 events.emit(B, { type: 'msg', ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) })
 for (let i = 0; i < 1600; i++) {
@@ -66,8 +91,8 @@ const api: AdminApi = {
   },
   webSessions: () => sessions,
   webOptions: () => ({ models: [{ label: 'Opus', value: 'opus' }, { label: 'Sonnet', value: 'sonnet' }], efforts: ['low', 'high'], modes: [{ label: 'manual', value: 'default' }, { label: 'auto', value: 'auto' }] }),
-  async webSend(pid, text) {
-    calls.push(`send:${pid}:${text}`)
+  async webSend(pid, text, images) {
+    calls.push(`send:${pid}:${text}${images?.length ? `:images=${images.length}` : ''}`)
     const s = sessions.find((x) => x.pid === pid)!
     const ts = `${s.thread.split('.')[0]}.${Date.now()}`
     events.emit(s.thread, { type: 'user', ts, text, via: 'web' })
@@ -94,6 +119,7 @@ const api: AdminApi = {
     return { ok: true, note: '눌렀습니다.' }
   },
   events,
+  images: imageStore,
   onChange(l) {
     changes.add(l)
     return () => changes.delete(l)
@@ -147,6 +173,15 @@ for (const [label, size, phone] of [
   check(`${label}: 도구 줄 링크는 칸을 펼치지 않음`, (await page.locator('.tool .detail').count()) === 0)
   await page.locator('.tool .head .st').click()
   check(`${label}: 도구 줄 펼치면 출력`, ((await page.locator('.tool .detail').textContent()) ?? '').includes('ok 286'))
+  check(`${label}: 도구가 읽은 작은 그림은 이벤트에 실린 채로`, ((await page.locator('.tool .img img').first().getAttribute('src')) ?? '').startsWith('data:image/png'))
+  await page.waitForFunction(() => (document.querySelector('.text .img img') as HTMLImageElement | null)?.complete && (document.querySelector('.text .img img') as HTMLImageElement).naturalWidth > 0, null, { timeout: 5000 }).catch(() => {})
+  check(`${label}: 큰 그림은 참조로 받아 그린다`, await page.locator('.text .img img').evaluate((i: HTMLImageElement) => i.naturalWidth > 0 && i.src.includes('/api/image/')))
+  const box = await page.locator('.text .img').boundingBox()
+  check(`${label}: 그림 틀은 실제 비율대로 (600×400)`, !!box && Math.abs(box.width / box.height - 1.5) < 0.05, JSON.stringify(box))
+  await page.locator('.text .img').click()
+  check(`${label}: 누르면 페이지 안에서 크게 보기`, await page.locator('.viewer').count() === 1)
+  await page.keyboard.press('Escape')
+  check(`${label}: Esc 로 닫힘`, await page.locator('.viewer').count() === 0)
   check(`${label}: 할 일 목록 입력칸 위`, (await page.locator('#todos').isVisible()) && ((await page.locator('#todos').textContent()) ?? '').includes('둘 하는 중'))
 
   // Send.
@@ -164,6 +199,15 @@ for (const [label, size, phone] of [
     check(`${label}: Shift+Enter 는 줄바꿈`, (await page.locator('#input').inputValue()) === '줄1\n줄2')
     await page.locator('#input').fill('')
   }
+
+  // A picture to send: picked, shown small, removable, sent with the message.
+  await page.locator('input[type=file]').setInputFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png(30, 20) })
+  await page.waitForSelector('.pending .thumb')
+  check(`${label}: 고른 그림이 입력칸 위에 작게`, (await page.locator('.pending .thumb').count()) === 1)
+  await page.locator('#btn-send').click()
+  await page.waitForTimeout(300)
+  check(`${label}: 그림만 보내도 된다 (images=1)`, calls.some((c) => c.startsWith('send:11:') && c.endsWith(':images=1')), calls.join(' | '))
+  check(`${label}: 보내면 미리보기가 사라진다`, (await page.locator('.pending .thumb').count()) === 0)
 
   // Draft survives switching sessions.
   await page.locator('#input').fill('쓰던 글')

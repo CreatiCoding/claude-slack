@@ -446,6 +446,7 @@ async function open(ts, { push = true } = {}) {
   renderHeader()
   renderComposerBits()
   loadDraft()
+  renderPending()
   const t = thread(ts)
   if (t.events.length) renderConvo(t.events)
   await subscribe(ts)
@@ -730,7 +731,9 @@ function draw(row) {
     case 'text': {
       const el = document.createElement('div')
       el.className = 'item text'
-      el.innerHTML = `<div class="md">${md(row.ev.text)}</div>${row.ev.files?.length ? `<div class="files">${icon('attach')} ${row.ev.files.map((f) => esc(f.split('/').pop())).join(', ')}</div>` : ''}`
+      const pictured = new Set((row.ev.images || []).map((im) => im.name))
+      const others = (row.ev.files || []).map((f) => f.split('/').pop()).filter((n) => !pictured.has(n))
+      el.innerHTML = `<div class="md">${md(row.ev.text)}</div>${imagesHtml(row.ev.images)}${others.length ? `<div class="files">${icon('attach')} ${others.map(esc).join(', ')}</div>` : ''}`
       el.append(timeEl(row.ev.at))
       return el
     }
@@ -749,6 +752,8 @@ function userEl(row) {
   el.className = 'item user'
   el.innerHTML = `<div class="bubble"></div><div class="meta"></div>`
   el.firstElementChild.innerHTML = linkify(ev.text)
+  if (!ev.text) el.firstElementChild.remove()
+  if (ev.images?.length) el.insertAdjacentHTML('afterbegin', imagesHtml(ev.images))
   const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
   const set = view.reacts.get(ev.ts)
   const st = !set ? '' : set.has('hourglass_flowing_sand') ? '<span class="held" title="실행 중인 도구가 끝나면 전달해요">대기 중</span>' : set.has('x') ? '<span class="failed">취소함</span>' : set.has('eyes') || set.has('white_check_mark') ? '<span>전달됨</span>' : ''
@@ -765,6 +770,7 @@ function toolEl(row) {
   const [cls, label] = toolStatus(row)
   el.innerHTML = `<div class="head"><span class="st ${cls}">${label}</span><span class="label"></span></div>`
   el.querySelector('.label').innerHTML = icon(toolIcon(row.ev.name)) + linkify(takeEmoji(row.ev.title).rest)
+  if (row.end?.images?.length) el.insertAdjacentHTML('beforeend', imagesHtml(row.end.images))
   el.querySelector('.head').addEventListener('click', (e) => {
     if (e.target.closest('a')) return // a link in the row opens the link, not the row
     let d = el.querySelector('.detail')
@@ -777,6 +783,7 @@ function toolEl(row) {
   return el
 }
 function updateTool(row) {
+  if (row.end?.images?.length && !row.el.querySelector('.imgs')) row.el.querySelector('.head').insertAdjacentHTML('afterend', imagesHtml(row.end.images))
   const st = row.el.querySelector('.st')
   const [cls, label] = toolStatus(row)
   st.className = 'st ' + cls
@@ -791,6 +798,123 @@ function fillTool(row, d) {
   else parts.push(`<div class="k">${row.closed ? '결과 없이 끝났어요' : '실행 중…'}</div>`)
   d.innerHTML = parts.join('')
 }
+// ---- pictures: sized from their real dimensions so a late one does not push the page; a large one is
+// fetched only when it comes within 800px of the view.
+function imagesHtml(images) {
+  if (!images?.length) return ''
+  return `<div class="imgs">${images
+    .map((im) => {
+      const w = im.w || 320
+      const h = im.h || 240
+      const src = im.data || ''
+      return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 480)}px)" data-full="${esc(im.data ? '' : im.src)}" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}"`} decoding="async"></button>`
+    })
+    .join('')}</div>`
+}
+const lazy = new IntersectionObserver(
+  (entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue
+      const img = e.target
+      lazy.unobserve(img)
+      if (img.dataset.src) img.src = img.dataset.src
+    }
+  },
+  { root: $('scroller'), rootMargin: '800px 0px' },
+)
+new MutationObserver((muts) => {
+  for (const m of muts) for (const n of m.addedNodes) if (n.querySelectorAll) for (const img of n.querySelectorAll('img[data-src]')) lazy.observe(img)
+}).observe($('log'), { childList: true, subtree: true })
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('.img')
+  if (!b) return
+  const img = b.querySelector('img')
+  openViewer(img.currentSrc || img.src || img.dataset.src)
+})
+
+/** A picture full-screen inside the page: pinch or wheel to zoom, drag to move, double tap for 2.5×, tap outside or Esc to close. */
+function openViewer(src) {
+  if (!src) return
+  const box = document.createElement('div')
+  box.className = 'viewer'
+  box.innerHTML = `<img alt=""><button class="icon-btn close" type="button" aria-label="닫기">${icon('close')}</button>`
+  const img = box.querySelector('img')
+  img.src = src
+  let scale = 1
+  let x = 0
+  let y = 0
+  const pts = new Map()
+  let pinch = null
+  let moved = false
+  let lastTap = 0
+  const draw = () => (img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`)
+  const zoomAt = (cx, cy, next) => {
+    next = Math.max(1, Math.min(8, next))
+    const r = box.getBoundingClientRect()
+    const px = cx - r.width / 2 - x
+    const py = cy - r.height / 2 - y
+    x -= px * (next / scale - 1)
+    y -= py * (next / scale - 1)
+    scale = next
+    if (scale === 1) x = y = 0
+    draw()
+  }
+  const close = () => {
+    box.remove()
+    removeEventListener('keydown', onKey)
+  }
+  const onKey = (e) => e.key === 'Escape' && close()
+  addEventListener('keydown', onKey)
+  box.addEventListener('wheel', (e) => {
+    e.preventDefault()
+    zoomAt(e.clientX, e.clientY, scale * Math.exp(-e.deltaY / 300))
+  }, { passive: false })
+  box.addEventListener('pointerdown', (e) => {
+    box.setPointerCapture(e.pointerId)
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    moved = false
+    if (pts.size === 2) {
+      const [a, b] = [...pts.values()]
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y), scale }
+    }
+  })
+  box.addEventListener('pointermove', (e) => {
+    const p = pts.get(e.pointerId)
+    if (!p) return
+    const dx = e.clientX - p.x
+    const dy = e.clientY - p.y
+    if (Math.abs(dx) + Math.abs(dy) > 3) moved = true
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+    if (pts.size === 2 && pinch) {
+      const [a, b] = [...pts.values()]
+      zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, (pinch.scale * Math.hypot(a.x - b.x, a.y - b.y)) / pinch.d)
+    } else if (pts.size === 1 && scale > 1) {
+      x += dx
+      y += dy
+      draw()
+    }
+  })
+  const up = (e) => {
+    pts.delete(e.pointerId)
+    if (pts.size < 2) pinch = null
+    if (pts.size || moved) return
+    const now = Date.now()
+    if (now - lastTap < 300) {
+      lastTap = 0
+      zoomAt(e.clientX, e.clientY, scale > 1 ? 1 : 2.5)
+      return
+    }
+    lastTap = now
+    // A single tap on the backdrop (not the picture) closes, once it is clear no second tap follows.
+    if (e.target === box) setTimeout(() => lastTap === now && close(), 300)
+  }
+  box.addEventListener('pointerup', up)
+  box.addEventListener('pointercancel', (e) => pts.delete(e.pointerId))
+  box.querySelector('.close').addEventListener('pointerdown', (e) => e.stopPropagation())
+  box.querySelector('.close').addEventListener('click', close)
+  document.body.append(box)
+}
+
 const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${inner}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
 
 function noticeEl(ic, text, { markdown = false } = {}) {
@@ -1063,10 +1187,22 @@ function renderComposerBits() {
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', '중단', () => command(s, 'esc'))
   chip('link', 'Slack 스레드', null, { href: withToken('/go/thread?ts=' + encodeURIComponent(s.thread)) })
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
+  chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('chat', '/btw', () => prefill(':btw '))
   chip('clipboard', '/compact', () => sendText(s, '/compact'))
   chip('search', '/context', () => sendText(s, '/context'))
   chip('refresh', '/clear', () => confirm('대화를 비울까요? (/clear)') && sendText(s, '/clear'))
+}
+async function pasteFromClipboard() {
+  try {
+    const files = []
+    for (const item of await navigator.clipboard.read())
+      for (const type of item.types.filter((t) => t.startsWith('image/'))) files.push(new File([await item.getType(type)], `붙여넣기.${type.split('/')[1]}`, { type }))
+    if (!files.length) return toast('클립보드에 그림이 없어요', 'err')
+    addPictures(files)
+  } catch {
+    toast('클립보드를 읽지 못했어요. 입력칸에 붙여넣어 보세요', 'err')
+  }
 }
 function prefill(text) {
   input.value = text
@@ -1101,6 +1237,82 @@ function showScreen(s) {
   document.body.append(scrim)
 }
 
+// ------------------------------------------------------------------ composer: pictures to send
+// Picked, pasted or dropped; shown small above the field with a remove button; shrunk before sending.
+// Kept in memory per session (a reload drops them; the text draft survives).
+const pending = new Map() // thread → [{ name, type, data, url }]
+$('btn-attach').hidden = false
+const picker = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple: true, hidden: true })
+document.body.append(picker)
+$('btn-attach').addEventListener('click', () => picker.click())
+picker.addEventListener('change', () => {
+  addPictures([...picker.files])
+  picker.value = ''
+})
+$('input').addEventListener('paste', (e) => {
+  const files = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'))
+  if (files.length) {
+    e.preventDefault()
+    addPictures(files)
+  }
+})
+$('convo').addEventListener('dragover', (e) => {
+  if ([...(e.dataTransfer?.items || [])].some((i) => i.type.startsWith('image/'))) e.preventDefault()
+})
+$('convo').addEventListener('drop', (e) => {
+  const files = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith('image/'))
+  if (!files.length) return
+  e.preventDefault()
+  addPictures(files)
+})
+async function addPictures(files) {
+  if (!current) return
+  const list = pending.get(current) ?? []
+  for (const f of files.slice(0, 10 - list.length)) {
+    try {
+      list.push(await shrinkPicture(f))
+    } catch {
+      toast(`${f.name} 을(를) 읽지 못했어요`, 'err')
+    }
+  }
+  pending.set(current, list)
+  renderPending()
+}
+/** Width 1600 at most, JPEG 0.85, unless the original is already small (a GIF keeps its frames). */
+async function shrinkPicture(f) {
+  const dataOf = (blob) => new Promise((res, rej) => Object.assign(new FileReader(), { onload: (e) => res(e.target.result), onerror: rej }).readAsDataURL(blob))
+  if (f.size <= 300_000 || f.type === 'image/gif') return { name: f.name, type: f.type, data: await dataOf(f), url: URL.createObjectURL(f) }
+  const bmp = await createImageBitmap(f)
+  const scale = Math.min(1, 1600 / bmp.width)
+  const c = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * scale), height: Math.round(bmp.height * scale) })
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+  const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85))
+  const small = blob && blob.size < f.size ? blob : f
+  return { name: f.name, type: small.type, data: await dataOf(small), url: URL.createObjectURL(small) }
+}
+function renderPending() {
+  let box = $('pending')
+  if (!box) {
+    box = Object.assign(document.createElement('div'), { id: 'pending', className: 'pending' })
+    $('chips').before(box)
+  }
+  const list = (current && pending.get(current)) || []
+  box.hidden = !list.length
+  box.innerHTML = ''
+  list.forEach((p, i) => {
+    const t = document.createElement('div')
+    t.className = 'thumb'
+    t.innerHTML = `<img alt=""><button type="button" aria-label="빼기">${icon('close')}</button>`
+    t.firstElementChild.src = p.url
+    t.lastElementChild.addEventListener('click', () => {
+      list.splice(i, 1)
+      renderPending()
+    })
+    box.append(t)
+  })
+  $('btn-send').disabled = !input.value.trim() && !list.length
+}
+
 // ------------------------------------------------------------------ composer: input
 const input = $('input')
 const drafts = store.get('drafts', {})
@@ -1117,7 +1329,7 @@ function loadDraft() {
 function autosize() {
   input.style.height = 'auto'
   input.style.height = Math.min(input.scrollHeight, 140) + 'px'
-  $('btn-send').disabled = !input.value.trim()
+  $('btn-send').disabled = !input.value.trim() && !(current && pending.get(current)?.length)
 }
 input.addEventListener('input', () => {
   autosize()
@@ -1134,24 +1346,29 @@ $('btn-send').addEventListener('click', sendNow)
 async function sendNow() {
   const s = current && sessionOf(current)
   const text = input.value.trim()
-  if (!text) return
+  const pics = pending.get(current) ?? []
+  if (!text && !pics.length) return
   if (!s) return toast('이미 종료된 세션이에요.', 'err')
   const keep = input.value
   input.value = ''
+  pending.delete(current)
+  renderPending()
   autosize()
   saveDraft()
-  store.set('lastSent:' + current, text)
-  if (!(await sendText(s, text))) {
+  if (text) store.set('lastSent:' + current, text)
+  if (!(await sendText(s, text, pics))) {
     input.value = keep
+    pending.set(current, pics)
+    renderPending()
     autosize()
     saveDraft()
   }
 }
-async function sendText(s, text) {
+async function sendText(s, text, pics = []) {
   // `/btw` answers from the screen, which the broker's :btw reads back; typed raw it would stay in the terminal.
   const body = /^\/btw\s/.test(text) ? ':' + text.slice(1) : text
   try {
-    await api(`/api/session/${s.pid}/send`, { text: body })
+    await api(`/api/session/${s.pid}/send`, { text: body, ...(pics.length ? { images: pics.map(({ name, type, data }) => ({ name, type, data })) } : {}) })
     return true
   } catch (err) {
     toast('보내지 못했어요: ' + err.message, 'err')
