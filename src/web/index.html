@@ -57,14 +57,19 @@
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
 <script>
-  // If the app itself fails to start (a script error, a failed load), say so in Korean instead of a blank page.
-  window.addEventListener('error', function (e) { window.__bootError = e.message || String(e.error || '') })
-  setTimeout(function () {
-    if (window.__ready) return
-    var code = 'E-' + ((window.__bootError || 'load').split('').reduce(function (h, c) { return (h * 31 + c.charCodeAt(0)) >>> 0 }, 7) % 65536).toString(16)
-    document.body.innerHTML = '<div class="crash"><p>화면을 열지 못했어요. (오류 ' + code + ')</p><p><button type="button" onclick="location.reload()">다시 열기</button> <button type="button" onclick="location.hash=\'\';location.reload()">세션 목록으로</button></p></div>'
-  }, 6000)
+  // If the app really fails to start (a script error, the module failing to load), say so in Korean, on top of
+  // the page. A slow phone is not a failure: without an error nothing is shown, and a late app still runs.
+  window.addEventListener('error', function (e) { if (!window.__ready) { window.__bootError = e.message || String(e.error || 'load'); window.__showBootError() } })
+  window.__showBootError = function () {
+    if (window.__ready || document.getElementById('boot-crash')) return
+    var code = 'E-' + (String(window.__bootError || 'load').split('').reduce(function (h, c) { return (h * 31 + c.charCodeAt(0)) >>> 0 }, 7) % 65536).toString(16)
+    var box = document.createElement('div')
+    box.id = 'boot-crash'
+    box.className = 'crash'
+    box.innerHTML = '<p>화면을 열지 못했어요. (오류 ' + code + ')</p><p><button type="button" onclick="location.reload()">다시 열기</button> <button type="button" onclick="location.hash=\'\';location.reload()">세션 목록으로</button></p>'
+    document.body.appendChild(box)
+  }
 </script>
-<script type="module" src="/web/app.js"></script>
+<script type="module" src="/web/app.js" onerror="window.__bootError = 'app.js 를 불러오지 못함'; window.__showBootError()"></script>
 </body>
 </html>

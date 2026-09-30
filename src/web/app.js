@@ -898,6 +898,8 @@ function timeEl(at) {
 function renderConvo(evs, opts = {}) {
   try {
     drawConvo(evs, opts)
+    // Drawn fine: a cover left by an earlier failed draw goes.
+    $('main').querySelector('.crash')?.remove()
   } catch (err) {
     reportError('draw', err)
     showCrash(err)
@@ -2419,9 +2421,12 @@ addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && menuState) return closeMenu()
   // Esc on a PC stops the session being watched, like the 중단 chip: not over a menu or dialog, not while
   // composing Korean, not a held-down key.
-  if (e.key === 'Escape' && hasMouse && current && !e.isComposing && !e.repeat && !overlayOpen()) {
+  // Only a busy session: waiting on a permission or a question, Esc would cancel or deny that dialog. And not from
+  // a text field, where Esc belongs to the field.
+  const inField = e.target instanceof HTMLElement && (e.target.matches('input, textarea, select') || e.target.isContentEditable)
+  if (e.key === 'Escape' && hasMouse && current && !e.isComposing && !e.repeat && !overlayOpen() && !inField) {
     const s = sessionOf(current)
-    if (s && (s.state === 'busy' || s.state === 'waiting')) {
+    if (s && s.state === 'busy') {
       e.preventDefault()
       command(s, 'esc')
       toast('중단했어요')
@@ -2466,6 +2471,8 @@ addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ start
 window.__ready = true
+// A boot cover shown for an error that turned out not to stop the app goes away.
+document.getElementById('boot-crash')?.remove()
 // Draw the last known list before the stream answers, so a reload never starts empty.
 sessions = store.get('sessions-cache', [])
 renderList()

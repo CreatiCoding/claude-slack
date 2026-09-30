@@ -17,6 +17,8 @@ export interface Session {
   threadTs: string
   /** A name a person gave (`:rename`, the web app). Slack still follows Claude Code's ai-title; the web app shows this first. */
   manualTitle?: string
+  /** The model given at launch or with /model (e.g. opus[1m]); `model` follows the transcript, which drops [1m]. */
+  launchModel?: string
   /** "끝나면 새로고침": when it was asked for; the refresh runs once the session is idle and its background work ended. */
   refreshAfter?: number
   /** Background work that a refresh cut off, told to the relaunched session first. */

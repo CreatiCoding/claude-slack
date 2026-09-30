@@ -245,7 +245,40 @@ const browser = await chromium.launch()
   check('깨진 대화: 한국어 안내와 오류 번호', /대화를 그리다 문제가 생겼어요\. \(오류 E-[0-9a-f]+\)/.test(crash), crash)
   check('깨진 대화: 다시 열기·세션 목록으로', (await page.locator('.crash button').allTextContents()).join('|') === '다시 열기|세션 목록으로')
   check('깨진 대화: 화면 오류 기록으로', clientErrors.some((e) => / draw: /.test(e)))
+  // Another session drawn fine: the error cover goes away.
+  // B's permission modal is up in this fresh page too: dismiss it first.
+  if (await page.locator('.perm-modal').count()) await page.mouse.click(5, 120)
+  await page.locator('.crash button', { hasText: '세션 목록으로' }).click()
+  await page.locator(`.row[data-thread="${A}"]`).click()
+  await page.waitForSelector('.item.text')
+  check('깨진 대화: 다른 대화를 제대로 그리면 오류 덮개를 치운다', (await page.locator('.crash').count()) === 0)
   await page.screenshot({ path: join(tmpdir(), 'qa-web-phone-crash.png') })
+  await ctx.close()
+}
+
+// A slow phone: app.js arrives after 6s with no error. The page must not be replaced by an error screen.
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  await page.route('**/web/app.js', async (route) => {
+    await new Promise((r) => setTimeout(r, 7000))
+    await route.continue()
+  })
+  await page.goto(base + '/')
+  await page.waitForTimeout(6500)
+  check('느린 부팅: 오류가 없으면 6초가 지나도 오류 화면을 띄우지 않는다', (await page.locator('.crash').count()) === 0)
+  await page.waitForSelector('.row[data-thread]', { timeout: 8000 }).catch(() => {})
+  check('느린 부팅: 늦게 온 앱이 그대로 동작한다', (await page.locator('.row[data-thread]').count()) >= 1)
+  await ctx.close()
+}
+// The app really fails to load: a Korean overlay on top of the page (the page itself is kept).
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  await page.route('**/web/app.js', (route) => route.fulfill({ status: 500, body: 'x' }))
+  await page.goto(base + '/')
+  await page.waitForSelector('.crash', { timeout: 9000 }).catch(() => {})
+  check('앱을 못 불러오면 오류 안내를 위에 덮는다', (await page.locator('.crash').count()) === 1 && (await page.locator('#app').count()) === 1)
   await ctx.close()
 }
 
@@ -446,6 +479,18 @@ for (const [label, size, phone] of [
   await page.waitForTimeout(300)
   check(`${label}: 잘못 보냄 → 묻고 retract`, calls.some((c) => c.startsWith('retract:11:')), calls.join(' | '))
 
+  if (!phone) {
+    // B waits for a permission: Esc (focus anywhere) must not reach it, it would cancel or deny the dialog.
+    await page.locator(`.row[data-thread="${B}"]`).click()
+    await page.waitForSelector('.card.decision')
+    await page.locator('#input').blur()
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+    check(`${label}: 권한 대기 세션에는 Esc 를 보내지 않는다`, !calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')), calls.join(' | '))
+    await page.locator(`.row[data-thread="${A}"]`).click()
+    await page.waitForSelector('.item.text')
+  }
+
   // Draft survives switching sessions.
   await page.locator('#input').fill('쓰던 글')
   if (phone) await page.goBack()
@@ -488,6 +533,10 @@ for (const [label, size, phone] of [
     await page.keyboard.press('Escape')
     check(`${label}: 메뉴가 떠 있으면 Esc 는 메뉴만 닫는다`, !calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')) && (await page.locator('.menu').count()) === 0)
     await page.locator('#input').focus()
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+    check(`${label}: 입력칸에서 누른 Esc 는 세션에 보내지 않는다`, !calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')), calls.join(' | '))
+    await page.locator('#input').blur()
     await page.keyboard.press('Escape')
     await page.waitForTimeout(150)
     check(`${label}: 작업 중 Esc 는 중단`, calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')), calls.join(' | '))

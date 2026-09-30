@@ -34,6 +34,7 @@ export interface ReviveEntry {
   manualTitle?: string
   autoAllow?: boolean
   model?: string
+  launchModel?: string
   effort?: string
 }
 

@@ -241,8 +241,13 @@ export type ProceedResult = 'answered' | 'no-dialog' | 'no-option' | 'unfocused'
 const ALWAYS_RE = /don'?t ask again|always allow|항상/i
 /** "Yes, allow reading from /X from this project" — still broader than one time. */
 const PROJECT_WIDE_RE = /\b(project|directory|folder)\b/i
-/** Allowed only until this Claude process ends (Claude in Chrome's "Allow all actions on <site> for this session"). */
-const SESSION_RE = /\b(for|during) (this|the current) session\b|이번 세션|세션 동안/i
+/**
+ * Allowed only until this Claude process ends: Claude in Chrome's "Allow all actions on <site> for this session".
+ * Not "allow all edits during this session (shift+tab)": that switches the session to acceptEdits, which outlives
+ * 전부 허용 being turned off.
+ */
+const SESSION_RE = /\bactions on\b.*\bfor this session\b/i
+const MODE_SWITCH_RE = /\bedits?\b|shift\s*\+\s*tab/i
 const DENY_RE = /^(no|deny|cancel|reject)\b/i
 const YES_RE = /^(yes|proceed|allow|continue)\b/i
 
@@ -256,7 +261,7 @@ export type OptionKind = 'allow-once' | 'allow-session' | 'allow-always' | 'deny
 export function classifyOption(label: string): OptionKind {
   if (ALWAYS_RE.test(label)) return 'allow-always'
   if (DENY_RE.test(label)) return 'deny'
-  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : SESSION_RE.test(label) ? 'allow-session' : 'allow-once'
+  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : SESSION_RE.test(label) && !MODE_SWITCH_RE.test(label) ? 'allow-session' : 'allow-once'
   return 'other'
 }
 

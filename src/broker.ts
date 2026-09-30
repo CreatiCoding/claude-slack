@@ -35,7 +35,7 @@ import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
-import { sessionPlugins, type PluginLine } from './plugins.ts'
+import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
 import { execFile } from 'node:child_process'
 import { REPO_ROOT } from './config.ts'
@@ -632,7 +632,8 @@ export class Broker {
   }
 
   private pluginCache = new Map<string, { at: number; lines: PluginLine[]; busy?: boolean }>()
-  private githubUser?: Promise<string | undefined>
+  private githubUsers?: string[]
+  private skillReaders = new Map<string, SkillLineReader>()
   private pluginsFor(s: Session): PluginLine[] | undefined {
     const k = `${s.key}:${s.pid}`
     const c = this.pluginCache.get(k)
@@ -649,14 +650,18 @@ export class Broker {
     return c?.lines.length ? c.lines : undefined
   }
   private async computePlugins(s: Session): Promise<PluginLine[]> {
-    this.githubUser ??= this.cfg.githubUser
-      ? Promise.resolve(this.cfg.githubUser)
-      : new Promise((resolve) => execFile('gh', ['api', 'user', '--jq', '.login'], { timeout: 8000 }, (err, out) => resolve(err ? process.env.CLAUDE_SLACK_GITHUB_USER : out.trim() || undefined)))
-    const user = await this.githubUser
-    if (!user) return []
+    // Every account gh is logged in to, on every host (a company GitHub too). A failure is not remembered: asked again next time.
+    if (!this.githubUsers?.length) this.githubUsers = this.cfg.githubUser ? [this.cfg.githubUser] : await githubAccounts()
+    if (!this.githubUsers.length) return []
     const facts = await (this.cfg.processFacts ?? processFacts)(s.pid).catch(() => ({}) as { startedAt?: number })
+    let reader: SkillLineReader | undefined
+    if (s.transcriptPath) {
+      const k = `${s.key}:${s.pid}:${s.transcriptPath}`
+      reader = this.skillReaders.get(k)
+      if (!reader) this.skillReaders.set(k, (reader = new SkillLineReader(s.transcriptPath)))
+    }
     try {
-      return sessionPlugins({ pluginsDir: this.cfg.pluginsDir, user, processStart: facts.startedAt, transcript: s.transcriptPath })
+      return sessionPlugins({ pluginsDir: this.cfg.pluginsDir, user: this.githubUsers, processStart: facts.startedAt, reader })
     } catch {
       return []
     }
@@ -691,7 +696,7 @@ export class Broker {
         state: s.state,
         waiting: s.waitingReason ? WAITING_LABEL[s.waitingReason] : undefined,
         waitingSince: s.waitingSince,
-        model: s.model,
+        model: s.launchModel ?? s.model,
         effort: s.effort,
         permissionMode: s.permissionMode,
         contextLabel: s.contextLabel,
@@ -1260,6 +1265,7 @@ export class Broker {
         ...(s.manualTitle ? { manualTitle: s.manualTitle } : {}),
         ...(s.autoAllow ? { autoAllow: true } : {}),
         ...(s.model ? { model: s.model } : {}),
+        ...(s.launchModel ? { launchModel: s.launchModel } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
       })
     }
@@ -1329,6 +1335,7 @@ export class Broker {
       if (pending) this.pendingLaunches.delete(hello.threadTs)
       if (pending?.statusTs) session.panelTs = pending.statusTs
       session.model ??= pending?.model
+      session.launchModel ??= pending?.model
       session.effort ??= pending?.effort
     } else if (!session.threadTs) {
       const rootTs = await this.slack.post({ text: this.rootText(session, '🟢', '터미널 세션') })
@@ -1399,6 +1406,7 @@ export class Broker {
     session.autoAllow = rec.autoAllow ?? session.autoAllow
     session.manualTitle = rec.manualTitle ?? session.manualTitle
     session.model ??= rec.model
+    session.launchModel ??= rec.launchModel
     session.effort ??= rec.effort
     if (rec.title && !session.title) session.title = rec.title
     if (rec.holdNoticeTs) {
@@ -2425,7 +2433,9 @@ export class Broker {
 
   /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
   private settingsArgs(session: Session): string[] {
-    const model = session.model && /^[\w.\[\]-]+$/.test(session.model) && !session.model.startsWith('<') ? session.model : undefined
+    // The model it was launched or switched with (opus[1m] keeps its 1M context); the transcript's name drops [1m].
+    const chosen = session.launchModel
+    const model = chosen && /^[\w.\[\]-]+$/.test(chosen) ? chosen : undefined
     const effort = session.effort && EFFORT_OPTIONS.includes(session.effort) ? session.effort : undefined
     return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
   }
@@ -3743,6 +3753,7 @@ export class Broker {
   private async setSetting(c: CommandContext, which: 'model' | 'effort'): Promise<void> {
     await this.tmux.typeLine(c.pane, `/${which} ${c.arg}`.trim())
     if (c.arg) c.session[which] = c.arg
+    if (c.arg && which === 'model') c.session.launchModel = c.arg
     this.schedulePanelRefresh(c.session)
     await c.ack(`→ /${which} ${c.arg}`)
     // Mid-conversation Claude Code asks "Switch model?"; a stuck dialog would swallow the next prompt.

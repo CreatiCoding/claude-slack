@@ -36,15 +36,20 @@ test('세션이 쓰는 버전 = 프로세스 시작 전에 있던 가장 새 버
   assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'CreatiCoding', processStart: Date.now() + 1000 }), [{ market: 'cdt-skills', version: '0.5.0' }])
 })
 
-test('대화에 Claude Code 가 쓴 "Base directory for this skill: …/<버전>/" 이 있으면 그것을 믿는다(명령 출력은 무시)', async () => {
+test('대화에 Claude Code 가 쓴 "Base directory for this skill" 만 증거로 본다(명령 출력 속 경로는 무시)', async () => {
   const { dir, v } = plugins()
   v('solo', 'solo', '1.0.0')
+  await sleep(30)
+  const started = Date.now()
+  await sleep(30)
   v('solo', 'solo', '1.1.0')
   const t = join(dir, 't.jsonl')
-  const skill = (ver: string) => JSON.stringify({ type: 'user', isMeta: true, message: { content: [{ type: 'text', text: `Base directory for this skill: ${dir}/cache/solo/solo/${ver}/skills/x` }] } })
-  const output = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'u', content: `Base directory for this skill: ${dir}/cache/solo/solo/9.9.9/skills/x` }] } })
+  const at = new Date(started + 10).toISOString()
+  const skill = (ver: string) => JSON.stringify({ type: 'user', isMeta: true, timestamp: at, message: { content: [{ type: 'text', text: `Base directory for this skill: ${dir}/cache/solo/solo/${ver}/skills/x` }] } })
+  // A command's output printing the newer path is not what this process loaded.
+  const output = JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: 'u', content: `Base directory for this skill: ${dir}/cache/solo/solo/1.1.0/skills/x` }] } })
   writeFileSync(t, [skill('1.0.0'), output].join('\n') + '\n')
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'creaticoding', transcript: t }), [{ market: 'solo', version: '1.0.0', latest: '1.1.0' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'creaticoding', processStart: started, transcript: t }), [{ market: 'solo', version: '1.0.0', latest: '1.1.0' }])
 })
 
 test('브로커: 목록에 세션이 쓰는 플러그인 버전과 "새로고침하면"', async () => {
