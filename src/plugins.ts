@@ -116,39 +116,97 @@ export class SkillLineReader {
   }
 }
 
-/** One line per user marketplace: the version this process runs, and a newer one when installed. */
+interface Member {
+  plugin: string
+  /** What installed_plugins.json points at: what a refresh would load. */
+  version: string
+  /** When that pointer last changed, and when the plugin first came. */
+  lastUpdated: number
+  installedAt: number
+}
+
+/** What installed_plugins.json says for a marketplace's plugins; without it, the cache folders (newest = installed). */
+function members(dir: string, market: string, cacheFor: (plugin: string) => Version[]): Member[] {
+  try {
+    const all = JSON.parse(readFileSync(join(dir, 'installed_plugins.json'), 'utf8')) as { plugins?: Record<string, Array<{ version?: string; installedAt?: string; lastUpdated?: string }>> }
+    const out = Object.entries(all.plugins ?? {})
+      .filter(([id]) => id.endsWith('@' + market))
+      .flatMap(([id, entries]) => {
+        const e = entries.at(-1)
+        if (!e?.version) return []
+        return [{ plugin: id.slice(0, -market.length - 1), version: e.version, lastUpdated: Date.parse(e.lastUpdated ?? '') || 0, installedAt: Date.parse(e.installedAt ?? e.lastUpdated ?? '') || 0 }]
+      })
+    if (out.length) return out
+  } catch {}
+  let plugins: string[] = []
+  try {
+    plugins = readdirSync(join(dir, 'cache', market))
+  } catch {}
+  return plugins.flatMap((plugin) => {
+    const v = cacheFor(plugin)
+    return v.length ? [{ plugin, version: v.at(-1)!.version, lastUpdated: v.at(-1)!.at, installedAt: v[0]!.at }] : []
+  })
+}
+
+const COMMIT_RE = /^[0-9a-f]{12,40}$/
+
+/**
+ * One line per user marketplace: the version this process runs, and what a refresh would load when different.
+ *
+ * What a refresh loads is installed_plugins.json (autoUpdate makes new cache folders but points only some plugins
+ * at them, so "the newest cache folder" is a promise it may not keep). What this process runs: the installed
+ * version if it was set before the process started; otherwise the newest cache folder older than the start
+ * (other than the new one); a "Base directory for this skill" line this process wrote beats both. A plugin first
+ * installed after the start is not in this process at all.
+ *
+ * A marketplace split into per-skill plugins versions them by commit: shown as a 7-letter id, the member commit
+ * installed last (ordered by when its cache folder appeared: the marketplace copy is a shallow clone, so git cannot
+ * compare them). Otherwise the bundle's version (the plugin named like the marketplace).
+ */
 export function sessionPlugins(o: { pluginsDir?: string; user: string | string[]; processStart?: number; transcript?: string; reader?: SkillLineReader }): PluginLine[] {
   const dir = o.pluginsDir ?? join(homedir(), '.claude', 'plugins')
   const reader = o.reader ?? (o.transcript && existsSync(o.transcript) ? new SkillLineReader(o.transcript) : undefined)
   const seen = reader?.read() ?? new Map<string, { version: string; at: number }>()
-  const lines: PluginLine[] = []
   const users = Array.isArray(o.user) ? o.user : [o.user]
-  const markets = [...new Set(users.flatMap((u) => userMarkets(dir, u)))]
-  for (const market of markets) {
-    let plugins: string[]
-    try {
-      plugins = readdirSync(join(dir, 'cache', market))
-    } catch {
-      continue
+  const start = o.processStart
+  const lines: PluginLine[] = []
+  for (const market of [...new Set(users.flatMap((u) => userMarkets(dir, u)))]) {
+    const cacheOf = new Map<string, Version[]>()
+    const cacheFor = (plugin: string) => {
+      let v = cacheOf.get(plugin)
+      if (!v) cacheOf.set(plugin, (v = versions(dir, market, plugin)))
+      return v
     }
-    const per = plugins.map((plugin) => {
-      const all = versions(dir, market, plugin)
-      const before = o.processStart ? all.filter((v) => v.at <= o.processStart!) : all
-      const fromCache = before.at(-1)?.version ?? all.at(-1)?.version
-      // A skill line counts only if this process wrote it: --resume appends to the same file, so the old process's
-      // lines are still there after a refresh. Of the line and the cache's pick, the newer version wins.
-      const line = seen.get(`${market}/${plugin}`)
-      const fromLine = line && (!o.processStart || line.at >= o.processStart) ? line.version : undefined
-      const birth = (v?: string) => all.find((x) => x.version === v)?.at ?? -1
-      const running = fromLine && birth(fromLine) > birth(fromCache) ? fromLine : fromCache ?? fromLine
-      const newest = all.at(-1)?.version
-      return { plugin, running, newest }
-    })
-    const bundle = per.find((p) => p.plugin === market) ?? (per.length === 1 ? per[0] : undefined)
-    const shown = bundle ?? per.slice().sort((a, b) => String(a.running).localeCompare(String(b.running), undefined, { numeric: true })).at(-1)
-    if (!shown?.running) continue
-    const outdated = per.some((p) => p.newest && p.newest !== p.running)
-    lines.push({ market, version: shown.running, ...(outdated ? { latest: shown.newest !== shown.running ? shown.newest : '최신' } : {}) })
+    const birth = (plugin: string, version: string) => cacheFor(plugin).find((x) => x.version === version)?.at ?? 0
+    const running: Array<{ plugin: string; version: string; at: number }> = []
+    const installed: Array<{ plugin: string; version: string; at: number }> = []
+    for (const m of members(dir, market, cacheFor)) {
+      installed.push({ plugin: m.plugin, version: m.version, at: birth(m.plugin, m.version) || m.lastUpdated })
+      let version: string | undefined
+      if (!start || m.lastUpdated <= start) version = m.version
+      else version = cacheFor(m.plugin).filter((v) => v.version !== m.version && v.at <= start).at(-1)?.version
+      const line = seen.get(`${market}/${m.plugin}`)
+      if (line && (!start || line.at >= start)) version = line.version
+      // Not there before this process started (and no line says it was loaded since): not in this process.
+      if (!version) continue
+      running.push({ plugin: m.plugin, version, at: birth(m.plugin, version) })
+    }
+    const show = (list: Array<{ plugin: string; version: string; at: number }>): string | undefined => {
+      if (!list.length) return undefined
+      // Split into per-skill plugins: the commit installed last speaks for the marketplace.
+      const commits = list.filter((x) => COMMIT_RE.test(x.version))
+      if (commits.length) return commits.sort((a, b) => a.at - b.at).at(-1)!.version.slice(0, 7)
+      // Not split (or a process from before the split): the bundle's version.
+      const bundle = list.find((x) => x.plugin === market) ?? (list.length === 1 ? list[0] : undefined)
+      if (bundle) return bundle.version
+      return [...list].sort((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true })).at(-1)!.version
+    }
+    const now = show(running)
+    if (!now) continue
+    const next = show(installed)
+    // Same shown version, but some member would change on a refresh (a sub-plugin of a bundle): say so without a number.
+    const changed = installed.some((i) => running.find((r) => r.plugin === i.plugin)?.version !== i.version)
+    lines.push({ market, version: now, ...(next && next !== now ? { latest: next } : changed ? { latest: '최신' } : {}) })
   }
   return lines
 }

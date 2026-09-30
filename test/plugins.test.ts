@@ -96,3 +96,48 @@ test('4-1 스킬 줄은 읽은 위치에서 이어 읽는다', async () => {
   assert.equal(r.read().get('m/p')!.version, '1.1.0')
   assert.ok((r as unknown as { offset: number }).offset > offset)
 })
+
+// ---- 5. 커밋 단위 마켓 (claude-web 의 교훈)
+function commitWorld() {
+  const dir = mkdtempSync(join(tmpdir(), 'plug-'))
+  writeFileSync(join(dir, 'known_marketplaces.json'), JSON.stringify({ 'cdt-skills': { source: { repo: 'me/cdt-skills' } } }))
+  const installed: Record<string, Array<{ version: string; installedAt: string; lastUpdated: string; installPath: string }>> = {}
+  const cache = (plugin: string, version: string) => mkdirSync(join(dir, 'cache', 'cdt-skills', plugin, version), { recursive: true })
+  const install = (plugin: string, version: string, at: number, first = at) => {
+    installed[`${plugin}@cdt-skills`] = [{ version, installedAt: new Date(first).toISOString(), lastUpdated: new Date(at).toISOString(), installPath: join(dir, 'cache', 'cdt-skills', plugin, version) }]
+    writeFileSync(join(dir, 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: installed }))
+  }
+  return { dir, cache, install }
+}
+
+test('5 커밋 단위 마켓: 이 프로세스가 쓰는 커밋과 새로고침하면 받을 커밋을 짧은 id 로(캐시 폴더 순서가 아니라 installed_plugins 로)', async () => {
+  const { dir, cache, install } = commitWorld()
+  const t0 = Date.now()
+  for (const p of ['pr-review-loop', 'add-cdt-skill', 'create-ticket']) cache(p, '6c0a647d6261'), install(p, '6c0a647d6261', t0)
+  await sleep(30)
+  for (const p of ['pr-review-loop', 'add-cdt-skill']) cache(p, '36c12d3aa001'), install(p, '36c12d3aa001', Date.now(), t0)
+  await sleep(30)
+  const started = Date.now()
+  await sleep(30)
+  // autoUpdate: new commit folders appear for everyone, but only some plugins are pointed at the newest.
+  for (const p of ['pr-review-loop', 'add-cdt-skill', 'create-ticket']) cache(p, '7dfcd11bb002')
+  await sleep(30)
+  for (const p of ['pr-review-loop', 'add-cdt-skill', 'create-ticket']) cache(p, '93767a3cc003')
+  for (const p of ['pr-review-loop', 'add-cdt-skill']) install(p, '93767a3cc003', Date.now(), t0)
+  // create-ticket still points at 6c0a647d6261 in installed_plugins.json.
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: started }), [{ market: 'cdt-skills', version: '36c12d3', latest: '93767a3' }])
+  // A process started now runs what is installed.
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: Date.now() + 1000 }), [{ market: 'cdt-skills', version: '93767a3' }])
+})
+
+test('5 쪼개지기 전에 뜬 세션은 그때의 번들 버전; 시작 후에 설치된 플러그인에 "가장 새 커밋"을 주지 않는다', async () => {
+  const { dir, cache, install } = commitWorld()
+  cache('cdt-skills', '0.4.2')
+  install('cdt-skills', '0.4.2', Date.now())
+  await sleep(30)
+  const started = Date.now()
+  await sleep(30)
+  cache('pr-review-loop', '93767a3cc003')
+  install('pr-review-loop', '93767a3cc003', Date.now())
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: started }), [{ market: 'cdt-skills', version: '0.4.2', latest: '93767a3' }])
+})

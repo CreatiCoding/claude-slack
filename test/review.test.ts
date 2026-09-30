@@ -36,9 +36,9 @@ test('1-2 새로고침 직후: 이전 프로세스 때의 "Base directory for th
   const t = join(dir, 't.jsonl')
   writeFileSync(t, JSON.stringify({ type: 'user', timestamp: new Date(refreshedAt - 60_000).toISOString(), message: { content: [{ type: 'text', text: `Base directory for this skill: ${dir}/cache/kit/kit/0.4.2/skills/x` }] } }) + '\n')
   assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: refreshedAt, transcript: t }), [{ market: 'kit', version: '0.5.0' }])
-  // A line from this process counts, but the newer of it and the cache's pick wins.
+  // A line this process wrote wins (autoUpdate or /reload-plugins can load another version mid-process).
   writeFileSync(t, JSON.stringify({ type: 'user', timestamp: new Date(refreshedAt + 5_000).toISOString(), message: { content: [{ type: 'text', text: `Base directory for this skill: ${dir}/cache/kit/kit/0.4.2/skills/x` }] } }) + '\n')
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: refreshedAt, transcript: t }), [{ market: 'kit', version: '0.5.0' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'me', processStart: refreshedAt, transcript: t }), [{ market: 'kit', version: '0.4.2', latest: '0.5.0' }])
 })
 
 async function autoSession(pane: string) {

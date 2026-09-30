@@ -375,7 +375,7 @@ for (const [label, size, phone] of [
   await settle(page)
   check(`${label}: 제목`, (await page.locator('#title').textContent()) === '알파 작업')
   const metaText = (await page.locator('#meta').textContent()) ?? ''
-  check(`${label}: 헤더에 세션이 쓰는 플러그인 버전과 "새로고침하면"`, metaText.includes('cdt-skills 0.4.2') && metaText.includes('새로고침하면 0.5.0'), metaText)
+  check(`${label}: 헤더에 세션이 쓰는 플러그인 버전과 "새로고침하면"`, metaText.includes('cdt-skills 0.4.2') && metaText.includes('새로고침하면 cdt-skills 0.5.0'), metaText)
   check(`${label}: 모델 이름(${phone ? '폰은 줄여서' : 'PC 는 그대로'})`, phone ? metaText.startsWith('opus 5.5') : metaText.startsWith('claude-opus-5-5'), metaText)
   const answer = page.locator('.item.text', { hasText: '통과' }).first()
   check(`${label}: 마크다운 제목·표·코드`, (await answer.locator('.md-h').count()) === 1 && (await answer.locator('table').count()) === 1 && (await answer.locator('pre').count()) === 1)

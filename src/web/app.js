@@ -838,7 +838,7 @@ function renderMeta(s) {
       const b = document.createElement('button')
       b.type = 'button'
       b.className = 'linkish plugin-new'
-      b.textContent = p.latest === '최신' ? '새로고침하면 최신' : `새로고침하면 ${p.latest}`
+      b.textContent = p.latest === '최신' ? '새로고침하면 최신' : `새로고침하면 ${p.market} ${p.latest}`
       b.addEventListener('click', () => refreshSession(s))
       meta.append(document.createTextNode(' '), b)
     }
