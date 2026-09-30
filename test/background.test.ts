@@ -175,3 +175,14 @@ test('실제 기록 형식: 완료 알림은 queue-operation(enqueue)·attachmen
   bg.scan()
   assert.deepEqual(bg.open({ now: T0 + 10_000 }), [])
 })
+
+test('4 TaskStop 성공은 문구의 첫머리("Successfully stopped")로: 설명에 failed·not found 가 있어도 성공', () => {
+  const f = file()
+  appendFileSync(f, use('g1', 'Bash', { command: 'grep failed log' }, 0))
+  appendFileSync(f, result('g1', 'Command running in background with ID: bg1.', 0))
+  appendFileSync(f, use('st1', 'TaskStop', { task_id: 'bg1' }, 1))
+  appendFileSync(f, result('st1', '{"message":"Successfully stopped task: bg1 (grep failed log | not found)"}', 1))
+  const bg = new BackgroundTracker(f)
+  bg.scan()
+  assert.deepEqual(bg.open({ now: T0 + 5000 }), [])
+})

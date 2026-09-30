@@ -130,7 +130,12 @@ export class BackgroundTracker {
       const text = textOf(b.content)
       // A TaskStop ends its task only when it worked.
       if (use?.name === 'TaskStop') {
-        if (!(b as { is_error?: boolean }).is_error && !/no task|not found|failed/i.test(text)) for (const [k, t] of this.tasks) if (t.id === use.taskId) this.tasks.delete(k)
+        // Success is Claude Code's own opening words, not the absence of "failed": the command in its description may say anything.
+        let msg = text.trim()
+        try {
+          msg = String((JSON.parse(msg) as { message?: unknown }).message ?? msg)
+        } catch {}
+        if (!(b as { is_error?: boolean }).is_error && /^Successfully stopped/.test(msg.trim())) for (const [k, t] of this.tasks) if (t.id === use.taskId) this.tasks.delete(k)
         continue
       }
       const first = text.split('\n')[0]!.slice(0, 400)
