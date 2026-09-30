@@ -595,6 +595,53 @@ export class Broker {
     return { ok: true, note: '보냈습니다.' }
   }
 
+  /**
+   * Take one held message back (it has not reached Claude): out of the queue, marked 취소함, and its text
+   * returned so the page can put it in the field to be edited and sent again.
+   */
+  async webUnhold(pid: number, ts: string): Promise<{ ok: boolean; note: string; text?: string }> {
+    const session = this.registry.byPid(pid)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    const i = session.held?.findIndex((m) => m.ts === ts) ?? -1
+    if (i < 0) return { ok: false, note: '이미 전달됐거나 대기 중이 아닌 메시지입니다.' }
+    const [m] = session.held!.splice(i, 1)
+    this.logAt('INFO', 'inject', 'held message taken back', this.tag(session, { ts, left: session.held!.length }))
+    await this.slack.unreact(ts, 'hourglass_flowing_sand').then(() => this.slack.react(ts, 'x')).catch(() => {})
+    if (session.holdNoticeTs) {
+      if (session.held!.length) {
+        const { text, blocks } = heldNoticeBlocks(session.pid, session.held!.length)
+        await this.say(session, { ts: session.holdNoticeTs, text, blocks })
+      } else {
+        await this.slack.delete(session.holdNoticeTs).catch(() => {})
+        session.holdNoticeTs = undefined
+      }
+    }
+    this.changed()
+    return { ok: true, note: '대기열에서 뺐습니다.', text: m!.text }
+  }
+
+  /**
+   * "잘못 보냄" on a message Claude already has: a channel message cannot be taken out of the conversation
+   * (it is not something /rewind reaches), so stop the turn and tell Claude plainly not to follow it.
+   */
+  async webRetract(pid: number, ts: string): Promise<{ ok: boolean; note: string }> {
+    const session = this.registry.byPid(pid)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    const last = this.events.last(session.threadTs)
+    const said = this.events
+      .since(session.threadTs, Math.max(0, last - 3000))
+      .reverse()
+      .find((e) => e.type === 'user' && e.ts === ts)
+    if (!said || said.type !== 'user') return { ok: false, note: '그 메시지를 찾지 못했습니다.' }
+    const quoted = truncate(said.text.replace(/\s+/g, ' ').trim(), 200)
+    if (session.pane) await this.interrupt(this.ctx(session, 'esc'))
+    const correction = `[정정] 방금 보낸 '${quoted}' 는 잘못 보낸 거예요. 따르지 말고, 이미 바꾼 파일이나 실행한 명령이 있으면 무엇을 했는지만 짧게 알려 줘요.`
+    this.logAt('INFO', 'inject', 'retracted from the web', this.tag(session, { ts }))
+    await this.slack.post({ threadTs: session.threadTs, text: `↩️ 웹: '${quoted}' 를 잘못 보냈다고 알렸습니다.` })
+    await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
+    return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
+  }
+
   /** A button in the web app: the very handler a Slack click reaches, as the owner. */
   async webAction(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }> {
     if (!a.actionId || typeof a.value !== 'string') return { ok: false, note: '잘못된 버튼입니다.' }

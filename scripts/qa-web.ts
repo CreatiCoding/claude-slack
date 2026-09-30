@@ -104,6 +104,18 @@ const api: AdminApi = {
     changed()
     return { ok: true, note: '보냈습니다.' }
   },
+  async webUnhold(pid, ts) {
+    calls.push(`unhold:${pid}:${ts}`)
+    const s = sessions.find((x) => x.pid === pid)!
+    events.emit(s.thread, { type: 'react', ts, name: 'hourglass_flowing_sand', on: false })
+    events.emit(s.thread, { type: 'react', ts, name: 'x', on: true })
+    changed()
+    return { ok: true, note: '대기열에서 뺐습니다.', text: '고칠 글' }
+  },
+  async webRetract(pid, ts) {
+    calls.push(`retract:${pid}:${ts}`)
+    return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
+  },
   async webAction(a) {
     calls.push(`action:${a.actionId.replace(/_\d+$/, '')}:${a.value}:${a.messageTs ?? ''}`)
     const auto = /^(\d+):auto (on|off)$/.exec(a.value)
@@ -185,12 +197,12 @@ for (const [label, size, phone] of [
   check(`${label}: 할 일 목록 입력칸 위`, (await page.locator('#todos').isVisible()) && ((await page.locator('#todos').textContent()) ?? '').includes('둘 하는 중'))
 
   // Send.
-  await page.locator('#input').fill('안녕 https://example.com/q')
+  await page.locator('#input').fill(`안녕 ${label} https://example.com/q`)
   if (phone) await page.locator('#btn-send').click()
   else await page.locator('#input').press('Enter')
-  await page.waitForSelector('.item.text:has-text("받았어요")')
+  await page.waitForSelector(`.item.text:has-text("받았어요: 안녕 ${label}")`)
   check(`${label}: 보내면 브로커 webSend`, calls.some((c) => c.startsWith('send:11:안녕')))
-  check(`${label}: 보낸 메시지와 전달됨 표시`, ((await page.locator('.item.user').last().textContent()) ?? '').includes('전달됨'))
+  check(`${label}: 보낸 메시지와 전달됨 표시`, ((await page.locator('.item.user').last().textContent()) ?? '').includes('전달됨'), (await page.locator('.item.user').last().textContent()) ?? '')
   check(`${label}: 입력칸 비움`, (await page.locator('#input').inputValue()) === '')
   if (!phone) {
     await page.locator('#input').fill('줄1')
@@ -247,6 +259,22 @@ for (const [label, size, phone] of [
   await page.waitForTimeout(300)
   check(`${label}: 그림만 보내도 된다 (images=1)`, calls.some((c) => c.startsWith('send:11:') && c.endsWith(':images=1')), calls.join(' | '))
   check(`${label}: 보내면 미리보기가 사라진다`, (await page.locator('.pending .thumb').count()) === 0)
+
+  // A held message: "수정" takes it back into the field. A delivered one: "잘못 보냄" asks and retracts.
+  events.emit(A, { type: 'user', ts: '1000.9', text: '고칠 글', via: 'web' })
+  events.emit(A, { type: 'react', ts: '1000.9', name: 'hourglass_flowing_sand', on: true })
+  changed()
+  await page.waitForSelector('button[data-act="unhold"]')
+  await page.locator('button[data-act="unhold"]').click()
+  await page.waitForFunction(() => (document.getElementById('input') as HTMLTextAreaElement).value.includes('고칠 글'), null, { timeout: 3000 }).catch(() => {})
+  check(`${label}: 수정 → 대기열에서 빼고 입력칸에`, calls.includes('unhold:11:1000.9') && (await page.locator('#input').inputValue()).includes('고칠 글'))
+  await page.waitForSelector('text=취소함', { timeout: 3000 }).catch(() => {})
+  check(`${label}: 뺀 메시지는 취소함`, (await page.locator('.user .failed', { hasText: '취소함' }).count()) >= 1)
+  await page.locator('#input').fill('')
+  page.once('dialog', (d) => d.accept())
+  await page.locator('button[data-act="retract"]').first().click()
+  await page.waitForTimeout(300)
+  check(`${label}: 잘못 보냄 → 묻고 retract`, calls.some((c) => c.startsWith('retract:11:')), calls.join(' | '))
 
   // Draft survives switching sessions.
   await page.locator('#input').fill('쓰던 글')

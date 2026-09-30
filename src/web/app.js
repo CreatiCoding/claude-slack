@@ -832,7 +832,17 @@ function userEl(row) {
   if (ev.images?.length) el.insertAdjacentHTML('afterbegin', imagesHtml(ev.images))
   const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
   const set = view.reacts.get(ev.ts)
-  const st = !set ? '' : set.has('hourglass_flowing_sand') ? '<span class="held" title="실행 중인 도구가 끝나면 전달해요">대기 중</span>' : set.has('x') ? '<span class="failed">취소함</span>' : set.has('eyes') || set.has('white_check_mark') ? '<span>전달됨</span>' : ''
+  const held = set?.has('hourglass_flowing_sand')
+  const delivered = !held && !set?.has('x') && (set?.has('eyes') || set?.has('white_check_mark'))
+  const st = !set
+    ? ''
+    : held
+      ? `<span class="held" title="실행 중인 도구가 끝나면 전달해요">대기 중</span><button class="linkish" type="button" data-act="unhold" data-ts="${esc(ev.ts)}">수정</button>`
+      : set.has('x')
+        ? '<span class="failed">취소함</span>'
+        : delivered
+          ? `<span>전달됨</span>${ev.via !== 'terminal' ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
+          : ''
   el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${hhmm(ev.at)}</span>${st}`
   return el
 }
@@ -1189,6 +1199,33 @@ function buttonEl(x, ev, all) {
   })
   return btn
 }
+
+// "수정" on a held message takes it back into the field; "잘못 보냄" stops Claude and tells it not to follow.
+$('log').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-act]')
+  const s = current && sessionOf(current)
+  if (!b || !s) return
+  const ts = b.dataset.ts
+  if (b.dataset.act === 'unhold') {
+    try {
+      const r = await api(`/api/session/${s.pid}/unhold`, { ts })
+      input.value = r.text + (input.value ? '\n' + input.value : '')
+      autosize()
+      saveDraft()
+      input.focus()
+      toast('대기열에서 빼서 입력칸에 넣었어요')
+    } catch (err) {
+      toast(err.message, 'err')
+    }
+  } else if (b.dataset.act === 'retract') {
+    if (!confirm('잘못 보냈다고 알릴까요?\n작업을 멈추고, 이 메시지를 따르지 말라고 보냅니다. 이미 한 일은 무엇인지 알려 달라고 합니다.')) return
+    try {
+      toast((await api(`/api/session/${s.pid}/retract`, { ts })).note)
+    } catch (err) {
+      toast(err.message, 'err')
+    }
+  }
+})
 
 // Copy buttons on every code box, wherever it is.
 document.addEventListener('click', async (e) => {

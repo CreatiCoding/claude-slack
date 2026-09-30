@@ -45,6 +45,8 @@ export interface AdminApi {
   webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
   webSend?(pid: number, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
+  webUnhold?(pid: number, ts: string): Promise<{ ok: boolean; note: string; text?: string }>
+  webRetract?(pid: number, ts: string): Promise<{ ok: boolean; note: string }>
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
@@ -283,6 +285,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const body = await readJson(req, 24 * 1024 * 1024)
     const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
+    return send(res, result.ok ? 200 : 400, result)
+  }
+  const onMessage = /^\/api\/session\/(\d+)\/(unhold|retract)$/.exec(url.pathname)
+  if (req.method === 'POST' && onMessage && api.webUnhold && api.webRetract) {
+    const body = await readJson(req)
+    const ts = String(body.ts ?? '')
+    const result = onMessage[2] === 'unhold' ? await api.webUnhold(Number(onMessage[1]), ts) : await api.webRetract(Number(onMessage[1]), ts)
+    log(`web ${onMessage[2]} ${ts}: ${result.note}`)
     return send(res, result.ok ? 200 : 400, result)
   }
   if (req.method === 'POST' && url.pathname === '/api/action' && api.webAction) {
