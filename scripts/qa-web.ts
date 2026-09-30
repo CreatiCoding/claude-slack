@@ -282,6 +282,37 @@ const browser = await chromium.launch()
   await ctx.close()
 }
 
+// A page in an error loop sends at most 20 errors a minute.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  await page.goto(base + '/')
+  await page.waitForSelector('.row[data-thread]')
+  const before = clientErrors.length
+  await page.evaluate(() => {
+    for (let i = 0; i < 40; i++) setTimeout(() => { throw new Error('반복 오류 ' + i) }, 0)
+  })
+  await page.waitForTimeout(800)
+  const sent = clientErrors.length - before
+  check('화면 오류: 페이지는 분당 20개까지만 보낸다', sent > 0 && sent <= 20, String(sent))
+  await ctx.close()
+}
+
+// A sessions_delta that fails leaves the page out of step with the server: it reconnects and gets the whole list.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  let streams = 0
+  await page.route('**/api/stream*', async (route) => {
+    if (++streams > 1) return route.continue()
+    await route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: `retry: 60000\n\nevent: hello\ndata: {"conn":"x"}\n\nevent: sessions\ndata: []\n\nevent: sessions_delta\ndata: {broken\n\n` })
+  })
+  await page.goto(base + '/')
+  await page.waitForSelector('.row[data-thread]', { timeout: 5000 }).catch(() => {})
+  check('깨진 sessions_delta: 다시 붙어 전체 목록을 받는다', streams >= 2 && (await page.locator('.row[data-thread]').count()) >= 3, `streams=${streams}`)
+  await ctx.close()
+}
+
 // A frame that cannot be parsed is recorded (screen error log) and does not stop the frames after it.
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })

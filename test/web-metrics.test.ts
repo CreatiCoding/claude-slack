@@ -207,3 +207,22 @@ test('화면 오류: 한 줄 요약과 그 아래 들여쓴 스택으로 남긴�
     server.close()
   }
 })
+
+test('4-3 화면 오류: where·view·url 의 줄바꿈으로 로그 줄을 꾸며 넣을 수 없고, 서버는 분당 상한을 둔다', async () => {
+  const entries: string[] = []
+  const server = createAdminServer(fakeApi(), { port: 0, clientLog: (e) => entries.push(e) })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  const post = (b: object) => fetch(`http://127.0.0.1:${port}/api/client-error`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
+  try {
+    await post({ where: 'sse\n2026-10-01 [INFO] [admin] 가짜 줄', view: 'pc\nX', message: 'm', url: '/#1\n가짜' })
+    const [head, ...rest] = entries[0]!.split('\n')
+    assert.ok(!rest.length, entries[0])
+    assert.ok(head!.includes('sse 2026-10-01'), head)
+    let refused = 0
+    for (let i = 0; i < 70; i++) if ((await post({ where: 'w', message: `m${i}` })).status === 429) refused++
+    assert.ok(entries.length <= 61 && refused >= 9, `기록 ${entries.length}, 거절 ${refused}`)
+  } finally {
+    server.close()
+  }
+})

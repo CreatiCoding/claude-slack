@@ -103,6 +103,8 @@ const SSE_PING_MS = 25_000
 const streams = new Map<string, { thread: string | null; live?: string; write?: (event: string, data: unknown, kind?: string) => void }>()
 /** How often the text being written is read off the screen for the pages watching that session. */
 const LIVE_MS = 1500
+/** When screen errors came in, over the last minute. */
+const clientErrorTimes: number[] = []
 /** The web app's files, served as they are: no build step. */
 const WEB_FILES: Record<string, string> = {
   '/': 'index.html',
@@ -325,10 +327,16 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   }
   // An error on a page (a listener that threw, a draw that failed): one summary line, the stack indented under it.
   if (req.method === 'POST' && url.pathname === '/api/client-error') {
+    // A page stuck in an error loop must not fill the disk: at most 60 a minute, the rest refused.
+    const now = Date.now()
+    while (clientErrorTimes.length && now - clientErrorTimes[0]! > 60_000) clientErrorTimes.shift()
+    if (clientErrorTimes.length >= 60) return send(res, 429, { error: '화면 오류가 너무 많아 잠시 받지 않습니다.' })
+    clientErrorTimes.push(now)
     const b = await readJson(req, 16 * 1024)
-    const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\r\t]/g, ' ').slice(0, n)
-    const head = `화면 오류 [${clean(b.view, 8)}] ${clean(b.where, 40)}: ${clean(b.message, 500).replace(/\n/g, ' ')} (${clean(b.url, 120)})`
-    const stack = clean(b.stack, 4000).split('\n').filter(Boolean).map((l) => '    ' + l.trim()).join('\n')
+    // Every field on one line (no control characters): a newline in where/view/url could forge a log line.
+    const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\u0000-\u001f\u007f\u2028\u2029]+/g, ' ').slice(0, n)
+    const head = `화면 오류 [${clean(b.view, 8)}] ${clean(b.where, 40)}: ${clean(b.message, 500)} (${clean(b.url, 120)})`
+    const stack = String(b.stack ?? '').slice(0, 4000).split('\n').map((l) => clean(l, 300).trim()).filter(Boolean).map((l) => '    ' + l).join('\n')
     ;(opts?.clientLog ?? ((line: string) => log(line)))(stack ? `${head}\n${stack}` : head)
     res.writeHead(204)
     res.end()

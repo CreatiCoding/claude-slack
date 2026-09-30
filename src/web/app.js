@@ -129,11 +129,18 @@ function toast(text, kind = 'ok', ms = 2600) {
 // What went wrong on this screen goes to the broker's log (web-client.log), not only to a toast nobody reads
 // on a phone. The same error is sent once a minute at most.
 const reported = new Map()
+/** At most 20 a minute from this page, whatever they are: a loop of different errors must not flood the broker. */
+const reportTimes = []
 function reportError(where, err) {
   const message = String(err?.message ?? err ?? '알 수 없는 오류').slice(0, 500)
   const key = where + '|' + message
-  if (Date.now() - (reported.get(key) ?? 0) < 60_000) return
-  reported.set(key, Date.now())
+  const now = Date.now()
+  if (now - (reported.get(key) ?? 0) < 60_000) return
+  while (reportTimes.length && now - reportTimes[0] > 60_000) reportTimes.shift()
+  if (reportTimes.length >= 20) return
+  reportTimes.push(now)
+  reported.set(key, now)
+  if (reported.size > 200) reported.delete(reported.keys().next().value)
   try {
     fetch(withToken('/api/client-error'), {
       method: 'POST',
@@ -250,15 +257,29 @@ function connect() {
     store.set('groups-cache', groups)
     renderList()
   })
-  // After the first full list, only the sessions that changed, with the order as thread keys.
-  on('sessions_delta', (e) => {
-    metrics.recvBytes += e.data.length
+  // After the first full list, only the sessions that changed, with the order as thread keys. One that cannot be
+  // read leaves this page out of step with what the server thinks it has: start over (a new stream sends it all).
+  es.addEventListener('sessions_delta', (e) => {
+    let delta
+    try {
+      delta = JSON.parse(e.data)
+    } catch (err) {
+      reportError('sse:sessions_delta', err)
+      return void connect()
+    }
+    try {
+      applyDelta(delta, e.data.length)
+    } catch (err) {
+      reportError('sse:sessions_delta', err)
+    }
+  })
+  const applyDelta = ({ order, changed }, bytes) => {
+    metrics.recvBytes += bytes
     metrics.recvEvents++
-    const { order, changed } = JSON.parse(e.data)
     const by = new Map(sessions.map((s) => [s.thread, s]))
     for (const s of changed) by.set(s.thread, s)
     applySessions(order.map((k) => by.get(k)).filter(Boolean))
-  })
+  }
   // What is being written right now (not stored): the activity box shows its last two lines.
   on('live', (e) => {
     const { thread: ts, text } = JSON.parse(e.data)

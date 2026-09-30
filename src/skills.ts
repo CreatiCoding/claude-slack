@@ -9,7 +9,8 @@
  * A person's message excludes system reminders, tool results, skill bodies (isMeta) and compaction summaries.
  * Counted over every conversation in ~/.claude/projects, reading each file only from where it was left.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -19,6 +20,16 @@ export interface SkillInfo {
   kind: 'skill' | 'command'
   source: 'user' | 'project' | 'plugin'
   description?: string
+}
+
+/** `user-invocable: false`: a skill only Claude calls, not one to offer in the chip. */
+function hiddenFromUser(file: string): boolean {
+  try {
+    const fm = /^---\n([\s\S]*?)\n---/.exec(readFileSync(file, 'utf8').slice(0, 4000))?.[1] ?? ''
+    return /^user-invocable:\s*false\s*$/m.test(fm)
+  } catch {
+    return false
+  }
 }
 
 function frontmatterDescription(file: string): string | undefined {
@@ -39,7 +50,7 @@ function scanDir(base: string, source: SkillInfo['source'], prefix = ''): SkillI
   try {
     for (const n of readdirSync(skills)) {
       const f = join(skills, n, 'SKILL.md')
-      if (existsSync(f)) out.push({ name: prefix + n, kind: 'skill', source, ...(frontmatterDescription(f) ? { description: frontmatterDescription(f) } : {}) })
+      if (existsSync(f) && !hiddenFromUser(f)) out.push({ name: prefix + n, kind: 'skill', source, ...(frontmatterDescription(f) ? { description: frontmatterDescription(f) } : {}) })
     }
   } catch {}
   const walk = (dir: string, ns: string[]) => {
@@ -77,15 +88,17 @@ export function availableSkills(cwd: string, o: { home?: string; claudeDir?: str
   }
   // Enabled plugins, from where they are installed.
   try {
-    const installed = JSON.parse(readFileSync(join(claude, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins?: Record<string, Array<{ installPath?: string }>> }
+    const installed = JSON.parse(readFileSync(join(claude, 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins?: Record<string, Array<{ installPath?: string; scope?: string; projectPath?: string }>> }
     let enabled: Record<string, boolean> | undefined
     try {
       enabled = (JSON.parse(readFileSync(join(claude, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> }).enabledPlugins
     } catch {}
     for (const [id, entries] of Object.entries(installed.plugins ?? {})) {
       if (enabled && enabled[id] !== true) continue
-      const path = entries.at(-1)?.installPath
-      if (path) out.push(...scanDir(path, 'plugin', id.split('@')[0] + ':'))
+      // A plugin installed for one project belongs only to sessions in that project's folder.
+      const here = resolve(cwd)
+      const entry = [...entries].reverse().find((e) => e.scope !== 'project' || (e.projectPath && (here === resolve(e.projectPath) || here.startsWith(resolve(e.projectPath) + '/'))))
+      if (entry?.installPath) out.push(...scanDir(entry.installPath, 'plugin', id.split('@')[0] + ':'))
     }
   } catch {}
   const seen = new Set<string>()
@@ -94,16 +107,31 @@ export function availableSkills(cwd: string, o: { home?: string; claudeDir?: str
 
 interface FileState {
   offset: number
-  /** The last message the person wrote in this file, for a Skill call that comes after it. */
-  last?: string
+  /**
+   * Short hashes of the words in the last message the person wrote in this file, for a Skill call read later.
+   * Not the message itself: it is private, and it would make the state file large.
+   */
+  lastWords?: string[]
 }
 interface UsageState {
+  /** The counting rules this was made with: different rules, start over. */
+  version: number
   files: Record<string, FileState>
   direct: Record<string, number>
   auto: Record<string, number>
 }
 
+/** Bump when the counting rules change; older counts are dropped. */
+const USAGE_VERSION = 2
+/** Read a conversation this much at a time, letting the broker breathe in between. */
+const CHUNK = 1024 * 1024
+/** A name this short ("run", "docs", "loop") is an everyday word: only /name counts as calling it. */
+const SHORT_NAME = 4
+
 const REMINDER_RE = /<system-reminder>[\s\S]*?<\/system-reminder>/g
+const wordHash = (w: string) => createHash('sha1').update(w.toLowerCase()).digest('hex').slice(0, 8)
+/** Words, so "report" does not match "reporting": letters, digits and - _ : kept together. */
+const words = (text: string) => [...new Set(text.toLowerCase().split(/[^\p{L}\p{N}_:\-]+/u).filter(Boolean))]
 
 /** The person's own words in a transcript entry, or undefined when it is not theirs. */
 function ownText(entry: { type?: string; isMeta?: boolean; isCompactSummary?: boolean; message?: { content?: unknown } }): string | undefined {
@@ -128,10 +156,12 @@ export class SkillUsage {
   constructor(o: { statePath?: string; projectsDir?: string } = {}) {
     this.path = o.statePath ?? join(homedir(), '.claude-slack', 'skill-usage.json')
     this.projects = o.projectsDir ?? join(homedir(), '.claude', 'projects')
+    const fresh = (): UsageState => ({ version: USAGE_VERSION, files: {}, direct: {}, auto: {} })
     try {
-      this.state = JSON.parse(readFileSync(this.path, 'utf8')) as UsageState
+      const st = JSON.parse(readFileSync(this.path, 'utf8')) as UsageState
+      this.state = st.version === USAGE_VERSION ? st : fresh()
     } catch {
-      this.state = { files: {}, direct: {}, auto: {} }
+      this.state = fresh()
     }
   }
 
@@ -139,7 +169,7 @@ export class SkillUsage {
     return { direct: this.state.direct, auto: this.state.auto }
   }
 
-  /** Read what was added to every conversation since last time; yields between files so the broker stays responsive. */
+  /** Read what was added to every conversation since last time, a piece at a time, yielding in between. */
   async update(): Promise<void> {
     let dirs: string[]
     try {
@@ -164,53 +194,61 @@ export class SkillUsage {
           continue
         }
         const st = (this.state.files[file] ??= { offset: 0 })
-        if (size < st.offset) Object.assign(st, { offset: 0, last: undefined })
+        if (size < st.offset) Object.assign(st, { offset: 0, lastWords: undefined })
         if (size === st.offset) continue
-        this.readFile(file, st, size)
+        await this.readFile(file, st, size)
         changed = true
-        await new Promise((r) => setImmediate(r))
       }
     }
     if (changed) this.save()
   }
 
-  private readFile(file: string, st: FileState, size: number): void {
-    const fd = openSync(file, 'r')
-    let text: string
-    try {
-      const buf = Buffer.alloc(size - st.offset)
-      readSync(fd, buf, 0, buf.length, st.offset)
-      text = buf.toString('utf8')
-    } finally {
-      closeSync(fd)
+  private async readFile(file: string, st: FileState, size: number): Promise<void> {
+    let rest = ''
+    let consumed = st.offset
+    const stream = createReadStream(file, { start: st.offset, end: size - 1, highWaterMark: CHUNK })
+    for await (const chunk of stream) {
+      const text = rest + (chunk as Buffer).toString('utf8')
+      const end = text.lastIndexOf('\n')
+      if (end < 0) {
+        rest = text
+        continue
+      }
+      rest = text.slice(end + 1)
+      const whole = text.slice(0, end)
+      consumed += Buffer.byteLength(whole) + 1
+      for (const line of whole.split('\n')) this.line(line, st)
+      // One piece at a time: a hundred-MB conversation must not stop the broker.
+      await new Promise((r) => setImmediate(r))
     }
-    // Only whole lines: a line still being written is read next time.
-    const end = text.lastIndexOf('\n')
-    if (end < 0) return
-    st.offset += Buffer.byteLength(text.slice(0, end + 1))
-    for (const line of text.slice(0, end).split('\n')) {
-      if (!line.includes('"user"') && !line.includes('"Skill"')) continue
-      let entry: { type?: string; isMeta?: boolean; isCompactSummary?: boolean; message?: { content?: unknown } }
-      try {
-        entry = JSON.parse(line)
-      } catch {
-        continue
-      }
-      const own = ownText(entry)
-      if (own !== undefined) {
-        for (const m of own.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) this.state.direct[m[1]!] = (this.state.direct[m[1]!] ?? 0) + 1
-        st.last = own.slice(0, 2000)
-        continue
-      }
-      if (entry.type !== 'assistant' || !Array.isArray(entry.message?.content)) continue
-      for (const b of entry.message!.content as Array<{ type?: string; name?: string; input?: { skill?: unknown } }>) {
-        if (b.type !== 'tool_use' || b.name !== 'Skill' || typeof b.input?.skill !== 'string') continue
-        const name = b.input.skill.replace(/^\//, '')
-        const short = name.split(':').pop()!
-        const asked = st.last !== undefined && (st.last.includes(name) || st.last.includes(short))
-        const bucket = asked ? this.state.direct : this.state.auto
-        bucket[name] = (bucket[name] ?? 0) + 1
-      }
+    // Only whole lines count as read: a line still being written is read next time.
+    st.offset = consumed
+  }
+
+  private line(line: string, st: FileState): void {
+    if (!line.includes('"user"') && !line.includes('"Skill"')) return
+    let entry: { type?: string; isMeta?: boolean; isCompactSummary?: boolean; message?: { content?: unknown } }
+    try {
+      entry = JSON.parse(line)
+    } catch {
+      return
+    }
+    const own = ownText(entry)
+    if (own !== undefined) {
+      for (const m of own.matchAll(/<command-name>\/?([^<\s]+)<\/command-name>/g)) this.state.direct[m[1]!] = (this.state.direct[m[1]!] ?? 0) + 1
+      st.lastWords = words(own).slice(0, 300).map(wordHash)
+      return
+    }
+    if (entry.type !== 'assistant' || !Array.isArray(entry.message?.content)) return
+    for (const b of entry.message!.content as Array<{ type?: string; name?: string; input?: { skill?: unknown } }>) {
+      if (b.type !== 'tool_use' || b.name !== 'Skill' || typeof b.input?.skill !== 'string') continue
+      const name = b.input.skill.replace(/^\//, '')
+      const short = name.split(':').pop()!
+      const said = new Set(st.lastWords ?? [])
+      // A short, common name is only "called directly" as /name (counted above), never by being mentioned.
+      const asked = short.length > SHORT_NAME && (said.has(wordHash(name)) || said.has(wordHash(short)))
+      const bucket = asked ? this.state.direct : this.state.auto
+      bucket[name] = (bucket[name] ?? 0) + 1
     }
   }
 

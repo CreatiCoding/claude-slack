@@ -68,3 +68,31 @@ test('브로커: 목록에 세션이 쓰는 플러그인 버전과 "새로고침
   s.conn.close()
   t.close()
 })
+
+test('4-1 gh 가 로그인한 모든 호스트의 계정을 본다(사내 GHE 포함)', async () => {
+  const { githubAccounts } = await import('../src/plugins.ts')
+  const { chmodSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'gh-'))
+  const gh = join(dir, 'gh')
+  writeFileSync(gh, `#!/bin/sh\necho "github.com" >&2\necho "  ✓ Logged in to github.com account CreatiCoding (keyring)" >&2\necho "github.toss.bz" >&2\necho "  ✓ Logged in to github.toss.bz account seokho-jeong (keyring)" >&2\nexit 1\n`)
+  chmodSync(gh, 0o755)
+  assert.deepEqual(await githubAccounts(gh), ['CreatiCoding', 'seokho-jeong'])
+  // A GHE marketplace (address path has the GHE account) counts as mine.
+  writeFileSync(join(dir, 'known_marketplaces.json'), JSON.stringify({ tossy: { source: { source: 'git', url: 'https://github.toss.bz/seokho-jeong/tossy.git' } } }))
+  assert.deepEqual(userMarkets(dir, 'seokho-jeong'), ['tossy'])
+})
+
+test('4-1 스킬 줄은 읽은 위치에서 이어 읽는다', async () => {
+  const { SkillLineReader } = await import('../src/plugins.ts')
+  const { appendFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'slr-'))
+  const t = join(dir, 't.jsonl')
+  const line = (v: string) => JSON.stringify({ type: 'user', timestamp: new Date().toISOString(), message: { content: [{ type: 'text', text: `Base directory for this skill: /x/cache/m/p/${v}/skills/a` }] } }) + '\n'
+  writeFileSync(t, line('1.0.0'))
+  const r = new SkillLineReader(t)
+  assert.equal(r.read().get('m/p')!.version, '1.0.0')
+  const offset = (r as unknown as { offset: number }).offset
+  appendFileSync(t, line('1.1.0'))
+  assert.equal(r.read().get('m/p')!.version, '1.1.0')
+  assert.ok((r as unknown as { offset: number }).offset > offset)
+})
