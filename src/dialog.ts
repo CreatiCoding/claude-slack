@@ -241,10 +241,12 @@ export type ProceedResult = 'answered' | 'no-dialog' | 'no-option' | 'unfocused'
 const ALWAYS_RE = /don'?t ask again|always allow|항상/i
 /** "Yes, allow reading from /X from this project" — still broader than one time. */
 const PROJECT_WIDE_RE = /\b(project|directory|folder)\b/i
+/** Allowed only until this Claude process ends (Claude in Chrome's "Allow all actions on <site> for this session"). */
+const SESSION_RE = /\b(for|during) (this|the current) session\b|이번 세션|세션 동안/i
 const DENY_RE = /^(no|deny|cancel|reject)\b/i
 const YES_RE = /^(yes|proceed|allow|continue)\b/i
 
-export type OptionKind = 'allow-once' | 'allow-always' | 'deny' | 'other'
+export type OptionKind = 'allow-once' | 'allow-session' | 'allow-always' | 'deny' | 'other'
 
 /**
  * What answering this option means. Order matters: "Don't ask again for Bash"
@@ -254,7 +256,7 @@ export type OptionKind = 'allow-once' | 'allow-always' | 'deny' | 'other'
 export function classifyOption(label: string): OptionKind {
   if (ALWAYS_RE.test(label)) return 'allow-always'
   if (DENY_RE.test(label)) return 'deny'
-  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : 'allow-once'
+  if (YES_RE.test(label)) return PROJECT_WIDE_RE.test(label) ? 'allow-always' : SESSION_RE.test(label) ? 'allow-session' : 'allow-once'
   return 'other'
 }
 
@@ -265,7 +267,7 @@ export function classifyOption(label: string): OptionKind {
  */
 export function isProceedDialog(d: TerminalDialog): boolean {
   const kinds = d.options.map((o) => classifyOption(o.label))
-  return kinds.includes('deny') && (kinds.includes('allow-once') || kinds.includes('allow-always'))
+  return kinds.includes('deny') && kinds.some((k) => k === 'allow-once' || k === 'allow-session' || k === 'allow-always')
 }
 
 /**
@@ -325,13 +327,17 @@ export class DialogDriver {
    * screen actually holds such a dialog, so a verdict for one request can never
    * answer an unrelated prompt that happens to be up.
    */
-  async answerProceed(pane: string, behavior: 'allow' | 'deny' | 'always', timeoutMs = 0): Promise<ProceedResult> {
+  /**
+   * `auto` is 전부 허용: the widest allow that ends with the session ("for this session") when there is one,
+   * else once. Never an option that is written into the settings ("don't ask again", "always", a whole project).
+   */
+  async answerProceed(pane: string, behavior: 'allow' | 'deny' | 'always' | 'auto', timeoutMs = 0): Promise<ProceedResult> {
     // Default to a single capture: a verdict answers the dialog that is up *now*.
     // Waiting would let a verdict for one request answer the next request's dialog.
     const dialog = timeoutMs > 0 ? await this.waitForDialog(pane, timeoutMs) : await this.read(pane)
     if (!dialog || !isProceedDialog(dialog)) return 'no-dialog'
-    const want: OptionKind = behavior === 'always' ? 'allow-always' : behavior === 'allow' ? 'allow-once' : 'deny'
-    const pick = dialog.options.find((o) => classifyOption(o.label) === want)
+    const want: OptionKind[] = behavior === 'always' ? ['allow-always'] : behavior === 'allow' ? ['allow-once'] : behavior === 'auto' ? ['allow-session', 'allow-once'] : ['deny']
+    const pick = want.map((k) => dialog.options.find((o) => classifyOption(o.label) === k)).find(Boolean)
     if (!pick) return 'no-option'
     return (await this.press(pane, String(pick.n))) ? 'answered' : 'unfocused'
   }

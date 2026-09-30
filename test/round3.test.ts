@@ -127,3 +127,43 @@ test('예약 취소하면 붙잡은 메시지를 바로 흘려보낸다; 지금 
   s2.conn.close()
   t.close()
 })
+
+async function autoSession(pane: string) {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: pane })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '5.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  return { t, s }
+}
+const surface = (t: Awaited<ReturnType<typeof setup>>) => hook(t.socketPath, 100, { hook_event_name: 'Notification', notification_type: 'agent_needs_input', message: '확인' })
+
+test('전부 허용: Claude in Chrome 사이트 확인 창은 "for this session" 을 고른다(다음 동작에서 또 묻지 않게)', async () => {
+  const { t, s } = await autoSession('%96')
+  t.tmux.screen = [' Claude in Chrome', ' Navigate to example.com', '', ' Do you want to allow this action?', ' ❯ 1. Allow', '   2. Allow all actions on example.com for this session', '   3. Deny (esc)'].join('\n')
+  await surface(t)
+  await until(() => t.slack.posts.some((p) => /자동 허용 · 터미널 확인 창/.test(p.text)), '자동 허용 기록')
+  assert.ok(t.tmux.keys.includes('%96:2'), `세션 동안 허용(2): ${t.tmux.keys}`)
+  assert.ok(!t.tmux.keys.includes('%96:1'))
+  s.conn.close()
+  t.close()
+})
+
+test('전부 허용: 설정에 남는 선택지("don\'t ask again", "always")는 세션 선택지가 있어도 누르지 않는다', async () => {
+  const { t, s } = await autoSession('%97')
+  t.tmux.screen = [' Bash command', '   rm x', '', ' Do you want to proceed?', ' ❯ 1. Yes', "   2. Yes, and don't ask again for rm commands", '   3. Always allow for this session', '   4. No'].join('\n')
+  await surface(t)
+  await until(() => t.tmux.keys.includes('%97:1'), '이번만(1)')
+  assert.ok(!t.tmux.keys.includes('%97:2') && !t.tmux.keys.includes('%97:3'), String(t.tmux.keys))
+  s.conn.close()
+  t.close()
+})
+
+test('전부 허용: 질문 글이 구분선과 섞여 읽혀도("──── proceed?") 선택지 모양(허용 + 거부)으로 판단해 누른다', async () => {
+  const { t, s } = await autoSession('%98')
+  t.tmux.screen = [' Bash command', '   ls', '──────────────────── proceed?', ' ❯ 1. Yes', '   2. No'].join('\n')
+  await surface(t)
+  await until(() => t.tmux.keys.includes('%98:1'), '예(1)')
+  assert.ok(!t.slack.posts.some((p) => /선택을 기다립니다/.test(p.text)), '카드로 멈추지 않는다')
+  s.conn.close()
+  t.close()
+})

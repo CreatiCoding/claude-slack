@@ -2074,7 +2074,7 @@ export class Broker {
     // 전부 허용: a permission asked only in the terminal (no MCP request) is pressed "yes" here too.
     // Only a yes/no proceed dialog; a question or a plan still goes to the person.
     if (session.autoAllow && isProceedDialog(dialog)) {
-      const pressed = await this.dialogs.answerProceed(session.pane, 'allow')
+      const pressed = await this.dialogs.answerProceed(session.pane, 'auto')
       if (pressed === 'answered') {
         const what = [dialog.context, dialog.description, dialog.question].filter(Boolean).join('\n')
         this.logAt('INFO', 'perm', 'auto-allowed a terminal dialog', this.tag(session, { question: truncate(dialog.question, 80) }))
@@ -2854,14 +2854,16 @@ export class Broker {
     // classifier, "Do you want to proceed?"). The MCP verdict does not clear it, so drive it too.
     // Only a yes/no proceed dialog is touched, so an unrelated prompt cannot be answered by mistake.
     let terminalNote = ''
-    const pressed = session.pane ? await this.dialogs.answerProceed(session.pane, behavior) : 'no-dialog'
+    // 전부 허용 (a record card) may take a "for this session" option; a person's 허용 is this once.
+    const how = record && behavior === 'allow' ? 'auto' : behavior
+    const pressed = session.pane ? await this.dialogs.answerProceed(session.pane, how) : 'no-dialog'
     this.logAt('INFO', 'perm', behavior, this.tag(session, { req: requestId, user, pressed, waited }))
     if (pressed === 'unfocused') {
       terminalNote = ' · ⏳ 터미널 확인 창은 프롬프트가 입력을 마치는 대로 자동으로 누릅니다'
       this.retryWhenFocused(
         session,
         `perm:${requestId}`,
-        () => this.dialogs.answerProceed(session.pane!, behavior),
+        () => this.dialogs.answerProceed(session.pane!, how),
         async (r) => {
           const ts = msgTs ?? pending?.msgTs
           const label = `${behavior === 'allow' ? '✅ 허용' : '⛔ 거부'} · \`${requestId}\` · <@${user}>${r === 'answered' ? ' · 터미널 확인 창도 눌렀습니다' : r === 'no-dialog' ? '' : ' · ⚠️ 터미널 확인 창을 대신 눌러주지 못했습니다, `:screen` 으로 확인하세요'}`
