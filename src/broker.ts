@@ -1406,6 +1406,10 @@ export class Broker {
     // Several keys can name one thread; the newest record speaks for it.
     const rec = this.recordedAtStart.filter((e) => e.threadTs === session.threadTs).sort((a, b) => b.lastSeen - a.lastSeen)[0] ?? this.dormant.get(session.threadTs)
     if (!rec) return
+    // Applied once, then gone: a later attach in this thread (a refresh relaunches under a new key) must not get
+    // it again, or a reservation kills the new pane, a 전부 허용 turned off comes back, held messages go twice.
+    this.recordedAtStart = this.recordedAtStart.filter((e) => e.threadTs !== session.threadTs)
+    this.dormant.delete(session.threadTs)
     session.notify = rec.notify ?? session.notify
     session.view = rec.view ?? session.view
     session.autoAllow = rec.autoAllow ?? session.autoAllow
