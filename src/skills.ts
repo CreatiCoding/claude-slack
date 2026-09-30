@@ -121,8 +121,8 @@ interface UsageState {
   auto: Record<string, number>
 }
 
-/** Bump when the counting rules change; older counts are dropped. */
-const USAGE_VERSION = 2
+/** Bump when the counting rules change; older counts are dropped. 3: counts inflated by a split character are dropped. */
+const USAGE_VERSION = 3
 /** Read a conversation this much at a time, letting the broker breathe in between. */
 const CHUNK = 1024 * 1024
 /** A name this short ("run", "docs", "loop") is an everyday word: only /name counts as calling it. */
@@ -204,20 +204,25 @@ export class SkillUsage {
   }
 
   private async readFile(file: string, st: FileState, size: number): Promise<void> {
-    let rest = ''
+    // Lines are cut in bytes (0x0A), and only whole lines are decoded: a piece boundary inside a multi-byte
+    // character decoded on its own became U+FFFD, and its byte count pushed the offset past the file's end.
+    let rest: Buffer = Buffer.alloc(0)
     let consumed = st.offset
     const stream = createReadStream(file, { start: st.offset, end: size - 1, highWaterMark: CHUNK })
     for await (const chunk of stream) {
-      const text = rest + (chunk as Buffer).toString('utf8')
-      const end = text.lastIndexOf('\n')
+      const buf = rest.length ? Buffer.concat([rest, chunk as Buffer]) : (chunk as Buffer)
+      const end = buf.lastIndexOf(0x0a)
       if (end < 0) {
-        rest = text
+        rest = buf
         continue
       }
-      rest = text.slice(end + 1)
-      const whole = text.slice(0, end)
-      consumed += Buffer.byteLength(whole) + 1
-      for (const line of whole.split('\n')) this.line(line, st)
+      rest = buf.subarray(end + 1)
+      consumed += end + 1
+      let from = 0
+      for (let nl = buf.indexOf(0x0a, from); nl !== -1 && nl <= end; nl = buf.indexOf(0x0a, from)) {
+        this.line(buf.toString('utf8', from, nl), st)
+        from = nl + 1
+      }
       // One piece at a time: a hundred-MB conversation must not stop the broker.
       await new Promise((r) => setImmediate(r))
     }

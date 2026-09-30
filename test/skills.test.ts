@@ -150,3 +150,21 @@ test('4-2f 스킬 이름은 낱말 경계로, 4자 이하 이름은 /이름 입�
   assert.deepEqual(s.counts().direct, { run: 1, 'publish-report': 1 })
   assert.deepEqual(s.counts().auto, { report: 1, run: 1 })
 })
+
+test('3 조각 경계에 걸린 한글 때문에 읽은 위치가 파일 크기를 넘지 않고, 파일이 그대로면 횟수도 그대로', async () => {
+  const MB = 1024 * 1024
+  // A line whose "한" (3 bytes) straddles the 1MB piece boundary.
+  const head = JSON.stringify({ type: 'user', message: { content: '' } })
+  const pad = MB - 1 - (head.length - 2) - 2 // leaves the 3-byte character starting one byte before the boundary
+  const line1 = JSON.stringify({ type: 'user', message: { content: 'x'.repeat(pad) + '한글' } }) + '\n'
+  const w = usageWorld(line1 + u('<command-name>/publish-report</command-name>'))
+  const { statSync } = await import('node:fs')
+  const s = new SkillUsage({ statePath: w.statePath, projectsDir: w.projects })
+  await s.update()
+  assert.deepEqual(s.counts().direct, { 'publish-report': 1 })
+  const state = JSON.parse(readFile(w.statePath, 'utf8')) as { files: Record<string, { offset: number }> }
+  assert.equal(state.files[w.f]!.offset, statSync(w.f).size, '읽은 위치 = 파일 크기')
+  const again = new SkillUsage({ statePath: w.statePath, projectsDir: w.projects })
+  await again.update()
+  assert.deepEqual(again.counts().direct, { 'publish-report': 1 }, '파일이 그대로면 다시 세지 않는다')
+})
