@@ -55,6 +55,11 @@ export interface AdminApi {
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
   webLive?(thread: string): Promise<string>
+  webGroups?(): unknown
+  webGroupOp?(o: never): { ok: boolean; note: string; id?: string }
+  webDefaultPrompt?(): string
+  webSetDefaultPrompt?(text: string): { ok: boolean; note: string }
+  webClearArchives?(): Promise<{ ok: boolean; note: string }>
   webLinks?(pid: number): Promise<{ prs: Array<{ url: string; label: string }>; threads: Array<{ url: string; label: string }> }>
 }
 
@@ -249,9 +254,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     // The whole list once; after that only what changed, with the order.
     const sent = new Map<string, string>()
     write('sessions', sessionsDelta(sent, api.webSessions())?.changed ?? [])
+    // Groups: the whole (small) thing, but only when it differs from what this page has.
+    let groupsSent = api.webGroups ? JSON.stringify(api.webGroups()) : ''
+    if (groupsSent) write('groups', JSON.parse(groupsSent))
     const offChange = api.onChange(() => {
       const delta = sessionsDelta(sent, api.webSessions!())
       if (delta) write('sessions_delta', delta)
+      const g = api.webGroups ? JSON.stringify(api.webGroups()) : ''
+      if (g !== groupsSent) {
+        groupsSent = g
+        write('groups', JSON.parse(g))
+      }
     })
     const conn = randomBytes(8).toString('hex')
     const me: { thread: string | null; live?: string; write?: typeof write } = { thread: null, write }
@@ -329,6 +342,25 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       log(`web trash ${trash[1]}: ${result.note}`)
       return send(res, result.ok ? 200 : 400, result)
     }
+  }
+  if (url.pathname === '/api/groups' && api.webGroups && api.webGroupOp) {
+    if (req.method === 'GET') return send(res, 200, api.webGroups())
+    if (req.method === 'POST') {
+      const result = api.webGroupOp((await readJson(req)) as never)
+      return send(res, result.ok ? 200 : 400, result)
+    }
+  }
+  if (url.pathname === '/api/default-prompt' && api.webDefaultPrompt && api.webSetDefaultPrompt) {
+    if (req.method === 'GET') return send(res, 200, { text: api.webDefaultPrompt() })
+    if (req.method === 'POST') {
+      const result = api.webSetDefaultPrompt(String((await readJson(req)).text ?? ''))
+      return send(res, result.ok ? 200 : 400, result)
+    }
+  }
+  if (req.method === 'POST' && url.pathname === '/api/archives/clear' && api.webClearArchives) {
+    const result = await api.webClearArchives()
+    log(`web clear archives: ${result.note}`)
+    return send(res, 200, result)
   }
   const links = /^\/api\/session\/(\d+)\/links$/.exec(url.pathname)
   if (req.method === 'GET' && links && api.webLinks) return send(res, 200, await api.webLinks(Number(links[1])))

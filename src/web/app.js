@@ -44,6 +44,7 @@ $('jump').firstElementChild.innerHTML = `${icon('chevron', 'down')}새 메시지
 
 // ------------------------------------------------------------------ state
 let sessions = []
+let groups = store.get('groups-cache', { groups: [], loose: [] })
 let recent = []
 let archives = []
 let options = { models: [], efforts: [], modes: [] }
@@ -207,6 +208,11 @@ function connect() {
     metrics.recvEvents++
     applySessions(JSON.parse(e.data))
   })
+  es.addEventListener('groups', (e) => {
+    groups = JSON.parse(e.data)
+    store.set('groups-cache', groups)
+    renderList()
+  })
   // After the first full list, only the sessions that changed, with the order as thread keys.
   es.addEventListener('sessions_delta', (e) => {
     metrics.recvBytes += e.data.length
@@ -240,6 +246,7 @@ function connect() {
 function applySessions(list) {
   sessions = list
   store.set('sessions-cache', list)
+  queueMicrotask(checkPermissionModal)
   for (const s of sessions) if (!(s.thread in seen)) seen[s.thread] = s.lastSeq // a session seen for the first time counts as read
   store.set('seen', seen)
   renderList()
@@ -376,18 +383,122 @@ function badgeHtml(s) {
   return `<span class="badge ${s.state}">${esc(text)}</span>`
 }
 
-function secHead(key, label, n) {
+function secHead(key, label, n, { group, dropOut } = {}) {
   const open = !folded[key]
   const el = document.createElement('div')
-  el.className = 'sec-head' + (open ? ' open' : '')
+  el.className = 'sec-head' + (open ? ' open' : '') + (group ? ' group' : '')
   el.setAttribute('role', 'button')
-  el.innerHTML = `<span class="tw">${icon('chevron')}</span><span>${esc(label)}</span><span class="n">${n}</span>`
-  el.addEventListener('click', () => {
+  el.innerHTML = `<span class="tw">${icon('chevron')}</span><span class="gname"></span><span class="n">${n}</span>${group ? `<button class="gmore" type="button" aria-label="그룹 메뉴">${icon('more')}</button>` : ''}`
+  el.querySelector('.gname').textContent = label
+  el.addEventListener('click', (e) => {
+    if (e.target.closest('.gmore')) return
     folded[key] = open
     store.set('folded', folded)
     renderList()
   })
+  if (group) {
+    const menu = (at) => openMenu(at, groupItems(group))
+    el.querySelector('.gmore').addEventListener('click', (e) => {
+      const r = e.currentTarget.getBoundingClientRect()
+      menu({ x: r.left, y: r.bottom + 4 })
+    })
+    el.addEventListener('contextmenu', (e) => (e.preventDefault(), menu({ x: e.clientX, y: e.clientY })))
+    // A group head is dragged to reorder groups, and takes a session dropped on it.
+    el.draggable = hasMouse
+    el.addEventListener('dragstart', (e) => startDrag(e, { group: group.id }, group.name))
+    dropTarget(el, { kind: 'head', group: group.id })
+  } else if (dropOut) dropTarget(el, { kind: 'head', group: null })
   return { el, open }
+}
+
+// ---- drag and drop (PC): a session onto a row (that place, that row's group), onto a group head (into it),
+// onto "진행 중"/"이어서 하기" (out of groups); a group head onto another (group order). A 2px accent line marks
+// where it lands, an outline a group it goes into; the pointer carries a small pill with the name.
+let dragging = null
+function startDrag(e, what, name) {
+  dragging = what
+  e.dataTransfer.effectAllowed = 'move'
+  e.dataTransfer.setData('text/plain', name)
+  const pill = document.createElement('div')
+  pill.className = 'drag-pill'
+  pill.textContent = name
+  document.body.append(pill)
+  e.dataTransfer.setDragImage(pill, 12, 14)
+  setTimeout(() => pill.remove(), 0)
+  e.currentTarget.classList.add('dragging')
+  e.currentTarget.addEventListener('dragend', () => {
+    e.currentTarget?.classList?.remove('dragging')
+    dragging = null
+    clearDropMarks()
+  }, { once: true })
+}
+function clearDropMarks() {
+  for (const x of document.querySelectorAll('.drop-before, .drop-after, .drop-into')) x.classList.remove('drop-before', 'drop-after', 'drop-into')
+}
+function dropTarget(el, spot) {
+  el.addEventListener('dragover', (e) => {
+    if (!dragging) return
+    // A group head moves only among group heads.
+    if (dragging.group && !(spot.kind === 'head' && spot.group)) return
+    e.preventDefault()
+    clearDropMarks()
+    const r = el.getBoundingClientRect()
+    const after = e.clientY > r.top + r.height / 2
+    if (dragging.group) el.classList.add(after ? 'drop-after' : 'drop-before')
+    else if (spot.kind === 'head') el.classList.add('drop-into')
+    else el.classList.add(after ? 'drop-after' : 'drop-before')
+  })
+  el.addEventListener('dragleave', () => el.classList.remove('drop-before', 'drop-after', 'drop-into'))
+  el.addEventListener('drop', async (e) => {
+    if (!dragging) return
+    e.preventDefault()
+    const after = el.classList.contains('drop-after')
+    clearDropMarks()
+    const what = dragging
+    dragging = null
+    let op
+    if (what.group) {
+      const ids = groups.groups.map((g) => g.id).filter((id) => id !== what.group)
+      const at = ids.indexOf(spot.group)
+      op = { op: 'order', id: what.group, before: after ? (ids[at + 1] ?? null) : spot.group }
+    } else if (spot.kind === 'head') op = { op: 'move', thread: what.thread, group: spot.group }
+    else {
+      const bucket = spot.group ? groups.groups.find((g) => g.id === spot.group)?.items ?? [] : [...$('list').querySelectorAll('.row[data-loose]')].map((x) => x.dataset.thread)
+      const rest = bucket.filter((t) => t !== what.thread)
+      const at = rest.indexOf(spot.thread) + (after ? 1 : 0)
+      if (spot.group) op = { op: 'move', thread: what.thread, group: spot.group, before: rest[at] ?? null }
+      // Outside groups the shown order is partly the default one: send the whole order as it now looks.
+      else op = { op: 'loose', order: [...rest.slice(0, at), what.thread, ...rest.slice(at)] }
+    }
+    try {
+      await api('/api/groups', op)
+    } catch (err) {
+      toast(err.message, 'err')
+    }
+  })
+}
+
+function groupItems(g) {
+  return [
+    { label: '이름 바꾸기', icon: 'edit', run: () => {
+      const name = prompt('그룹 이름', g.name)
+      if (name && name.trim()) groupOp({ op: 'rename', id: g.id, name })
+    } },
+    { label: '그룹 삭제', icon: 'deny', danger: true, run: () => confirm(`"${g.name}" 그룹을 지울까요? 안의 세션은 그대로 남아요.`) && groupOp({ op: 'delete', id: g.id }) },
+  ]
+}
+async function groupOp(op) {
+  try {
+    return await api('/api/groups', op)
+  } catch (err) {
+    toast(err.message, 'err')
+  }
+}
+async function newGroup(thenThread) {
+  const name = prompt('새 그룹 이름')
+  if (!name || !name.trim()) return
+  const r = await groupOp({ op: 'create', name })
+  if (r?.id && thenThread) groupOp({ op: 'move', thread: thenThread, group: r.id })
 }
 
 function renderList() {
@@ -397,16 +508,28 @@ function renderList() {
   const keepScroll = list.scrollTop
   list.innerHTML = ''
 
-  const live = sessions.filter((s) => match(s.title, s.preview, s.cwd, s.last?.text)).sort((a, b) => (b.state === 'waiting') - (a.state === 'waiting') || b.lastAt - a.lastAt)
-  const h = secHead('live', '진행 중', live.length)
+  const shown = sessions.filter((s) => match(s.title, s.preview, s.cwd, s.last?.text))
+  const byThread = new Map(shown.map((s) => [s.thread, s]))
+  const grouped = new Set(groups.groups.flatMap((g) => g.items))
+  // Groups first, each in its own order; then the rest: the order they were put in, then waiting first, newest first.
+  for (const g of groups.groups) {
+    const members = g.items.map((t) => byThread.get(t)).filter(Boolean)
+    const h = secHead('g:' + g.id, g.name, members.length, { group: g })
+    list.append(h.el)
+    if (h.open) for (const s of members) list.append(liveRow(s, g.id))
+  }
+  const loose = groups.loose || []
+  const rank = (s) => (loose.includes(s.thread) ? loose.indexOf(s.thread) : Infinity)
+  const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => rank(a) - rank(b) || (b.state === 'waiting') - (a.state === 'waiting') || b.lastAt - a.lastAt)
+  const h = secHead('live', '진행 중', live.length, { dropOut: true })
   list.append(h.el)
   if (h.open) {
-    for (const s of live) list.append(liveRow(s))
+    for (const s of live) list.append(liveRow(s, null))
     if (!live.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">${q ? '찾는 세션이 없어요' : '떠 있는 세션이 없어요'}</div>`)
   }
 
   const rec = recent.filter((r) => match(r.title, r.preview, r.cwd))
-  const hr = secHead('recent', '이어서 하기', rec.length)
+  const hr = secHead('recent', '이어서 하기', rec.length, { dropOut: true })
   list.append(hr.el)
   if (hr.open)
     for (const r of rec)
@@ -425,7 +548,7 @@ function renderList() {
   list.scrollTop = keepScroll
 }
 
-function liveRow(s) {
+function liveRow(s, groupId) {
   const row = document.createElement('div')
   const unread = (seen[s.thread] ?? 0) < s.lastSeq && s.thread !== current
   row.className = 'row' + (s.thread === current ? ' active' : '') + (unread ? ' unread' : '')
@@ -441,6 +564,12 @@ function liveRow(s) {
   row.querySelector('.sub.last').textContent = last
   row.querySelector('.sub.where').textContent = `${folderOf(s.cwd)} · ${ago(s.lastAt)}`
   wireRow(row, () => open(s.thread), (at) => openMenu(at, sessionItems(s)))
+  if (groupId === null) row.dataset.loose = '1'
+  if (hasMouse) {
+    row.draggable = true
+    row.addEventListener('dragstart', (e) => startDrag(e, { thread: s.thread }, nameOf(s)))
+    dropTarget(row, { kind: 'row', group: groupId, thread: s.thread })
+  }
   return row
 }
 
@@ -1644,6 +1773,16 @@ input.addEventListener('input', () => {
   saveDraft()
 })
 input.addEventListener('keydown', (e) => {
+  // ↑ in an empty field brings back the last message sent in this session.
+  if (e.key === 'ArrowUp' && !input.value && current && !e.isComposing) {
+    const last = store.get('lastSent:' + current, '')
+    if (last) {
+      e.preventDefault()
+      input.value = last
+      autosize()
+    }
+    return
+  }
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
   if (e.metaKey || e.ctrlKey) return // ⌘↵ is "allow", never "send"
   if (e.shiftKey || !hasMouse) return // a newline (a phone keyboard's Enter is always a newline)
@@ -1774,6 +1913,16 @@ function sessionItems(s) {
       ],
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
+    {
+      label: `그룹: ${groups.groups.find((g) => g.items.includes(s.thread))?.name ?? '없음'}`,
+      icon: 'folder',
+      sub: () => [
+        ...groups.groups.map((g) => ({ label: g.name, icon: 'folder', on: g.items.includes(s.thread), run: () => groupOp({ op: 'move', thread: s.thread, group: g.id }) })),
+        ...(groups.groups.some((g) => g.items.includes(s.thread)) ? [{ label: '그룹에서 빼기', icon: 'undo', run: () => groupOp({ op: 'move', thread: s.thread, group: null }) }] : []),
+        'sep',
+        { label: '새 그룹…', icon: 'plus', run: () => newGroup(s.thread) },
+      ],
+    },
     { label: s.autoAllow ? '전부 허용 끄기' : '전부 허용 켜기', icon: 'bolt', on: s.autoAllow, run: () => toggleAuto(s) },
     { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
     'sep',
@@ -1821,6 +1970,8 @@ function globalItems() {
   const theme = store.get('theme', 'auto')
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
+    { label: '새 그룹', icon: 'folder', run: () => newGroup() },
+    { label: '기본 프롬프트', icon: 'edit', run: editDefaultPrompt },
     {
       label: '테마',
       icon: theme === 'dark' ? 'moon' : 'sun',
@@ -1831,11 +1982,140 @@ function globalItems() {
         { label: '어둡게', icon: 'moon', on: theme === 'dark', run: () => applyTheme('dark') },
       ],
     },
+    'sep',
+    { label: '이어서 하기 비우기', icon: 'undo', run: () => confirm('이어서 하기 목록을 비울까요?\n맥의 대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).') && groupOp({ op: 'clearRecent' }).then(loadSideLists) },
+    { label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => confirm('지난 기록을 모두 지울까요? 실행 중인 세션의 기록은 남겨요.') && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) },
     { label: '이전 관리 화면', icon: 'screen', run: () => (location.href = withToken('/admin')) },
   ]
   const s = current && sessionOf(current)
   if (s) items.push('sep', { head: '이 세션' }, ...sessionItems(s).filter((x) => x.label !== '열기'))
   return items
+}
+// ---- ⌘K: find a session. "새 세션" first, then running sessions filtered by name, state, folder, first message.
+function openFinder() {
+  closeMenu()
+  const scrim = document.createElement('div')
+  scrim.className = 'scrim dim'
+  const el = document.createElement('div')
+  el.className = 'finder'
+  el.innerHTML = `<input class="search" placeholder="세션 찾기" aria-label="세션 찾기"><div class="finder-list" role="listbox"></div>`
+  const q = el.querySelector('input')
+  let items = []
+  let sel = 0
+  const draw = () => {
+    const t = q.value.trim().toLowerCase()
+    const found = sessions.filter((s) => !t || [nameOf(s), STATE[s.state], s.waiting, s.cwd, s.preview].some((v) => (v || '').toLowerCase().includes(t)))
+    items = [{ label: '새 세션', icon: 'plus', run: newSession }, ...found.map((s) => ({ label: nameOf(s), sub: `${STATE[s.state] ?? ''} · ${folderOf(s.cwd)}`, icon: 'chat', run: () => open(s.thread) }))]
+    sel = Math.max(0, Math.min(sel, items.length - 1))
+    const box = el.querySelector('.finder-list')
+    box.innerHTML = ''
+    items.forEach((it, i) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'mi' + (i === sel ? ' sel' : '')
+      b.innerHTML = `${icon(it.icon)}<span class="fl"></span><span class="end"></span>`
+      b.querySelector('.fl').textContent = it.label
+      b.querySelector('.end').textContent = it.sub ?? ''
+      b.addEventListener('click', () => (close(), it.run()))
+      box.append(b)
+    })
+    box.children[sel]?.scrollIntoView({ block: 'nearest' })
+  }
+  const close = () => (scrim.remove(), el.remove())
+  // Typing a query highlights its first match; "새 세션" stays at the top, one ↑ away.
+  q.addEventListener('input', () => ((sel = q.value.trim() ? 1 : 0), draw()))
+  q.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+      draw()
+    } else if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault()
+      const it = items[sel]
+      close()
+      it?.run()
+    } else if (e.key === 'Escape') close()
+  })
+  scrim.addEventListener('click', close)
+  document.body.append(scrim, el)
+  draw()
+  q.focus()
+}
+
+// ---- Another session waits for a permission: ask here, whatever screen this is. Dismissed by tapping outside,
+// that request is not asked again. The session on screen shows its own card instead.
+let permModal = null
+// Kept across reloads: a request dismissed once is not asked again.
+const dismissedPerms = new Set(store.get('dismissed-perms', []))
+const dismissPerm = (ts) => {
+  dismissedPerms.add(ts)
+  store.set('dismissed-perms', [...dismissedPerms].slice(-200))
+}
+function checkPermissionModal() {
+  if (permModal) {
+    const still = sessions.some((s) => s.permission?.ts === permModal.dataset.ts && s.thread !== current)
+    if (still) return
+    permModal.remove()
+    permModal.scrim?.remove()
+    permModal = null
+  }
+  const s = sessions.find((x) => x.permission && x.thread !== current && !dismissedPerms.has(x.permission.ts))
+  if (!s) return
+  const scrim = document.createElement('div')
+  scrim.className = 'scrim dim'
+  const el = document.createElement('div')
+  el.className = 'perm-modal'
+  el.dataset.ts = s.permission.ts
+  el.innerHTML = `<div class="pm-head">${icon('lock')}<div><div class="pm-name"></div><div class="pm-where"></div></div></div>`
+  el.querySelector('.pm-name').textContent = nameOf(s)
+  el.querySelector('.pm-where').textContent = folderOf(s.cwd)
+  el.append(cardEl({ ts: s.permission.ts, text: s.permission.text, blocks: s.permission.blocks, at: Date.now() }, s.permission.blocks))
+  const go = document.createElement('button')
+  go.type = 'button'
+  go.className = 'btn'
+  go.textContent = '세션으로 가기'
+  go.addEventListener('click', () => {
+    dismissPerm(s.permission.ts)
+    open(s.thread)
+  })
+  el.querySelector('.actions')?.append(go)
+  scrim.addEventListener('click', () => {
+    dismissPerm(s.permission.ts)
+    scrim.remove()
+    el.remove()
+    permModal = null
+    checkPermissionModal()
+  })
+  el.scrim = scrim
+  document.body.append(scrim, el)
+  permModal = el
+}
+
+/** The instruction every new or reopened session gets, edited in a sheet. */
+async function editDefaultPrompt() {
+  let text = ''
+  try {
+    text = (await api('/api/default-prompt')).text
+  } catch {}
+  const scrim = document.createElement('div')
+  scrim.className = 'scrim dim'
+  const el = document.createElement('div')
+  el.className = 'menu sheet prompt-sheet'
+  el.innerHTML = `<div class="ns-head"><h2>기본 프롬프트</h2></div><p class="hint">모든 세션에 넣는 지시예요(예: "한국어로 답해"). 새로 띄우거나 다시 연 세션부터 적용돼요. 비우면 넣지 않아요.</p><textarea class="ns-prompt" rows="6"></textarea><div class="ns-actions"><button class="btn" type="button" data-x="cancel">취소</button><button class="btn primary" type="button" data-x="save">저장</button></div>`
+  el.querySelector('textarea').value = text
+  const close = () => (scrim.remove(), el.remove())
+  scrim.addEventListener('click', close)
+  el.querySelector('[data-x="cancel"]').addEventListener('click', close)
+  el.querySelector('[data-x="save"]').addEventListener('click', async () => {
+    try {
+      toast((await api('/api/default-prompt', { text: el.querySelector('textarea').value })).note)
+      close()
+    } catch (err) {
+      toast(err.message, 'err')
+    }
+  })
+  document.body.append(scrim, el)
+  el.querySelector('textarea').focus()
 }
 $('btn-more').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect()
@@ -1954,6 +2234,26 @@ addEventListener('keydown', (e) => {
   if (mod && e.key === '\\') {
     e.preventDefault()
     setCollapsed(!$('app').classList.contains('collapsed'))
+    return
+  }
+  if (mod && e.key.toLowerCase() === 'k') {
+    e.preventDefault()
+    return openFinder()
+  }
+  // ⌥↑ / ⌥↓: the previous or next session, in the order the sidebar shows them.
+  if (e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    const order = [...$('list').querySelectorAll('.row[data-thread]')].map((r) => r.dataset.thread)
+    if (!order.length) return
+    e.preventDefault()
+    const i = order.indexOf(current)
+    const next = order[(i < 0 ? 0 : i + (e.key === 'ArrowDown' ? 1 : -1) + order.length) % order.length]
+    if (next && next !== current) open(next)
+    return
+  }
+  // In the permission modal, ⌘↵ allows what it asks.
+  if (e.key === 'Enter' && mod && permModal) {
+    e.preventDefault()
+    permModal.querySelector('button[data-action^="perm_allow"]')?.click()
     return
   }
   // ⌘/Ctrl+Enter presses "허용" on the newest permission card of the open session.

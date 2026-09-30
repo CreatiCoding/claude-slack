@@ -8,6 +8,7 @@ import { createAdminServer, type AdminApi } from '../src/admin.ts'
 import type { AdminState, WebSession } from '../src/broker.ts'
 import { EventLog } from '../src/events.ts'
 import { ImageStore } from '../src/images.ts'
+import { GroupStore } from '../src/groups.ts'
 import { deflateSync, crc32 } from 'node:zlib'
 
 /** A PNG of noise (incompressible), to get a picture of a given byte size. */
@@ -31,6 +32,8 @@ function png(w: number, h: number): Buffer {
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', ihdr), chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0))])
 }
 const imageStore = new ImageStore(mkdtempSync(join(tmpdir(), 'qa-img-')))
+const groupStore = new GroupStore(join(mkdtempSync(join(tmpdir(), 'qa-grp-')), 'groups.json'))
+let defaultPrompt = ''
 
 const events = new EventLog(mkdtempSync(join(tmpdir(), 'qa-web-')))
 const calls: string[] = []
@@ -68,6 +71,7 @@ events.emit(A, { type: 'text', text: '표를 그렸어요\n\n````html\n<!doctype
 events.emit(A, { type: 'text', text: '큰 스크린샷이에요', images: [imageStore.put(A, png(600, 400), 'image/png')!] })
 events.emit(A, { type: 'todos', todos: [{ content: '하나', status: 'completed' }, { content: '둘', status: 'in_progress', activeForm: '둘 하는 중' }, { content: '셋', status: 'pending' }] })
 events.emit(B, { type: 'msg', ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) })
+sessions = sessions.map((x) => (x.thread === B ? { ...x, permission: { ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) } } : x))
 for (let i = 0; i < 1600; i++) {
   events.emit(C, { type: 'user', ts: `3000.${i}`, text: `질문 ${i}`, via: 'web' })
   events.emit(C, { type: 'tool', id: `c${i}`, name: 'Bash', title: `ls ${i}`, detail: 'ls' })
@@ -106,6 +110,23 @@ const api: AdminApi = {
     }, 200)
     changed()
     return { ok: true, note: '보냈습니다.' }
+  },
+  webGroups: () => groupStore.get(),
+  webGroupOp(o) {
+    calls.push(`group:${(o as { op: string }).op}`)
+    const r = groupStore.apply(o)
+    changed()
+    return r
+  },
+  webDefaultPrompt: () => defaultPrompt,
+  webSetDefaultPrompt(t) {
+    defaultPrompt = t
+    calls.push(`prompt:${t}`)
+    return { ok: true, note: '저장했어요. 새로 띄우거나 다시 연 세션부터 적용돼요.' }
+  },
+  async webClearArchives() {
+    calls.push('clearArchives')
+    return { ok: true, note: '지난 기록 1개를 지웠어요.' }
   },
   async webLinks(pid) {
     return pid === 11
@@ -162,7 +183,7 @@ const api: AdminApi = {
     }
     if (a.messageTs === '2000.5') {
       events.emit(B, { type: 'msg_update', ts: '2000.5', text: '✅ 허용', blocks: [{ type: 'section', text: { type: 'mrkdwn', text: '✅ 허용됨 · `abcde`' } }] })
-      sessions = sessions.map((s) => (s.thread === B ? { ...s, state: 'busy', waiting: undefined } : s))
+      sessions = sessions.map((s) => (s.thread === B ? { ...s, state: 'busy', waiting: undefined, permission: undefined } : s))
       changed()
     }
     return { ok: true, note: '눌렀습니다.' }
@@ -199,11 +220,17 @@ for (const [label, size, phone] of [
   await page.goto(base + '/')
   await page.waitForSelector('.row')
   check(`${label}: 목록에 떠 있는 세션들`, (await page.locator('.row[data-thread]').count()) >= 3)
-  check(`${label}: 응답 대기 배지`, ((await page.locator('.row[data-thread] .badge').first().textContent()) ?? '').includes('권한 대기'))
-  check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row .name').first().textContent()) ?? '') === '베타')
+  check(`${label}: 응답 대기 배지`, ((await page.locator(`.row[data-thread="${B}"] .badge`).first().textContent()) ?? '').includes('권한 대기'))
+  check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row[data-loose] .name').first().textContent()) ?? '') === '베타')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
 
-  // Open A and read it.
+  // B waits for a permission, so a modal asks about it on whatever screen this is; tapping outside dismisses it.
+  await page.waitForSelector('.perm-modal', { timeout: 3000 }).catch(() => {})
+  check(`${label}: 다른 세션의 권한 대기는 모달로`, ((await page.locator('.perm-modal .pm-name').textContent().catch(() => '')) ?? '') === '베타' && (await page.locator('.perm-modal button[data-action^="perm_allow"]').count()) === 1)
+  check(`${label}: 모달에 세션으로 가기`, (await page.locator('.perm-modal .btn', { hasText: '세션으로 가기' }).count()) === 1)
+  await page.mouse.click(5, 300)
+  await page.waitForTimeout(150)
+  check(`${label}: 바깥을 누르면 닫고 다시 띄우지 않는다`, (await page.locator('.perm-modal').count()) === 0)
   await page.locator(`.row[data-thread="${A}"]`).click()
   await page.waitForSelector('.item.text')
   await settle(page)
@@ -421,6 +448,70 @@ for (const [label, size, phone] of [
     check(`${label}: 확인하면 trash`, calls.includes('trash:11'))
   }
 
+  // Groups: made from the menu, a session put in one from its menu (and, on a PC, by dragging onto the head).
+  page.once('dialog', (d) => d.accept('업무'))
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '새 그룹' }).click()
+  await page.waitForSelector('.sec-head.group', { timeout: 3000 }).catch(() => {})
+  if (phone) await page.goBack()
+  check(`${label}: 새 그룹`, ((await page.locator('.sec-head.group .gname').first().textContent()) ?? '') === '업무')
+  if (phone) {
+    await page.locator(`.row[data-thread="${C}"]`).click()
+    await page.locator('#btn-more').click()
+  } else await page.locator(`.row[data-thread="${C}"]`).click({ button: 'right' })
+  await page.locator('.menu .mi', { hasText: '그룹: 없음' }).click()
+  await page.locator('.menu .mi', { hasText: '업무' }).click()
+  await page.waitForTimeout(300)
+  if (phone) await page.goBack()
+  const inGroup = () => page.evaluate(() => { const head = document.querySelector('.sec-head.group'); let n = head?.nextElementSibling; const out: string[] = []; while (n && n.classList.contains('row')) { out.push((n as HTMLElement).dataset.thread!); n = n.nextElementSibling } return out })
+  check(`${label}: 메뉴로 그룹에 넣기`, (await inGroup()).includes(C), JSON.stringify(await inGroup()))
+  if (!phone) {
+    await page.locator(`.row[data-thread="${B}"]`).dragTo(page.locator('.sec-head.group'))
+    await page.waitForTimeout(300)
+    check(`${label}: 끌어다 그룹 머리에 놓으면 그 그룹으로`, (await inGroup()).includes(B), JSON.stringify(await inGroup()))
+    await page.locator(`.row[data-thread="${B}"]`).dragTo(page.locator('.sec-head', { hasText: '진행 중' }))
+    await page.waitForTimeout(300)
+    check(`${label}: "진행 중" 머리에 놓으면 그룹에서 뺀다`, !(await inGroup()).includes(B))
+  }
+  await page.locator(`.row[data-thread="${A}"]`).click()
+  await page.waitForSelector('.item.text')
+
+  // Default prompt, and clearing the side lists, from the global menu.
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '기본 프롬프트' }).click()
+  await page.locator('.prompt-sheet textarea').fill('한국어로 답해')
+  await page.locator('.prompt-sheet .btn.primary').click()
+  await page.waitForTimeout(200)
+  check(`${label}: 기본 프롬프트 저장`, calls.includes('prompt:한국어로 답해'))
+  page.once('dialog', (d) => d.accept())
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '이어서 하기 비우기' }).click()
+  await page.waitForTimeout(200)
+  page.once('dialog', (d) => d.accept())
+  await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: '지난 기록 모두 지우기' }).click()
+  await page.waitForTimeout(200)
+  check(`${label}: 이어서 하기 비우기·지난 기록 지우기`, calls.includes('group:clearRecent') && calls.includes('clearArchives'))
+
+  if (!phone) {
+    // ⌘K finds a session; ⌥↓ goes to the next one; ↑ in an empty field brings back the last message.
+    await page.keyboard.press('Meta+k')
+    await page.locator('.finder input').fill('긴 세')
+    await page.keyboard.press('Enter')
+    await page.waitForTimeout(200)
+    check(`${label}: ⌘K 로 찾아 열기`, (await page.locator('#title').textContent()) === '긴 세션')
+    const before = await page.locator('#title').textContent()
+    await page.keyboard.press('Alt+ArrowDown')
+    await page.waitForTimeout(200)
+    check(`${label}: ⌥↓ 다음 세션`, (await page.locator('#title').textContent()) !== before)
+    await page.locator(`.row[data-thread="${A}"]`).click()
+    await page.waitForSelector('.item.text')
+    await page.locator('#input').focus()
+    await page.keyboard.press('ArrowUp')
+    check(`${label}: 빈 입력칸에서 ↑ 는 마지막으로 보낸 글`, (await page.locator('#input').inputValue()).length > 0, await page.locator('#input').inputValue())
+    await page.locator('#input').fill('')
+  }
+
   // 복제 opens the new session, with the copied history and the line where it ends.
   if (!phone) {
     await page.locator('#btn-more').click()
@@ -507,7 +598,9 @@ for (const [label, size, phone] of [
   calls.length = 0
   // Reset B's card for the next viewport.
   events.emit(B, { type: 'msg', ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) })
-  sessions = sessions.map((s) => (s.thread === B ? { ...s, state: 'waiting', waiting: '권한 대기' } : s))
+  sessions = sessions.map((s) => (s.thread === B ? { ...s, state: 'waiting', waiting: '권한 대기', permission: { ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) } } : s))
+  for (const g of [...groupStore.get().groups]) groupStore.apply({ op: 'delete', id: g.id })
+  groupStore.apply({ op: 'loose', order: [] })
   changed()
   await ctx.close()
 }

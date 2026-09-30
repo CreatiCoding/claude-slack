@@ -33,6 +33,7 @@ import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
 import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
 import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, repos, type Link } from './links.ts'
+import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -64,6 +65,8 @@ export interface WebSession {
   startedAt: number
   /** Messages held until the running tool finishes. */
   held: number
+  /** The oldest permission card still open, for the web app's modal. */
+  permission?: { ts: string; text: string; blocks: unknown[] }
   /** Runs in a tmux pane, so keys and the screen are available. */
   canKeys: boolean
   /** "전부 허용": the broker answers every permission request with allow. */
@@ -139,6 +142,10 @@ export interface BrokerConfig {
   eventsDir?: string
   /** Where pictures shown in the web app are kept. */
   webImagesDir?: string
+  /** The web app's groups (default ~/.claude-slack/groups.json). */
+  groupsPath?: string
+  /** "기본 프롬프트": added to every session launched (default ~/.claude-slack/default-prompt.txt). */
+  defaultPromptPath?: string
   /** Where "폴더 버리고 종료" moves a folder (default ~/.Trash). */
   trashDir?: string
   /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
@@ -335,7 +342,7 @@ export class Broker {
   /** A mobile double-tap delivers the same button twice. */
   private recentActions = new RecentKeys(ACTION_DEDUPE_MS)
   private pendingLaunches = new Map<string, PendingLaunch>()
-  private pendingPermissions = new Map<string, { msgTs: string; pid: number; requestId: string; toolName: string; at: number; timer?: ReturnType<typeof setTimeout>; reminded?: number }>()
+  private pendingPermissions = new Map<string, { msgTs: string; pid: number; requestId: string; toolName: string; at: number; timer?: ReturnType<typeof setTimeout>; reminded?: number; text?: string; blocks?: unknown[] }>()
   /** Block types this workspace rejected, so they are not sent (and refused) again every time. */
   private unsupportedBlocks = new Set<string>()
   /** Home tab filter per user: everything, or only sessions that need a person. */
@@ -355,6 +362,7 @@ export class Broker {
   readonly events: EventLog
   /** Pictures shown in the web app, kept under the broker's own folder. */
   readonly images: ImageStore
+  private groupStore: GroupStore
   /** Which thread a message the broker posted lives in, so its edits, deletions and reactions reach the right log. */
   private msgThread = new Map<string, string>()
   /**
@@ -423,6 +431,7 @@ export class Broker {
     }
     this.events = new EventLog(cfg.eventsDir)
     this.images = new ImageStore(cfg.webImagesDir)
+    this.groupStore = new GroupStore(cfg.groupsPath)
     this.quietSlack = this.installMirror(slack)
     this.tmux = tmux
     this.confirmDialogs = confirmDialogs
@@ -598,7 +607,55 @@ export class Broker {
         lastAt: this.lastEventAt(s.threadTs) ?? s.startedAt,
         preview: s.transcriptPath ? this.firstMessages.get(s.transcriptPath) : undefined,
         ...(this.lastTexts.get(s.threadTs) ? { last: this.lastTexts.get(s.threadTs) } : {}),
+        ...(() => {
+          // The oldest open permission card, so the web app can ask about it from any screen.
+          const p = [...this.pendingPermissions.values()].filter((x) => x.pid === s.pid && x.blocks).sort((a, b) => a.at - b.at)[0]
+          return p ? { permission: { ts: p.msgTs, text: p.text ?? '', blocks: p.blocks! } } : {}
+        })(),
       }))
+  }
+
+  webGroups(): GroupsState {
+    return this.groupStore.get()
+  }
+  webGroupOp(o: GroupOp): { ok: boolean; note: string; id?: string } {
+    const r = this.groupStore.apply(o)
+    if (r.ok) this.changed()
+    return r
+  }
+
+  private get defaultPromptPath(): string {
+    return this.cfg.defaultPromptPath ?? process.env.CLAUDE_SLACK_DEFAULT_PROMPT ?? join(homedir(), '.claude-slack', 'default-prompt.txt')
+  }
+  /** The instruction added to every session (--append-system-prompt), '' when none. */
+  webDefaultPrompt(): string {
+    try {
+      return readFileSync(this.defaultPromptPath, 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  webSetDefaultPrompt(text: string): { ok: boolean; note: string } {
+    const t = text.trim().slice(0, 8000)
+    try {
+      mkdirSync(join(this.defaultPromptPath, '..'), { recursive: true })
+      writeFileSync(this.defaultPromptPath, t)
+    } catch (err) {
+      return { ok: false, note: `저장하지 못했어요: ${describeError(err)}` }
+    }
+    return { ok: true, note: t ? '저장했어요. 새로 띄우거나 다시 연 세션부터 적용돼요.' : '비웠어요. 새로 띄우는 세션에는 기본 프롬프트를 넣지 않아요.' }
+  }
+
+  /** "지난 기록 모두 지우기": every archive except those of sessions still running. */
+  async webClearArchives(): Promise<{ ok: boolean; note: string }> {
+    const running = new Set(this.registry.live.filter((s) => !s.ended && s.sessionId).map((s) => s.sessionId))
+    let n = 0
+    for (const a of listArchives(10_000, this.cfg.archiveDir)) {
+      if (running.has(a.sessionId)) continue
+      if (deleteArchive(a.path, this.cfg.archiveDir)) n++
+    }
+    this.logAt('INFO', 'admin', 'archives cleared', { n })
+    return { ok: true, note: `지난 기록 ${n}개를 지웠어요.` }
   }
 
   /** The pickers' choices, the same lists the Slack settings modal offers. */
@@ -1337,7 +1394,7 @@ export class Broker {
       const { text, blocks } = permissionBlocksV2({ pid: session.pid, hasPane: !!session.pane, mention: this.mentionFor(session, 'decision'), toolInput, ...msg })
       const msgTs = await this.slack.post({ threadTs: session.threadTs, text, blocks })
       const key = `${session.pid}:${msg.requestId}`
-      this.pendingPermissions.set(key, { msgTs, pid: session.pid, requestId: msg.requestId, toolName: msg.toolName, at: Date.now() })
+      this.pendingPermissions.set(key, { msgTs, pid: session.pid, requestId: msg.requestId, toolName: msg.toolName, at: Date.now(), text, blocks })
       this.armReminder(session, key)
       this.logAt('INFO', 'perm', 'permission requested', this.tag(session, { req: msg.requestId, tool: msg.toolName, preview: truncate(msg.inputPreview, 80) }))
       this.markWaiting(session, 'permission')
@@ -2944,7 +3001,9 @@ export class Broker {
     const all = await (this.cfg.listSessions ?? listRecentSessions)(limit + taken.size)
     // A conversation whose folder is gone (moved to the Trash) cannot be resumed there.
     const exists = this.cfg.folderExists ?? existsSync
-    return all.filter((r) => !taken.has(r.id) && exists(r.cwd)).slice(0, limit)
+    // "이어서 하기 비우기" hides what is older than when it was cleared; a conversation used again shows again.
+    const cleared = this.groupStore.get().recentClearedAt
+    return all.filter((r) => !taken.has(r.id) && exists(r.cwd) && (!cleared || r.mtime > cleared)).slice(0, limit)
   }
 
   /** The session (or a launch still coming up) that already has this conversation open, in a thread other than `exceptThread`. */
@@ -2996,7 +3055,7 @@ export class Broker {
           ...(this.cfg.socketPath ? { CLAUDE_SLACK_SOCKET: this.cfg.socketPath } : {}),
           ...(process.env.CLAUDE_SLACK_NO_CHANNEL ? { CLAUDE_SLACK_NO_CHANNEL: '1' } : {}),
         },
-        command: [this.cfg.launcher, ...(o.resumeId ? ['--resume', o.resumeId] : []), ...(o.extraArgs ?? [])],
+        command: [this.cfg.launcher, ...(o.resumeId ? ['--resume', o.resumeId] : []), ...(o.extraArgs ?? []), ...(this.webDefaultPrompt().trim() ? ['--append-system-prompt', this.webDefaultPrompt().trim()] : [])],
         name: `cs-${sessionKeyForLaunch}`,
       })
     } catch (err) {

@@ -378,3 +378,33 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .hp-full iframe { flex: 1; width: 100%; border: 0; background: #fff; }
 .hp-full .hp-bar { padding-top: calc(6px + env(safe-area-inset-top)); }
 .hp-zoom { font-variant-numeric: tabular-nums; min-width: 42px; text-align: center; }
+
+/* groups and drag and drop */
+.sec-head .gmore { visibility: hidden; width: 22px; height: 22px; display: inline-grid; place-items: center; border-radius: 6px; color: var(--muted); }
+.sec-head:hover .gmore, .sec-head .gmore:focus-visible { visibility: visible; }
+.sec-head .gmore:hover { background: var(--hover); }
+.sec-head.group .gname { color: var(--text-2); font-weight: 600; }
+.sec-head .gname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dragging { opacity: .4; }
+.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.drop-into { outline: 1.5px solid var(--accent); outline-offset: -1.5px; }
+.drag-pill { position: fixed; top: -100px; left: -100px; padding: 3px 10px; border-radius: 99px; background: var(--accent); color: #fff; font-size: var(--fs-s); white-space: nowrap; max-width: 240px; overflow: hidden; text-overflow: ellipsis; }
+.prompt-sheet { padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 10px; }
+.prompt-sheet .hint { margin: 0; font-size: var(--fs-s); color: var(--muted); }
+@media (hover: none) { .sec-head .gmore { visibility: visible; } }
+
+/* ⌘K finder, permission modal */
+.finder { position: fixed; z-index: 45; top: 12vh; left: 50%; transform: translateX(-50%); width: min(560px, calc(100vw - 32px)); background: var(--card); border: 1px solid var(--line); border-radius: 12px; box-shadow: var(--shadow); padding: 8px; }
+.finder .search { width: 100%; }
+.finder-list { max-height: 50vh; overflow-y: auto; margin-top: 6px; }
+.finder .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 0 10px; border-radius: 6px; text-align: left; }
+.finder .mi:hover, .finder .mi.sel { background: var(--hover); }
+.finder .mi .fl { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.finder .mi .end { color: var(--muted); font-size: var(--fs-s); white-space: nowrap; }
+.perm-modal { position: fixed; z-index: 45; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(640px, calc(100vw - 24px)); max-height: 80vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+.pm-head { display: flex; gap: 10px; align-items: flex-start; }
+.pm-head > .ic { color: var(--accent); margin-top: .2em; }
+.pm-name { font-weight: 600; }
+.pm-where { font-size: var(--fs-s); color: var(--muted); }
+@media (max-width: 899px) { .perm-modal { top: auto; bottom: 0; transform: translateX(-50%); width: 100%; border-radius: 14px 14px 0 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); } }

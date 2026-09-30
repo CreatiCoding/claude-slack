@@ -345,3 +345,26 @@ test('같은 확인 창이 되풀이되면(MCP 인증 메뉴처럼) 카드를 �
   s.conn.close()
   t.close()
 })
+
+test('기본 프롬프트는 새로 띄우는 세션에 --append-system-prompt 로; 이어서 하기 비우기는 그 전 것만 숨긴다; 권한 카드는 목록에 실린다', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dp-'))
+  const t = await setup({ defaultPromptPath: join(dir, 'p.txt'), groupsPath: join(dir, 'g.json'), listSessions: async () => [{ id: 'old', cwd: '/x', title: 'old', mtime: 1000, when: '' }, { id: 'new', cwd: '/x', title: 'new', mtime: Date.now() + 60_000, when: '' }] })
+  assert.equal(t.broker.webDefaultPrompt(), '')
+  assert.match(t.broker.webSetDefaultPrompt('  한국어로 답해  ').note, /새로 띄우거나 다시 연 세션부터/)
+  await t.broker.adminNew({ cwd: tmpdir() })
+  assert.deepEqual(t.tmux.launches.at(-1)!.command.slice(-2), ['--append-system-prompt', '한국어로 답해'])
+  t.broker.webSetDefaultPrompt('')
+  await t.broker.adminNew({ cwd: tmpdir() })
+  assert.ok(!t.tmux.launches.at(-1)!.command.includes('--append-system-prompt'), '비우면 넣지 않는다')
+
+  t.broker.webGroupOp({ op: 'clearRecent' } as never)
+  assert.deepEqual((await t.broker.adminState()).recent.map((r) => r.id), ['new'])
+
+  const s = await shim(t.socketPath, {})
+  s.conn.send({ type: 'permission_request', requestId: 'qwert', toolName: 'Bash', description: 'Run', inputPreview: '{"command":"ls"}' })
+  await tick()
+  const row = t.broker.webSessions().find((x) => x.pid === 100)!
+  assert.ok(row.permission && JSON.stringify(row.permission.blocks).includes('perm_allow'), '다른 세션에서도 물을 수 있게 카드째')
+  s.conn.close()
+  t.close()
+})
