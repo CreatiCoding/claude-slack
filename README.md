@@ -31,7 +31,23 @@ Slack에서 내 맥에 떠 있는 **진짜 Claude Code 터미널 세션**을 조
 
 브로커가 올리는 메시지의 유형(상태·흐름·결정 카드·진행 안내·확인·시스템·오류)과 아이콘 사전, 각 유형의 멘션·버튼·수명 규칙은 `docs/MESSAGES.md` 에 있다. 문구를 추가하거나 고칠 때 거기에 맞춘다.
 
-## 어드민 페이지
+## 웹 앱
+
+브로커의 HTTP 서버(`/`)가 Slack 스레드에서 하던 일을 폰·PC 브라우저에서 그대로 한다. 같은 세션을 Slack 과 동시에 보고,
+카드의 버튼은 Slack 블록을 그대로 그려 Slack 클릭과 같은 `handleAction` 을 부른다(웹에서 보낸 글은 스레드에 `🌐 웹:` 으로 남는다).
+
+- 연결: SSE(`/api/stream`) 하나로 세션 목록(바뀐 것만)과 보고 있는 스레드의 이벤트만 받는다. 명령은 JSON POST.
+  이벤트는 스레드마다 번호(seq)를 붙여 `~/.claude-slack/events/<스레드>.jsonl` 에 쌓고, 끊겼다 붙으면 `after=seq` 로 빠진 것만 받는다.
+- 그림: `~/.claude-slack/web-images/` 에 옮겨 둔 것만 내보낸다. 150KB 넘으면 폭 1280 이하 WebP(cwebp, 없으면 sips JPEG).
+- 브라우저 저장: IndexedDB `claude-slack-web`(timeline·images), localStorage(쓰던 글·목록 캐시·테마 등).
+- 브로커 파일: `~/.claude-slack/groups.json`(그룹·순서), `~/.claude-slack/default-prompt.txt`(모든 세션에 `--append-system-prompt`).
+- 측정: 브로커 로그에 1분마다 `web sent 1m …`(보낸 양)과 `page …`(페이지가 받은 양·반영 시간·멈춤·DOM 수).
+  `node scripts/measure-web.ts [분]` 이 실제 브로커에 읽기 전용 페이지를 붙여 그 줄들을 모은다.
+- 확인: `node scripts/qa-web.ts` 가 가짜 API 로 PC(1440×820)·폰(390×844)에서 눌러 본다.
+
+이전 관리 화면은 `/admin` 에 남아 있다(잔재 스레드 정리 등).
+
+## 어드민 페이지 (`/admin`)
 
 브로커가 도는 기계에서 `http://127.0.0.1:4180` 을 열면 실행 중인 세션, 이어서 할 세션,
 보관된 기록을 한 화면에서 본다. 세션 종료와 스레드 정리도 여기서 된다. 4초마다 갱신된다.
