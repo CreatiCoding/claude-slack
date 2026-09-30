@@ -436,3 +436,13 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .crash { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--text); padding: 24px; text-align: center; }
 .main { position: relative; }
 body > .crash { position: fixed; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+
+/* PR state icons: open green, merged purple, closed red */
+.menu .mi.pr-open .ic { color: #2f9a4f; }
+.menu .mi.pr-merged .ic { color: #8250df; }
+.menu .mi.pr-closed .ic { color: #cf3f3f; }
+/* the held message line: the explanation takes one line and ends in "…"; the badge and 수정 never shrink */
+.user .meta { max-width: 100%; min-width: 0; }
+.user .meta .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user .meta .held, .user .meta [data-act], .user .meta .t { flex-shrink: 0; }
+.chip.pr-open .ic { color: #2f9a4f; } .chip.pr-merged .ic { color: #8250df; } .chip.pr-closed .ic { color: #cf3f3f; }

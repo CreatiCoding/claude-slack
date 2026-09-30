@@ -9,6 +9,9 @@ import { join } from 'node:path'
 export interface Link {
   url: string
   label: string
+  /** A pull request's state, for its coloured icon: open green, merged purple, closed red. */
+  state?: 'OPEN' | 'MERGED' | 'CLOSED'
+  number?: number
 }
 
 const PR_RE = /https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g
@@ -51,11 +54,43 @@ export function branchPr(repo: string, gh = 'gh'): Promise<Link | undefined> {
     execFile(gh, ['pr', 'view', '--json', 'url,title,number,state'], { cwd: repo, timeout: 8000 }, (err, out) => {
       if (err) return resolve(undefined)
       try {
-        const pr = JSON.parse(out) as { url: string; title: string; number: number; state: string }
-        resolve({ url: pr.url, label: `#${pr.number} ${pr.title}${pr.state === 'OPEN' ? '' : ` (${pr.state.toLowerCase()})`}` })
+        const pr = JSON.parse(out) as { url: string; title: string; number: number; state: Link['state'] }
+        resolve({ url: pr.url, label: `#${pr.number} ${pr.title}`, state: pr.state, number: pr.number })
       } catch {
         resolve(undefined)
       }
     }),
   )
+}
+
+/** A merged or closed PR does not change again: remembered for good. An open one is asked again after a minute. */
+const prStates = new Map<string, { at: number; link: Link }>()
+
+/** The state and title of PRs by address, asked of gh four at a time. */
+export async function prInfo(urls: string[], gh = 'gh'): Promise<Link[]> {
+  const ask = (url: string) =>
+    new Promise<Link>((resolve) => {
+      const known = prStates.get(url)
+      if (known && (known.link.state !== 'OPEN' || Date.now() - known.at < 60_000)) return resolve(known.link)
+      const fallback: Link = { url, label: url.replace(/^https:\/\/github\.com\//, '').replace('/pull/', ' #'), number: Number(/\/pull\/(\d+)/.exec(url)?.[1]) || undefined }
+      execFile(gh, ['pr', 'view', url, '--json', 'url,title,number,state'], { timeout: 8000 }, (err, out) => {
+        if (err) return resolve(known?.link ?? fallback)
+        try {
+          const pr = JSON.parse(out) as { title: string; number: number; state: Link['state'] }
+          const link: Link = { url, label: `#${pr.number} ${pr.title}`, state: pr.state, number: pr.number }
+          prStates.set(url, { at: Date.now(), link })
+          resolve(link)
+        } catch {
+          resolve(fallback)
+        }
+      })
+    })
+  const out: Link[] = []
+  for (let i = 0; i < urls.length; i += 4) out.push(...(await Promise.all(urls.slice(i, i + 4).map(ask))))
+  return out
+}
+
+/** Open ones first, then the newest (largest number) first. */
+export function sortPrs(prs: Link[]): Link[] {
+  return [...prs].sort((a, b) => (a.state === 'OPEN' ? 0 : 1) - (b.state === 'OPEN' ? 0 : 1) || (b.number ?? 0) - (a.number ?? 0))
 }

@@ -136,7 +136,7 @@ const api: AdminApi = {
   },
   async webLinks(pid) {
     return pid === 11
-      ? { prs: [{ url: 'https://github.com/a/b/pull/1', label: '#1 첫 PR' }, { url: 'https://github.com/a/c/pull/2', label: '#2 둘째 PR' }], threads: [{ url: 'https://x.slack.com/archives/C1/p1000000100000001', label: '이 세션의 스레드' }] }
+      ? { prs: [{ url: 'https://github.com/a/c/pull/2', label: '#2 둘째 PR', state: 'OPEN', number: 2 }, { url: 'https://github.com/a/b/pull/1', label: '#1 첫 PR', state: 'MERGED', number: 1 }], threads: [{ url: 'https://x.slack.com/archives/C1/p1000000100000001', label: '이 세션의 스레드' }] }
       : { prs: [], threads: [] }
   },
   async webLive(thread) {
@@ -343,6 +343,10 @@ for (const [label, size, phone] of [
   check(`${label}: PR 이 여러 개면 "PR 2" 칩`, (await page.locator('.chip', { hasText: 'PR 2' }).count()) === 1)
   await page.locator('.chip', { hasText: 'PR 2' }).click()
   check(`${label}: 누르면 목록`, (await page.locator('.menu .mi', { hasText: '#2 둘째 PR' }).count()) === 1)
+  check(`${label}: PR 상태는 글자 대신 색 아이콘(열림·머지)`, (await page.locator('.menu .mi.pr-open').count()) === 1 && (await page.locator('.menu .mi.pr-merged').count()) === 1 && !((await page.locator('.menu').textContent()) ?? '').includes('merged'))
+  const chipBox = await page.locator('.chip', { hasText: 'PR 2' }).boundingBox()
+  const menuBox = await page.locator('.menu').boundingBox()
+  check(`${label}: 칩 목록은 ${phone ? '아래 시트' : '칩 윗변에 붙여 위로'}`, phone ? (await page.locator('.menu.sheet').count()) === 1 : !!chipBox && !!menuBox && menuBox.y + menuBox.height <= chipBox.y + 1 && chipBox.y - (menuBox.y + menuBox.height) < 12, JSON.stringify({ chipBox, menuBox }))
   await page.keyboard.press('Escape')
   check(`${label}: Slack 스레드 하나면 바로 링크`, (await page.locator('a.chip', { hasText: 'Slack 스레드' }).getAttribute('href')) === 'https://x.slack.com/archives/C1/p1000000100000001')
   await page.locator('.chip', { hasText: '스킬' }).click()
@@ -424,6 +428,13 @@ for (const [label, size, phone] of [
   events.emit(A, { type: 'react', ts: '1000.9', name: 'hourglass_flowing_sand', on: true })
   changed()
   await page.waitForSelector('button[data-act="unhold"]')
+  // One line: the explanation shrinks and ends in "…", the badge and 수정 keep their size.
+  const heldLine = await page.locator('.item.user', { hasText: '고칠 글' }).last().locator('.meta').evaluate((m) => {
+    const desc = m.querySelector('.desc') as HTMLElement
+    const fix = m.querySelector('[data-act="unhold"]') as HTMLElement
+    return { oneLine: m.getBoundingClientRect().height < 24, ellipsis: getComputedStyle(desc).textOverflow, fixWidth: fix.getBoundingClientRect().width }
+  })
+  check(`${label}: 대기 중 줄은 한 줄, 수정은 줄지 않는다`, heldLine.oneLine && heldLine.ellipsis === 'ellipsis' && heldLine.fixWidth > 15, JSON.stringify(heldLine))
   await page.locator('button[data-act="unhold"]').click()
   await page.waitForFunction(() => (document.getElementById('input') as HTMLTextAreaElement).value.includes('고칠 글'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 수정 → 대기열에서 빼고 입력칸에`, calls.includes('unhold:11:1000.9') && (await page.locator('#input').inputValue()).includes('고칠 글'))
@@ -541,7 +552,7 @@ for (const [label, size, phone] of [
   if (!phone) {
     let asked = ''
     page.once('dialog', (d) => ((asked = d.message()), d.accept()))
-    await page.locator('#btn-more').click()
+    await page.locator(`.row[data-thread="${A}"]`).click({ button: 'right' })
     await page.locator('.menu .mi', { hasText: '폴더 버리고 종료' }).click()
     await page.waitForTimeout(300)
     check(`${label}: 버리기 전에 저장소 상태를 보여 준다`, /커밋 안 한 변경 2개/.test(asked) && /push 안 한 커밋 1개/.test(asked), asked)
@@ -583,14 +594,30 @@ for (const [label, size, phone] of [
   await page.locator('.prompt-sheet .btn.primary').click()
   await page.waitForTimeout(200)
   check(`${label}: 기본 프롬프트 저장`, calls.includes('prompt:한국어로 답해'))
-  page.once('dialog', (d) => d.accept())
+  // The global menu opens under its button, right edges lined up, and has neither the clearing items nor this
+  // session's destructive ones; clearing lives on its section's ⋯.
   await page.locator('#btn-more').click()
+  const btn = await page.locator('#btn-more').boundingBox()
+  const gm = await page.locator('.menu').boundingBox()
+  const gmText = (await page.locator('.menu').textContent()) ?? ''
+  if (!phone) check(`${label}: 전역 메뉴는 버튼 바로 아래 오른쪽 끝 맞춤`, !!btn && !!gm && Math.abs(gm.x + gm.width - (btn.x + btn.width)) < 2 && gm.y >= btn.y + btn.height, JSON.stringify({ btn, gm }))
+  check(`${label}: 전역 메뉴에 비우기·파괴적 세션 항목 없음`, !/이어서 하기 비우기|지난 기록 모두 지우기|강제 종료|폴더 버리고 종료/.test(gmText), gmText)
+  await page.keyboard.press('Escape')
+  if (phone) await page.goBack()
+  page.once('dialog', (d) => d.accept())
+  await page.locator('.sec-head', { hasText: '이어서 하기' }).hover()
+  await page.locator('.sec-head', { hasText: '이어서 하기' }).locator('.gmore').click()
   await page.locator('.menu .mi', { hasText: '이어서 하기 비우기' }).click()
   await page.waitForTimeout(200)
   page.once('dialog', (d) => d.accept())
-  await page.locator('#btn-more').click()
+  await page.locator('.sec-head', { hasText: '지난 기록' }).hover()
+  await page.locator('.sec-head', { hasText: '지난 기록' }).locator('.gmore').click()
   await page.locator('.menu .mi', { hasText: '지난 기록 모두 지우기' }).click()
   await page.waitForTimeout(200)
+  if (phone) {
+    await page.locator(`.row[data-thread="${A}"]`).click()
+    await page.waitForSelector('.item.text')
+  }
   check(`${label}: 이어서 하기 비우기·지난 기록 지우기`, calls.includes('group:clearRecent') && calls.includes('clearArchives'))
 
   if (!phone) {

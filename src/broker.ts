@@ -32,7 +32,7 @@ import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
 import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
 import { writingPreview } from './preview.ts'
-import { branchPr, linksIn, repos, type Link } from './links.ts'
+import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
 import { sessionPlugins, type PluginLine } from './plugins.ts'
@@ -167,6 +167,8 @@ export interface BrokerConfig {
   claudeDir?: string
   /** Where Claude Code keeps plugins (tests use a temporary one). */
   pluginsDir?: string
+  /** PR states by address (tests fake gh). */
+  prInfo?: (urls: string[]) => Promise<Link[]>
   /** How often a scheduled refresh looks again (default a minute). */
   refreshCheckMs?: number
   /** When a process started and how many shells it has open (tests fake it). */
@@ -588,7 +590,7 @@ export class Broker {
       .since(session.threadTs, Math.max(0, last - 2000))
       .flatMap((e) => (e.type === 'user' || e.type === 'text' ? [e.text] : e.type === 'tool_end' ? [e.output] : []))
     const fromGh = (await Promise.all(repos(session.cwd).slice(0, 5).map((r) => branchPr(r)))).filter((x): x is Link => !!x)
-    const prs = fromGh.length ? fromGh : linksIn(texts, 'pr').slice(-10).map((url) => ({ url, label: url.replace(/^https:\/\/github\.com\//, '').replace('/pull/', ' #') }))
+    const prs = sortPrs(fromGh.length ? fromGh : await (this.cfg.prInfo ?? prInfo)(linksIn(texts, 'pr').slice(-10)))
     const own = await this.adminThreadLink(session.threadTs).catch(() => undefined)
     const threads = [...(own ? [{ url: own, label: '이 세션의 스레드' }] : []), ...linksIn(texts, 'slack').filter((u) => !own || !u.startsWith(own.split('?')[0]!)).slice(-10).map((url) => ({ url, label: url.replace(/^https:\/\/[\w-]+\.slack\.com\/archives\//, '') }))]
     const value = { prs, threads }

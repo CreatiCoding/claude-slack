@@ -439,12 +439,12 @@ function badgeHtml(s) {
   return `<span class="badge ${s.state}">${esc(text)}</span>`
 }
 
-function secHead(key, label, n, { group, dropOut } = {}) {
+function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
   const open = !folded[key]
   const el = document.createElement('div')
   el.className = 'sec-head' + (open ? ' open' : '') + (group ? ' group' : '')
   el.setAttribute('role', 'button')
-  el.innerHTML = `<span class="tw">${icon('chevron')}</span><span class="gname"></span><span class="n">${n}</span>${group ? `<button class="gmore" type="button" aria-label="그룹 메뉴">${icon('more')}</button>` : ''}`
+  el.innerHTML = `<span class="tw">${icon('chevron')}</span><span class="gname"></span><span class="n">${n}</span>${group || sectionMenu ? `<button class="gmore" type="button" aria-label="${group ? '그룹 메뉴' : '메뉴'}">${icon('more')}</button>` : ''}`
   el.querySelector('.gname').textContent = label
   el.addEventListener('click', (e) => {
     if (e.target.closest('.gmore')) return
@@ -452,6 +452,14 @@ function secHead(key, label, n, { group, dropOut } = {}) {
     store.set('folded', folded)
     renderList()
   })
+  if (sectionMenu) {
+    const menu = (at) => openMenu(at, sectionMenu)
+    el.querySelector('.gmore').addEventListener('click', (e) => {
+      const r = e.currentTarget.getBoundingClientRect()
+      menu({ x: r.right, y: r.bottom + 4, end: true })
+    })
+    el.addEventListener('contextmenu', (e) => (e.preventDefault(), menu({ x: e.clientX, y: e.clientY })))
+  }
   if (group) {
     const menu = (at) => openMenu(at, groupItems(group))
     el.querySelector('.gmore').addEventListener('click', (e) => {
@@ -585,7 +593,7 @@ function renderList() {
   }
 
   const rec = recent.filter((r) => match(r.title, r.preview, r.cwd))
-  const hr = secHead('recent', '이어서 하기', rec.length, { dropOut: true })
+  const hr = secHead('recent', '이어서 하기', rec.length, { dropOut: true, menu: [clearRecentItem()] })
   list.append(hr.el)
   if (hr.open)
     for (const r of rec)
@@ -594,7 +602,7 @@ function renderList() {
       )
 
   const arc = archives.filter((a) => match(a.title, a.preview, a.cwd))
-  const ha = secHead('archives', '지난 기록', arc.length)
+  const ha = secHead('archives', '지난 기록', arc.length, { menu: [clearArchivesItem()] })
   list.append(ha.el)
   if (ha.open)
     for (const a of arc) {
@@ -1133,7 +1141,7 @@ function userEl(row) {
   const st = !set
     ? ''
     : held
-      ? `<span class="held" title="실행 중인 도구가 끝나면 전달해요">대기 중</span><button class="linkish" type="button" data-act="unhold" data-ts="${esc(ev.ts)}">수정</button>`
+      ? `<span class="held">대기 중</span><span class="desc" title="실행 중인 도구가 끝나면 전달해요">실행 중인 도구가 끝나면 전달해요</span><button class="linkish" type="button" data-act="unhold" data-ts="${esc(ev.ts)}">수정</button>`
       : set.has('x')
         ? '<span class="failed">취소함</span>'
         : delivered
@@ -1705,9 +1713,9 @@ function renderComposerBits() {
   const chips = $('chips')
   chips.innerHTML = ''
   if (!s) return
-  const chip = (ic, label, run, { hot = false, href } = {}) => {
+  const chip = (ic, label, run, { hot = false, href, cls = '' } = {}) => {
     const c = document.createElement(href ? 'a' : 'button')
-    c.className = 'chip' + (hot ? ' hot' : '')
+    c.className = 'chip' + (hot ? ' hot' : '') + (cls ? ' ' + cls : '')
     c.innerHTML = `${icon(ic)}<span></span>`
     c.lastElementChild.textContent = label
     if (href) {
@@ -1723,10 +1731,10 @@ function renderComposerBits() {
   // PR and Slack thread: one link opens at once, several open a small list (above the chip on a PC, a sheet on a phone).
   const linkChip = (ic, label, list, fallback) => {
     if (!list?.length && !fallback) return
-    if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, null, { href: list?.[0]?.url ?? fallback })
+    if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, null, { href: list?.[0]?.url ?? fallback, cls: list?.[0]?.state ? 'pr-' + list[0].state.toLowerCase() : '' })
     chip(ic, `${label} ${list.length}`, (e) => {
       const r = e.currentTarget.getBoundingClientRect()
-      openMenu({ x: r.left, y: r.top - 8 - Math.min(list.length, 8) * 34 }, list.map((l) => ({ label: l.label, icon: ic, run: () => window.open(l.url, '_blank', 'noopener') })))
+      openMenu({ x: r.left, y: r.top, above: true }, list.map((l) => ({ label: l.label, icon: ic, cls: l.state ? 'pr-' + l.state.toLowerCase() : '', run: () => window.open(l.url, '_blank', 'noopener') })))
     })
   }
   const links = linkCache.get(s.pid)
@@ -2004,6 +2012,7 @@ function openMenu(at, items, { title } = {}) {
       b.type = 'button'
       b.className = 'mi' + (it.danger ? ' danger' : '') + (it.on ? ' on' : '')
       b.setAttribute('role', 'menuitem')
+      if (it.cls) b.classList.add(it.cls)
       b.innerHTML = `${icon(it.icon || 'dot')}<span></span>${it.sub ? `<span class="end">${esc(it.end || '')}${icon('chevron')}</span>` : it.on ? `<span class="end">${icon('check')}</span>` : it.end ? `<span class="end">${esc(it.end)}</span>` : ''}`
       b.children[1].textContent = it.label
       b.addEventListener('click', () => {
@@ -2151,13 +2160,11 @@ function globalItems() {
         { label: '어둡게', icon: 'moon', on: theme === 'dark', run: () => applyTheme('dark') },
       ],
     },
-    'sep',
-    { label: '이어서 하기 비우기', icon: 'undo', run: () => confirm('이어서 하기 목록을 비울까요?\n맥의 대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).') && groupOp({ op: 'clearRecent' }).then(loadSideLists) },
-    { label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => confirm('지난 기록을 모두 지울까요? 실행 중인 세션의 기록은 남겨요.') && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) },
     { label: '이전 관리 화면', icon: 'screen', run: () => (location.href = withToken('/admin')) },
   ]
   const s = current && sessionOf(current)
-  if (s) items.push('sep', { head: '이 세션' }, ...sessionItems(s).filter((x) => x.label !== '열기'))
+  // This session's items, without the destructive ones (강제 종료, 폴더 버리고 종료): those stay in its own menu.
+  if (s) items.push('sep', { head: '이 세션' }, ...sessionItems(s).filter((x) => x !== 'sep' && x.label !== '열기' && x.label !== '강제 종료' && x.label !== '폴더 버리고 종료'))
   return items
 }
 // ---- ⌘K: find a session. "새 세션" first, then running sessions filtered by name, state, folder, first message.
@@ -2292,10 +2299,13 @@ async function editDefaultPrompt() {
   document.body.append(scrim, el)
   el.querySelector('textarea').focus()
 }
+// Under the button, right edges lined up (bottom-end).
 $('btn-more').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect()
-  openMenu({ x: r.right - 240, y: r.bottom + 4 }, globalItems())
+  openMenu({ x: r.right, y: r.bottom + 4, end: true }, globalItems())
 })
+const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => confirm('이어서 하기 목록을 비울까요?\n맥의 대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).') && groupOp({ op: 'clearRecent' }).then(loadSideLists) })
+const clearArchivesItem = () => ({ label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => confirm('지난 기록을 모두 지울까요? 실행 중인 세션의 기록은 남겨요.') && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) })
 // ------------------------------------------------------------------ new session
 // A PC gets it as the right-hand pane (not a sheet), a phone as a sheet from the bottom.
 let newForm = null
