@@ -164,3 +164,16 @@ test('전부 허용: 터미널에만 뜬 확인 창(매뉴얼 모드의 권한 �
   s.conn.close()
   t.close()
 })
+
+test('EventLog.since: 개수만이 아니라 약 1MB 로도 자르고, 아무리 커도 최소 한 건은 준다', () => {
+  const log = new EventLog(mkdtempSync(join(tmpdir(), 'ev-')))
+  const big = 'x'.repeat(400_000)
+  for (let i = 0; i < 5; i++) log.emit('3.3', { type: 'text', text: big })
+  const first = log.since('3.3', 0)
+  assert.equal(first.length, 2, '400KB 짜리는 한 번에 두 건까지(1MB 안)')
+  assert.deepEqual(log.since('3.3', 2).map((e) => e.seq), [3, 4])
+  const huge = new EventLog(mkdtempSync(join(tmpdir(), 'ev-')))
+  huge.emit('4.4', { type: 'text', text: 'y'.repeat(2_000_000) })
+  huge.emit('4.4', { type: 'text', text: 'z' })
+  assert.equal(huge.since('4.4', 0).length, 1, '1MB 넘는 한 건도 준다')
+})

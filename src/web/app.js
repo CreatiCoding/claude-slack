@@ -119,13 +119,26 @@ function applyTheme(t) {
 // ------------------------------------------------------------------ live connection
 let es = null
 let connected = false
+let connId = null
+async function subscribe(ts) {
+  if (!connId) return
+  try {
+    await api('/api/subscribe', { conn: connId, thread: ts })
+  } catch {
+    connect() // the broker does not know this stream any more: a fresh one says hello again
+  }
+}
 function connect() {
   if (es) es.close()
   es = new EventSource(withToken('/api/stream'))
   es.addEventListener('open', () => {
     connected = true
     renderConn()
-    if (current) catchUp(current)
+  })
+  // Each stream has an id; the page tells the broker which thread it shows, and only that thread's events come.
+  es.addEventListener('hello', (e) => {
+    connId = JSON.parse(e.data).conn
+    if (current) subscribe(current).then(() => catchUp(current))
   })
   es.addEventListener('error', () => {
     connected = false
@@ -134,28 +147,54 @@ function connect() {
   es.addEventListener('sessions', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
-    sessions = JSON.parse(e.data)
-    for (const s of sessions) if (!(s.thread in seen)) seen[s.thread] = s.lastSeq // a session seen for the first time counts as read
-    store.set('seen', seen)
-    renderList()
-    renderHeader()
-    renderComposerBits()
-    renderActivity()
+    applySessions(JSON.parse(e.data))
+  })
+  // After the first full list, only the sessions that changed, with the order as thread keys.
+  es.addEventListener('sessions_delta', (e) => {
+    metrics.recvBytes += e.data.length
+    metrics.recvEvents++
+    const { order, changed } = JSON.parse(e.data)
+    const by = new Map(sessions.map((s) => [s.thread, s]))
+    for (const s of changed) by.set(s.thread, s)
+    applySessions(order.map((k) => by.get(k)).filter(Boolean))
   })
   es.addEventListener('ev', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
     const { thread: ts, ev } = JSON.parse(e.data)
-    const t = threads.get(ts)
-    if (!t || (!t.events.length && !t.loading && ts !== current)) return
+    if (ts !== current) return // switched away a moment ago; its catch-up covers it next time
+    const t = thread(ts)
     if (t.loading) return
     if (ev.seq <= t.last) return
     if (ev.seq !== t.last + 1) return void catchUp(ts)
     addEvents(ts, [ev], { live: true })
   })
 }
+function applySessions(list) {
+  sessions = list
+  for (const s of sessions) if (!(s.thread in seen)) seen[s.thread] = s.lastSeq // a session seen for the first time counts as read
+  store.set('seen', seen)
+  renderList()
+  renderHeader()
+  renderComposerBits()
+  renderActivity()
+}
+// A tab nobody looks at should not keep receiving: after 30s hidden the stream closes, and showing the
+// tab opens it again and catches up from the last event it has.
+const HIDDEN_CLOSE_MS = Number(params.get('hiddenMs')) || 30_000
+let hiddenTimer = null
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState !== 'visible') return
+  if (document.visibilityState !== 'visible') {
+    hiddenTimer = setTimeout(() => {
+      hiddenTimer = null
+      es?.close()
+      es = null
+      connId = null
+      connected = false
+    }, HIDDEN_CLOSE_MS)
+    return
+  }
+  if (hiddenTimer) clearTimeout(hiddenTimer), (hiddenTimer = null)
   if (!es || es.readyState === EventSource.CLOSED || !connected) connect()
   else if (current) catchUp(current)
 })
@@ -174,15 +213,20 @@ async function catchUp(ts) {
     let rounds = 0
     let got = 0
     try {
+      // Fetch every page first and draw once: drawing each page as it came pushed the view down again and again.
+      const all = []
+      let after = t.last
       for (;;) {
-        const { events } = await api(`/api/events?thread=${encodeURIComponent(ts)}&after=${t.last}`)
+        const { events, more } = await api(`/api/events?thread=${encodeURIComponent(ts)}&after=${after}`)
         rounds++
-        const fresh = events.filter((e) => e.seq > t.last)
+        const fresh = events.filter((e) => e.seq > after)
         if (!fresh.length) break
-        got += fresh.length
-        addEvents(ts, fresh)
-        if (events.length < 1000) break
+        all.push(...fresh)
+        after = fresh.at(-1).seq
+        if (!more) break
       }
+      got = all.length
+      if (all.length) addEvents(ts, all)
       metrics.catchups.push({ rounds, events: got, ms: Math.round(performance.now() - started) })
     } catch (err) {
       toast('대화를 불러오지 못했어요: ' + err.message, 'err')
@@ -404,6 +448,7 @@ async function open(ts, { push = true } = {}) {
   loadDraft()
   const t = thread(ts)
   if (t.events.length) renderConvo(t.events)
+  await subscribe(ts)
   await catchUp(ts)
   scrollToBottom()
   markSeen(ts)
@@ -414,6 +459,7 @@ async function open(ts, { push = true } = {}) {
 function closeConvo() {
   saveDraft()
   current = null
+  subscribe(null)
   $('app').classList.remove('in-convo')
   $('empty').hidden = false
   $('convo').hidden = true
@@ -492,11 +538,15 @@ $('btn-collapse').addEventListener('click', () => setCollapsed(!$('app').classLi
 })()
 
 // ------------------------------------------------------------------ conversation
+// Events are applied to a model of rows first; only the newest rows get elements (150, more when the
+// view is scrolled to the top). A long session of thousands of events then costs the same to open as a
+// short one, and an update (a tool's result, an answered card) finds its row by id, not by walking.
+const WINDOW = 150
 let view
 function resetConvo() {
   $('log').innerHTML = ''
   $('todos').hidden = true
-  view = { msgs: new Map(), tools: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0 }
+  view = { rows: [], tools: new Map(), msgs: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0, start: 0, dirty: new Set(), opened: false }
 }
 
 const scroller = $('scroller')
@@ -505,7 +555,10 @@ function scrollToBottom() {
   scroller.scrollTop = scroller.scrollHeight
   $('jump').hidden = true
 }
-scroller.addEventListener('scroll', () => atBottom() && ($('jump').hidden = true))
+scroller.addEventListener('scroll', () => {
+  if (atBottom()) $('jump').hidden = true
+  if (scroller.scrollTop < 200 && view?.start > 0) showOlder()
+})
 $('jump').firstElementChild.addEventListener('click', scrollToBottom)
 
 function timeEl(at) {
@@ -519,153 +572,224 @@ function timeEl(at) {
 function renderConvo(evs, { live = false } = {}) {
   const t0 = performance.now()
   const follow = atBottom()
-  const log = $('log')
-  for (const ev of evs) {
-    const el = renderEvent(ev, live)
-    if (el) log.append(el)
+  const before = view.rows.length
+  for (const ev of evs) apply(ev, live)
+  // The first draw of a session shows only the newest rows.
+  if (!view.opened) {
+    view.opened = true
+    view.start = Math.max(0, view.rows.length - WINDOW)
   }
+  flush(before)
   renderTodos()
   renderWaitingNote()
   renderActivity()
   if (follow) scrollToBottom()
-  else if (evs.length) $('jump').hidden = false
+  else if (view.rows.length > before) $('jump').hidden = false
   noteApply(performance.now() - t0)
 }
 
-function renderEvent(ev, live) {
+function addRow(kind, ev, extra = {}) {
+  const row = { kind, ev, at: ev.at, el: null, ...extra }
+  view.rows.push(row)
+  return row
+}
+function touch(row) {
+  if (row.el) view.dirty.add(row)
+}
+
+function apply(ev, live) {
   view.lastAt = ev.at
   switch (ev.type) {
     case 'user': {
       view.turnAt = ev.at
-      const el = document.createElement('div')
-      el.className = 'item user'
-      el.innerHTML = `<div class="bubble"></div><div class="meta"></div>`
-      el.firstElementChild.innerHTML = linkify(ev.text)
-      const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
-      el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${hhmm(ev.at)}</span><span class="state"></span>`
-      view.users.set(ev.ts, el)
-      applyReacts(ev.ts)
-      return el
+      view.users.set(ev.ts, addRow('user', ev))
+      return
     }
-    case 'text': {
-      const el = document.createElement('div')
-      el.className = 'item text'
-      el.innerHTML = `<div class="md">${md(ev.text)}</div>${ev.files?.length ? `<div class="files">${icon('attach')} ${ev.files.map((f) => esc(f.split('/').pop())).join(', ')}</div>` : ''}`
-      el.append(timeEl(ev.at))
-      return el
-    }
+    case 'text':
+      addRow('text', ev)
+      return
     case 'tool':
-      return toolEl(ev)
+      view.tools.set(ev.id, addRow('tool', ev, { end: null, closed: false }))
+      return
     case 'tool_end': {
-      const t = findTool(ev.id)
-      if (t) {
-        t.end = ev
-        t.st.className = 'st ' + (ev.ok ? 'ok' : 'fail')
-        t.st.textContent = ev.ok ? '완료' : '실패'
-        if (t.detail && !t.detail.hidden) fillTool(t)
+      const row = view.tools.get(ev.id)
+      if (row) {
+        row.end = ev
+        touch(row)
       }
-      return null
+      return
     }
     case 'todos':
       view.todos = ev.todos
-      return null
+      return
     case 'msg': {
       // A note only for the presser (a button's answer): a toast while it is fresh, nothing in the timeline.
       if (ev.ephemeral && !hasActions(ev.blocks)) {
         if (live) toast(takeEmoji(plainText(ev.text)).rest)
-        return null
+        return
       }
-      const el = msgEl(ev)
-      view.msgs.set(ev.ts, el)
-      return el
+      view.msgs.set(ev.ts, addRow('msg', ev))
+      return
     }
     case 'msg_update': {
-      const old = view.msgs.get(ev.ts)
-      if (old) {
-        const el = msgEl({ ...ev, at: old._at ?? ev.at })
-        old.replaceWith(el)
-        view.msgs.set(ev.ts, el)
+      const row = view.msgs.get(ev.ts)
+      if (row) {
+        row.ev = { ...ev, at: row.at }
+        touch(row)
       }
-      return null
+      return
     }
     case 'msg_delete': {
-      view.msgs.get(ev.ts)?.remove()
-      view.msgs.delete(ev.ts)
-      return null
+      const row = view.msgs.get(ev.ts)
+      if (row) {
+        row.deleted = true
+        view.msgs.delete(ev.ts)
+        touch(row)
+      }
+      return
     }
     case 'react': {
       const set = view.reacts.get(ev.ts) ?? new Set()
       ev.on ? set.add(ev.name) : set.delete(ev.name)
       view.reacts.set(ev.ts, set)
-      applyReacts(ev.ts)
-      return null
+      const row = view.users.get(ev.ts)
+      if (row) touch(row)
+      return
     }
     case 'status':
       if (ev.state === 'busy' && !view.turnAt) view.turnAt = ev.at
       if (ev.state !== 'busy') closeRunningTools()
-      return null
+      return
     case 'end':
       closeRunningTools()
-      return noticeEl('ended', `세션 ${ev.why}`)
-    default:
-      return null
+      addRow('notice', ev, { icon: 'ended', text: `세션 ${ev.why}` })
+      return
   }
 }
 
-// Newest first, stop at the first hit: a tool result belongs to a recent call.
-function findTool(id) {
-  return view.tools.get(id)
-}
+// A turn that ended leaves no tool "running": the ones without a result are closed.
 function closeRunningTools() {
-  for (const t of view.tools.values())
-    if (!t.end && t.st.classList.contains('run')) {
-      t.st.className = 'st ok'
-      t.st.textContent = '끝남'
+  for (const row of view.tools.values())
+    if (!row.end && !row.closed) {
+      row.closed = true
+      touch(row)
     }
 }
 
-function applyReacts(ts) {
-  const el = view.users.get(ts)
-  const set = view.reacts.get(ts)
-  if (!el || !set) return
-  const st = el.querySelector('.state')
-  if (set.has('hourglass_flowing_sand')) {
-    st.className = 'state held'
-    st.textContent = '대기 중'
-    st.title = '실행 중인 도구가 끝나면 전달해요'
-  } else if (set.has('x')) {
-    st.className = 'state failed'
-    st.textContent = '취소함'
-  } else if (set.has('eyes') || set.has('white_check_mark')) {
-    st.className = 'state'
-    st.textContent = '전달됨'
+/** Put what changed on the page: edited rows in place, new rows at the end (within the window). */
+function flush(before) {
+  const log = $('log')
+  for (const row of view.dirty) {
+    if (!row.el) continue
+    if (row.deleted) {
+      row.el.remove()
+      row.el = null
+    } else if (row.kind === 'tool') updateTool(row)
+    else {
+      const el = draw(row)
+      row.el.replaceWith(el)
+      row.el = el
+    }
+  }
+  view.dirty.clear()
+  const frag = document.createDocumentFragment()
+  for (let i = Math.max(before, view.start); i < view.rows.length; i++) {
+    const row = view.rows[i]
+    if (row.el || row.deleted) continue
+    row.el = draw(row)
+    frag.append(row.el)
+  }
+  // On the first draw everything in the window is new; after that only what came after `before`.
+  if (before === 0 || view.start >= before) {
+    for (let i = view.start; i < Math.max(before, view.start); i++) {
+      const row = view.rows[i]
+      if (!row.el && !row.deleted) frag.prepend((row.el = draw(row)))
+    }
+  }
+  log.append(frag)
+}
+
+/** Scrolled to the top: draw the previous 150 rows above, keeping what is on screen where it is. */
+function showOlder() {
+  const from = Math.max(0, view.start - WINDOW)
+  const frag = document.createDocumentFragment()
+  for (let i = from; i < view.start; i++) {
+    const row = view.rows[i]
+    if (!row.deleted && !row.el) frag.append((row.el = draw(row)))
+  }
+  view.start = from
+  const h = scroller.scrollHeight
+  $('log').prepend(frag)
+  scroller.scrollTop += scroller.scrollHeight - h
+}
+
+function draw(row) {
+  switch (row.kind) {
+    case 'user':
+      return userEl(row)
+    case 'text': {
+      const el = document.createElement('div')
+      el.className = 'item text'
+      el.innerHTML = `<div class="md">${md(row.ev.text)}</div>${row.ev.files?.length ? `<div class="files">${icon('attach')} ${row.ev.files.map((f) => esc(f.split('/').pop())).join(', ')}</div>` : ''}`
+      el.append(timeEl(row.ev.at))
+      return el
+    }
+    case 'tool':
+      return toolEl(row)
+    case 'msg':
+      return msgEl(row.ev)
+    case 'notice':
+      return noticeEl(row.icon, row.text)
   }
 }
 
-function toolEl(ev) {
+function userEl(row) {
+  const ev = row.ev
+  const el = document.createElement('div')
+  el.className = 'item user'
+  el.innerHTML = `<div class="bubble"></div><div class="meta"></div>`
+  el.firstElementChild.innerHTML = linkify(ev.text)
+  const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
+  const set = view.reacts.get(ev.ts)
+  const st = !set ? '' : set.has('hourglass_flowing_sand') ? '<span class="held" title="실행 중인 도구가 끝나면 전달해요">대기 중</span>' : set.has('x') ? '<span class="failed">취소함</span>' : set.has('eyes') || set.has('white_check_mark') ? '<span>전달됨</span>' : ''
+  el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${hhmm(ev.at)}</span>${st}`
+  return el
+}
+
+function toolStatus(row) {
+  return row.end ? (row.end.ok ? ['ok', '완료'] : ['fail', '실패']) : row.closed ? ['ok', '끝남'] : ['run', '실행 중']
+}
+function toolEl(row) {
   const el = document.createElement('div')
   el.className = 'item tool'
-  el.innerHTML = `<div class="head"><span class="st run">실행 중</span><span class="label"></span></div>`
-  el.querySelector('.label').innerHTML = icon(toolIcon(ev.name)) + linkify(takeEmoji(ev.title).rest)
-  const t = { ev, el, st: el.querySelector('.st'), detail: null, end: null }
-  view.tools.set(ev.id, t)
+  const [cls, label] = toolStatus(row)
+  el.innerHTML = `<div class="head"><span class="st ${cls}">${label}</span><span class="label"></span></div>`
+  el.querySelector('.label').innerHTML = icon(toolIcon(row.ev.name)) + linkify(takeEmoji(row.ev.title).rest)
   el.querySelector('.head').addEventListener('click', (e) => {
     if (e.target.closest('a')) return // a link in the row opens the link, not the row
-    if (!t.detail) {
-      t.detail = document.createElement('div')
-      t.detail.className = 'detail'
-      el.append(t.detail)
-      fillTool(t) // drawn the first time it is opened, so a long conversation stays light
-    } else t.detail.hidden = !t.detail.hidden
+    let d = el.querySelector('.detail')
+    if (d) return void (d.hidden = !d.hidden)
+    d = document.createElement('div')
+    d.className = 'detail'
+    el.append(d)
+    fillTool(row, d) // drawn the first time it is opened, so a long conversation stays light
   })
   return el
 }
-function fillTool(t) {
+function updateTool(row) {
+  const st = row.el.querySelector('.st')
+  const [cls, label] = toolStatus(row)
+  st.className = 'st ' + cls
+  st.textContent = label
+  const d = row.el.querySelector('.detail')
+  if (d) fillTool(row, d)
+}
+function fillTool(row, d) {
   const parts = []
-  if (t.ev.detail) parts.push(`<div class="k">입력</div>${codeBoxHtml(linkify(t.ev.detail))}`)
-  if (t.end) parts.push(`<div class="k">${t.end.ok ? '출력' : '오류'}</div>${codeBoxHtml(linkify(t.end.output || '(출력 없음)'))}`)
-  else parts.push('<div class="k">실행 중…</div>')
-  t.detail.innerHTML = parts.join('')
+  if (row.ev.detail) parts.push(`<div class="k">입력</div>${codeBoxHtml(linkify(row.ev.detail))}`)
+  if (row.end) parts.push(`<div class="k">${row.end.ok ? '출력' : '오류'}</div>${codeBoxHtml(linkify(row.end.output || '(출력 없음)'))}`)
+  else parts.push(`<div class="k">${row.closed ? '결과 없이 끝났어요' : '실행 중…'}</div>`)
+  d.innerHTML = parts.join('')
 }
 const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${inner}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
 
@@ -880,7 +1004,7 @@ function renderActivity() {
     return
   }
   let running = null
-  for (const t of view.tools.values()) if (!t.end && t.st.classList.contains('run')) running = t
+  for (const t of view.tools.values()) if (!t.end && !t.closed) running = t
   const since = running ? running.ev.at : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
   const secs = Math.max(0, Math.round((Date.now() - since) / 1000))
   const key = running ? 'tool:' + running.ev.id : 'think'
@@ -908,7 +1032,8 @@ setInterval(() => current && renderActivity(), 1000)
 
 // ------------------------------------------------------------------ composer: chips, waiting note, held
 function renderWaitingNote() {
-  const n = $('log').querySelectorAll('.card.decision').length
+  let n = 0
+  for (const row of view.msgs.values()) if (!row.deleted && hasActions(row.ev.blocks) && !row.ev.ephemeral) n++
   const el = $('waiting-note')
   el.hidden = !n
   if (n) el.innerHTML = `${icon('ring')}위 카드 ${n}개가 응답을 기다려요`

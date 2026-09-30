@@ -13,6 +13,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import type { AdminState, Orphan, ThreadView, WebSession } from './broker.ts'
 import type { SessionEvent } from './events.ts'
@@ -48,8 +49,40 @@ export interface AdminApi {
   onChange?(l: () => void): () => void
 }
 
+/**
+ * What to send a page about the session list, given what it already has (`sent`, updated in place):
+ * the sessions whose content changed, and the order as thread keys. Nothing changed: undefined.
+ * The list used to go out whole on every event, and was the largest thing on the wire.
+ */
+export function sessionsDelta(sent: Map<string, string>, list: WebSession[]): { order: string[]; changed: WebSession[] } | undefined {
+  const order = list.map((s) => s.thread)
+  const changed: WebSession[] = []
+  for (const s of list) {
+    const json = JSON.stringify(s)
+    if (sent.get(s.thread) !== json) {
+      changed.push(s)
+      sent.set(s.thread, json)
+    }
+  }
+  const before = [...sent.keys()]
+  for (const k of before) if (!order.includes(k)) sent.delete(k)
+  const sameOrder = before.length === order.length && before.every((k, i) => k === order[i])
+  if (!changed.length && sameOrder) return undefined
+  // Keep the map in the list's order, so the next comparison of order is a plain walk.
+  const entries = order.map((k) => [k, sent.get(k)!] as const)
+  sent.clear()
+  for (const [k, v] of entries) sent.set(k, v)
+  return { order, changed }
+}
+
 /** A comment line every so often keeps proxies and phones from calling an idle stream dead. */
 const SSE_PING_MS = 25_000
+/**
+ * Open streams, by the id each was given, and the one thread its page is looking at. Only that thread's
+ * events go down the stream; the rest the page learns from the list (lastSeq) and fetches when it
+ * switches (after=seq). With several sessions running, every page used to receive everything.
+ */
+const streams = new Map<string, { thread: string | null }>()
 /** The web app's files, served as they are: no build step. */
 const WEB_FILES: Record<string, string> = {
   '/': 'index.html',
@@ -180,11 +213,23 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       res.write(frame)
     }
     res.write('retry: 2000\n\n')
-    write('sessions', api.webSessions())
-    const offChange = api.onChange(() => write('sessions', api.webSessions!()))
-    const offEvent = api.events.subscribe((thread, ev) => write('ev', { thread, ev }, `ev:${ev.type}`))
+    // The whole list once; after that only what changed, with the order.
+    const sent = new Map<string, string>()
+    write('sessions', sessionsDelta(sent, api.webSessions())?.changed ?? [])
+    const offChange = api.onChange(() => {
+      const delta = sessionsDelta(sent, api.webSessions!())
+      if (delta) write('sessions_delta', delta)
+    })
+    const conn = randomBytes(8).toString('hex')
+    const me = { thread: null as string | null }
+    streams.set(conn, me)
+    write('hello', { conn })
+    const offEvent = api.events.subscribe((thread, ev) => {
+      if (me.thread === thread) write('ev', { thread, ev }, `ev:${ev.type}`)
+    })
     const ping = setInterval(() => res.write(`: ping ${Date.now()}\n\n`), SSE_PING_MS)
     req.on('close', () => {
+      streams.delete(conn)
       clearInterval(ping)
       offChange()
       offEvent()
@@ -195,10 +240,21 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   if (req.method === 'GET' && url.pathname === '/api/events' && api.events) {
     const thread = url.searchParams.get('thread') ?? ''
     const after = Math.max(0, Number(url.searchParams.get('after') ?? 0) || 0)
-    const body = JSON.stringify({ events: api.events.since(thread, after), last: api.events.last(thread) })
+    const events = api.events.since(thread, after)
+    const last = api.events.last(thread)
+    const body = JSON.stringify({ events, last, more: (events.at(-1)?.seq ?? last) < last })
     meter.add('events', Buffer.byteLength(body), `thread=${thread} after=${after}`)
     res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
     res.end(body)
+    return
+  }
+  if (req.method === 'POST' && url.pathname === '/api/subscribe') {
+    const body = await readJson(req)
+    const stream = streams.get(String(body.conn ?? ''))
+    if (!stream) return send(res, 404, { error: '모르는 연결입니다. 다시 연결하세요.' })
+    stream.thread = typeof body.thread === 'string' && /^\d+\.\d+$/.test(body.thread) ? body.thread : null
+    res.writeHead(204)
+    res.end()
     return
   }
   // A page's own numbers for its last minute (received, time to show, catch-ups, stalls, DOM size), into the log.

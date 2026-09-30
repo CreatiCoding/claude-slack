@@ -16,8 +16,9 @@ export const DEFAULT_EVENTS_DIR = process.env.CLAUDE_SLACK_EVENTS_DIR ?? join(ho
 
 /** Kept in memory per thread; older ones are still in the file. */
 const MEMORY_PER_THREAD = 3000
-/** At most this many in one catch-up answer; the page asks again from the last one it got. */
+/** At most this many in one catch-up answer, and about this many bytes; the page asks again from the last one it got. */
 const PAGE = 1000
+const PAGE_BYTES = 1_000_000
 
 export type EventBody =
   /** Something a person said: typed in Slack, in the web app, or in the terminal. */
@@ -136,8 +137,12 @@ export class EventLog {
       } catch {}
     }
     const out: SessionEvent[] = []
+    let bytes = 0
     for (const ev of pool) {
       if (ev.seq <= after) continue
+      // Always at least one, however large: otherwise a page could never get past it.
+      bytes += JSON.stringify(ev).length
+      if (out.length && bytes > PAGE_BYTES) break
       out.push(ev)
       if (out.length >= PAGE) break
     }

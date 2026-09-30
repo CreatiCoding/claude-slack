@@ -14,8 +14,10 @@ const changes = new Set<() => void>()
 const now = Date.now()
 const A = '1000.0001'
 const B = '2000.0002'
+const C = '3000.0003' // a long session: thousands of events
 let sessions: WebSession[] = [
   { pid: 11, thread: A, cwd: '/p/alpha', title: '알파 작업', state: 'idle', model: 'opus', effort: 'high', permissionMode: 'default', contextLabel: '12%', startedAt: now - 60_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 60_000, preview: '첫 메시지 A' },
+  { pid: 13, thread: C, cwd: '/p/long', title: '긴 세션', state: 'idle', startedAt: now - 300_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 300_000 },
   { pid: 12, thread: B, cwd: '/p/beta', title: '베타', state: 'waiting', waiting: '권한 대기', startedAt: now - 120_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 120_000 },
 ]
 const changed = () => {
@@ -38,6 +40,12 @@ events.emit(A, { type: 'tool', id: 't1', name: 'Bash', title: '💻 npm test htt
 events.emit(A, { type: 'tool_end', id: 't1', ok: true, output: 'ok 286' })
 events.emit(A, { type: 'todos', todos: [{ content: '하나', status: 'completed' }, { content: '둘', status: 'in_progress', activeForm: '둘 하는 중' }, { content: '셋', status: 'pending' }] })
 events.emit(B, { type: 'msg', ts: '2000.5', text: '권한 요청', blocks: permBlocks(12) })
+for (let i = 0; i < 1600; i++) {
+  events.emit(C, { type: 'user', ts: `3000.${i}`, text: `질문 ${i}`, via: 'web' })
+  events.emit(C, { type: 'tool', id: `c${i}`, name: 'Bash', title: `ls ${i}`, detail: 'ls' })
+  events.emit(C, { type: 'tool_end', id: `c${i}`, ok: true, output: 'a\nb' })
+  events.emit(C, { type: 'text', text: `답 **${i}**` })
+}
 changed()
 
 const api: AdminApi = {
@@ -115,7 +123,7 @@ for (const [label, size, phone] of [
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()))
   await page.goto(base + '/')
   await page.waitForSelector('.row')
-  check(`${label}: 목록에 세션 두 개`, (await page.locator('.row[data-thread]').count()) === 2)
+  check(`${label}: 목록에 세션 세 개`, (await page.locator('.row[data-thread]').count()) === 3)
   check(`${label}: 응답 대기 배지`, ((await page.locator('.row[data-thread] .badge').first().textContent()) ?? '').includes('권한 대기'))
   check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row .name').first().textContent()) ?? '') === '베타')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
@@ -210,6 +218,46 @@ for (const [label, size, phone] of [
   changed()
   await page.waitForSelector(`text=${live}`, { timeout: 3000 }).catch(() => {})
   check(`${label}: SSE 로 새 답이 바로 붙음`, (await page.locator(`text=${live}`).count()) === 1)
+
+  // A hidden tab closes its stream (here after 300ms instead of 30s) and catches up when shown again.
+  if (!phone) {
+    await page.goto(base + '/?hiddenMs=300#' + A)
+    await page.waitForSelector('.item.text')
+    const streams = () => page.evaluate(() => (performance.getEntriesByType('resource') as PerformanceResourceTiming[]).filter((r) => r.name.includes('/api/stream')).length)
+    const before = await streams()
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await page.waitForTimeout(500)
+    const missed = `가려진 동안 온 답 ${label}`
+    events.emit(A, { type: 'text', text: missed })
+    changed()
+    await page.waitForTimeout(200)
+    check(`${label}: 가려진 탭은 받지 않는다`, (await page.locator(`text=${missed}`).count()) === 0)
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true })
+      document.dispatchEvent(new Event('visibilitychange'))
+    })
+    await page.waitForSelector(`text=${missed}`, { timeout: 3000 }).catch(() => {})
+    check(`${label}: 다시 보이면 다시 붙어 따라잡는다`, (await page.locator(`text=${missed}`).count()) === 1 && (await streams()) > before)
+  }
+
+  // A long session (6400 events) opens by drawing only its newest rows; scrolling up draws more.
+  if (phone) await page.goBack()
+  const t0 = Date.now()
+  await page.locator('.row', { hasText: '긴 세션' }).click()
+  await page.waitForSelector('text=답 1599')
+  const openMs = Date.now() - t0
+  const drawn = await page.locator('#log > .item').count()
+  check(`${label}: 긴 세션은 최근 줄만 그린다 (${drawn}줄, ${openMs}ms)`, drawn <= 150 && drawn >= 100, String(drawn))
+  await page.locator('#scroller').evaluate((el) => (el.scrollTop = 0))
+  await page.waitForTimeout(300)
+  const more = await page.locator('#log > .item').count()
+  check(`${label}: 위로 올리면 150줄 더 (${more}줄)`, more > drawn && more <= drawn + 150, String(more))
+  if (phone) await page.goBack()
+  await page.locator('.row', { hasText: '알파' }).click()
+  await page.waitForSelector('.item.text')
 
   // Scroll horizontally never.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
