@@ -35,7 +35,7 @@
   </aside>
   <main id="main" class="main">
     <div id="subbar" class="subbar" hidden><span id="badge"></span><span id="meta" class="meta"></span></div>
-    <section id="empty" class="empty">왼쪽에서 세션을 고르세요.</section>
+    <section id="empty" class="empty"><div class="empty-in"><p class="empty-title">왼쪽에서 세션을 고르세요.</p><div id="offline" class="offline" hidden></div><div id="qr-box" class="qr-box"></div></div></section>
     <section id="convo" class="convo" hidden>
       <div id="scroller" class="scroller">
         <div id="log" class="log"></div>
@@ -56,6 +56,15 @@
   </main>
 </div>
 <div id="toast" class="toast" role="status" hidden></div>
+<script>
+  // If the app itself fails to start (a script error, a failed load), say so in Korean instead of a blank page.
+  window.addEventListener('error', function (e) { window.__bootError = e.message || String(e.error || '') })
+  setTimeout(function () {
+    if (window.__ready) return
+    var code = 'E-' + ((window.__bootError || 'load').split('').reduce(function (h, c) { return (h * 31 + c.charCodeAt(0)) >>> 0 }, 7) % 65536).toString(16)
+    document.body.innerHTML = '<div class="crash"><p>화면을 열지 못했어요. (오류 ' + code + ')</p><p><button type="button" onclick="location.reload()">다시 열기</button> <button type="button" onclick="location.hash=\'\';location.reload()">세션 목록으로</button></p></div>'
+  }, 6000)
+</script>
 <script type="module" src="/web/app.js"></script>
 </body>
 </html>

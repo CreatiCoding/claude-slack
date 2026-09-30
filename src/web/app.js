@@ -5,6 +5,7 @@
 import { esc, linkify, md, mrkdwn } from './markdown.js'
 import { icon, takeEmoji, toolIcon } from './icons.js'
 import { getImage, loadTimeline, putImage, saveTimeline } from './idb.js'
+import { qrSvg } from './qr.js'
 
 const $ = (id) => document.getElementById(id)
 const params = new URLSearchParams(location.search)
@@ -310,7 +311,26 @@ document.addEventListener('visibilitychange', () => {
   else if (current) catchUp(current)
 })
 addEventListener('online', () => connect())
+/** The empty right pane: how to start the broker when it is off (only after 2.5s: a page just opened has heard nothing yet), and a QR to open this page on a phone. */
+function renderEmpty() {
+  const off = !connected && lostAt && Date.now() - lostAt > 2500
+  const box = $('offline')
+  if (off && box.hidden) {
+    const step = (n, title, cmd, note) => `<li><div class="step-title">${n}. ${title}</div>${cmd ? `<div class="codebox"><pre><code>${esc(cmd)}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>` : ''}${note ? `<div class="step-note">${note}</div>` : ''}</li>`
+    box.innerHTML = `<div class="off-title">${icon('alert')}브로커가 꺼져 있어요</div><ol class="steps">${step(1, '맥에서 브로커 켜기', 'launchctl kickstart gui/$(id -u)/com.claude-slack', '안 되면 <code>cd ~/projects/claude-slack && npm start</code>')}${step(2, '처음이라면 로그인', 'claude', 'Claude Code 를 한 번 띄워 로그인하고, .env 에 Slack 토큰을 넣어요.')}${step(3, '연결 확인', 'tail -f ~/.claude-slack/logs/broker.log', '<code>[broker] up</code> 이 보이면 이 화면이 저절로 다시 붙어요.')}</ol>`
+  }
+  box.hidden = !off
+  const qr = $('qr-box')
+  if (!qr.firstChild) {
+    // The address without the session in it; with the token if this page has one, so the phone gets in too.
+    const url = location.origin + location.pathname + (token ? '?t=' + encodeURIComponent(token) : '')
+    try {
+      qr.innerHTML = `${qrSvg(url, 176)}<div class="qr-note">폰으로 열기</div>`
+    } catch {}
+  }
+}
 function renderConn() {
+  renderEmpty()
   const el = $('conn')
   const quiet = connected || (lostAt && Date.now() - lostAt < (restarting ? 30_000 : 8_000))
   el.textContent = quiet ? '' : '연결이 끊겼어요 · 다시 붙는 중…'
@@ -867,7 +887,28 @@ function timeEl(at) {
   return d
 }
 
-function renderConvo(evs, { live = false } = {}) {
+function renderConvo(evs, opts = {}) {
+  try {
+    drawConvo(evs, opts)
+  } catch (err) {
+    reportError('draw', err)
+    showCrash(err)
+  }
+}
+/** The conversation could not be drawn: a short Korean note with the error's number, a way to reopen, a way back. */
+function showCrash(err) {
+  const code = 'E-' + (String(err?.message ?? err).split('').reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 65536).toString(16)
+  let box = $('main').querySelector('.crash')
+  if (!box) {
+    box = document.createElement('div')
+    box.className = 'crash'
+    $('main').append(box)
+  }
+  box.innerHTML = `<p>${icon('alert')} 대화를 그리다 문제가 생겼어요. (오류 ${code})</p><p><button class="btn primary" type="button" data-x="reload">다시 열기</button> <button class="btn" type="button" data-x="list">세션 목록으로</button></p>`
+  box.querySelector('[data-x="reload"]').addEventListener('click', () => location.reload())
+  box.querySelector('[data-x="list"]').addEventListener('click', () => (box.remove(), closeConvo()))
+}
+function drawConvo(evs, { live = false } = {}) {
   const t0 = performance.now()
   const follow = atBottom()
   const before = view.rows.length
@@ -2414,6 +2455,7 @@ addEventListener('keydown', (e) => {
 })
 
 // ------------------------------------------------------------------ start
+window.__ready = true
 // Draw the last known list before the stream answers, so a reload never starts empty.
 sessions = store.get('sessions-cache', [])
 renderList()

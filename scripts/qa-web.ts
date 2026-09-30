@@ -215,6 +215,40 @@ const check = (name: string, cond: unknown, detail = '') => {
 const settle = (p: Page, ms = 400) => p.waitForTimeout(ms)
 
 const browser = await chromium.launch()
+// The empty pane: a QR that keeps its size; "브로커가 꺼져 있어요" only after 2.5s without a connection (fake clock).
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  await page.clock.install()
+  await page.route('**/api/stream*', (route) => route.abort('failed'))
+  await page.goto(base + '/')
+  await page.waitForSelector('#qr-box svg.qr')
+  const qr = await page.locator('#qr-box svg.qr').boundingBox()
+  check('빈 칸: 폰으로 여는 QR(176px, 줄지 않음)', !!qr && Math.round(qr.width) === 176 && Math.round(qr.height) === 176, JSON.stringify(qr))
+  await page.clock.runFor(2000)
+  check('빈 칸: 2초에는 "꺼져 있어요"를 띄우지 않는다', await page.locator('#offline').isHidden())
+  await page.clock.runFor(1500)
+  check('빈 칸: 2.5초 넘게 꺼져 있으면 켜는 법', (await page.locator('#offline').isVisible()) && ((await page.locator('#offline').textContent()) ?? '').includes('launchctl kickstart'))
+  await page.screenshot({ path: join(tmpdir(), 'qa-web-pc-offline.png') })
+  await ctx.close()
+}
+
+// A conversation that cannot be drawn: a short Korean note with a number, "다시 열기" and "세션 목록으로".
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  const E = '5000.0005'
+  events.emit(E, { type: 'user', ts: '5000.1' } as never)
+  await page.goto(base + '/#' + E)
+  await page.waitForSelector('.crash', { timeout: 5000 }).catch(() => {})
+  const crash = (await page.locator('.crash').textContent()) ?? ''
+  check('깨진 대화: 한국어 안내와 오류 번호', /대화를 그리다 문제가 생겼어요\. \(오류 E-[0-9a-f]+\)/.test(crash), crash)
+  check('깨진 대화: 다시 열기·세션 목록으로', (await page.locator('.crash button').allTextContents()).join('|') === '다시 열기|세션 목록으로')
+  check('깨진 대화: 화면 오류 기록으로', clientErrors.some((e) => / draw: /.test(e)))
+  await page.screenshot({ path: join(tmpdir(), 'qa-web-phone-crash.png') })
+  await ctx.close()
+}
+
 // A frame that cannot be parsed is recorded (screen error log) and does not stop the frames after it.
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })

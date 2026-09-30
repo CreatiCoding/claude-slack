@@ -420,3 +420,19 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 /* header line: the badge keeps its width when 대기 ↔ 작업 중, so the text after it does not move */
 #badge .badge:first-child { min-width: 4.6em; }
 .plugin-new { font-size: var(--fs-s); color: var(--accent); }
+
+/* empty pane: broker off, QR */
+.empty-in { display: flex; flex-direction: column; align-items: center; gap: 18px; max-width: 560px; width: 100%; padding: 24px var(--gutter); }
+.empty-title { margin: 0; }
+.offline { width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; color: var(--text); text-align: left; }
+.off-title { display: flex; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 8px; color: var(--yellow); }
+.steps { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.step-title { font-size: var(--fs-m); }
+.step-note { font-size: var(--fs-s); color: var(--muted); }
+.step-note code { font-family: var(--mono); font-size: var(--fs-s); background: var(--soft); border-radius: 4px; padding: 0 4px; }
+.qr-box { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.qr-box .qr { flex-shrink: 0; width: 176px; height: 176px; border-radius: 8px; }
+.qr-note { font-size: var(--fs-s); color: var(--muted); }
+.crash { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--text); padding: 24px; text-align: center; }
+.main { position: relative; }
+body > .crash { position: fixed; font: 15px/1.5 -apple-system, system-ui, sans-serif; }

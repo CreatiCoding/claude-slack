@@ -112,6 +112,7 @@ const WEB_FILES: Record<string, string> = {
   '/web/markdown.js': 'markdown.js',
   '/web/icons.js': 'icons.js',
   '/web/idb.js': 'idb.js',
+  '/web/qr.js': 'qr.js',
 }
 const WEB_TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' }
 
