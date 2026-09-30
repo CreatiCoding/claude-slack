@@ -104,6 +104,14 @@ const api: AdminApi = {
     changed()
     return { ok: true, note: '보냈습니다.' }
   },
+  webTrashInfo(pid) {
+    calls.push(`trash-info:${pid}`)
+    return { ok: true, note: '', folder: '/Users/me/p/alpha', repos: [{ path: '/Users/me/p/alpha', uncommitted: 2, unpushed: 1 }] }
+  },
+  async webTrash(pid) {
+    calls.push(`trash:${pid}`)
+    return { ok: true, note: '휴지통으로 옮겼습니다: ~/.Trash/alpha' }
+  },
   async webFork(pid) {
     calls.push(`fork:${pid}`)
     const D = '4000.0004'
@@ -325,6 +333,17 @@ for (const [label, size, phone] of [
   await page.locator('.menu .mi', { hasText: '전부 허용 끄기' }).click()
   await page.waitForFunction(() => !document.querySelector('#badge .badge.auto'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 끄기는 묻지 않고 :auto off`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto off')))
+  // 폴더 버리고 종료: shows what would be lost first, then goes on only when confirmed.
+  if (!phone) {
+    let asked = ''
+    page.once('dialog', (d) => ((asked = d.message()), d.accept()))
+    await page.locator('#btn-more').click()
+    await page.locator('.menu .mi', { hasText: '폴더 버리고 종료' }).click()
+    await page.waitForTimeout(300)
+    check(`${label}: 버리기 전에 저장소 상태를 보여 준다`, /커밋 안 한 변경 2개/.test(asked) && /push 안 한 커밋 1개/.test(asked), asked)
+    check(`${label}: 확인하면 trash`, calls.includes('trash:11'))
+  }
+
   // 복제 opens the new session, with the copied history and the line where it ends.
   if (!phone) {
     await page.locator('#btn-more').click()

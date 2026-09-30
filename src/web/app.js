@@ -1602,8 +1602,29 @@ function sessionItems(s) {
     { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
     'sep',
     { label: '종료', icon: 'ended', danger: true, run: () => confirm(`"${nameOf(s)}" 세션을 종료할까요?`) && command(s, 'exit') },
+    { label: '폴더 버리고 종료', icon: 'folder', danger: true, run: () => trashFolder(s) },
     { label: '강제 종료', icon: 'deny', danger: true, run: () => confirm('tmux 창을 닫아 강제로 끝낼까요?') && api(`/api/session/${s.pid}/kill`, {}).then((r) => toast(r.note), (e) => toast(e.message, 'err')) },
   ]
+}
+/** Say what would be lost (per repository), then end the session and move its folder to the Trash. */
+async function trashFolder(s) {
+  let info
+  try {
+    info = await api(`/api/session/${s.pid}/trash-info`)
+  } catch (err) {
+    return toast(err.message, 'err')
+  }
+  if (!info.ok) return toast(info.note, 'err')
+  const home = (p) => p.replace(/^\/Users\/[^/]+/, '~')
+  const lines = (info.repos || []).map((r) => `• ${home(r.path)}: ${r.uncommitted ? `커밋 안 한 변경 ${r.uncommitted}개` : '변경 없음'}, ${r.unpushed ? `push 안 한 커밋 ${r.unpushed}개` : 'push 안 한 커밋 없음'}`)
+  const risky = (info.repos || []).some((r) => r.uncommitted || r.unpushed)
+  const msg = [`${home(info.folder)} 폴더를 휴지통으로 옮기고 세션을 끝낼까요?`, '', ...(lines.length ? lines : ['(git 저장소 없음)']), ...(risky ? ['', '⚠ 저장하지 않은 작업이 있어요. 휴지통에서 되살릴 수는 있어요.'] : [])].join('\n')
+  if (!confirm(msg)) return
+  try {
+    toast((await api(`/api/session/${s.pid}/trash`, {})).note)
+  } catch (err) {
+    toast(err.message, 'err')
+  }
 }
 async function forkSession(s) {
   try {

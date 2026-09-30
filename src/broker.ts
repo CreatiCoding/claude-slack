@@ -29,6 +29,8 @@ import { countArchives, deleteArchive, listArchives, renameArchive, type Session
 import { PurgeService } from './purge.ts'
 import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
+import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
+import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
 export type { Session } from './session.ts'
@@ -134,6 +136,10 @@ export interface BrokerConfig {
   eventsDir?: string
   /** Where pictures shown in the web app are kept. */
   webImagesDir?: string
+  /** Where "폴더 버리고 종료" moves a folder (default ~/.Trash). */
+  trashDir?: string
+  /** Does a conversation's folder still exist (tests fake it). */
+  folderExists?: (path: string) => boolean
   /** Draw terminal screens as pictures (default on); text when off or when rendering fails. */
   screenImages?: boolean
   /** Renders a screen with colours to its pictures (one, or the conversation and its side panel). Tests replace it so no browser starts; a single Buffer is one picture. */
@@ -645,6 +651,40 @@ export class Broker {
     await this.slack.post({ threadTs: session.threadTs, text: `↩️ 웹: '${quoted}' 를 잘못 보냈다고 알렸습니다.` })
     await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
     return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
+  }
+
+  /** Folders that must never go to the Trash: home, the default folder, the broker's own and its state. */
+  private get protectedDirs(): string[] {
+    return [homedir(), this.cfg.defaultCwd, REPO_ROOT, join(homedir(), '.claude'), join(homedir(), '.claude-slack')]
+  }
+
+  /** What "폴더 버리고 종료" would do, for the page to show before it asks. */
+  webTrashInfo(pid: number): { ok: boolean; note: string; folder?: string; repos?: RepoState[] } {
+    const session = this.registry.byPid(pid)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    const refused = refuseReason(session.cwd, this.protectedDirs)
+    if (refused) return { ok: false, note: refused, folder: session.cwd }
+    return { ok: true, note: '', folder: session.cwd, repos: repoStates(session.cwd) }
+  }
+
+  /** End the session and move its folder to the Trash (never deleted). */
+  async webTrash(pid: number): Promise<{ ok: boolean; note: string }> {
+    const session = this.registry.byPid(pid)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    const folder = session.cwd
+    const refused = refuseReason(folder, this.protectedDirs)
+    if (refused) return { ok: false, note: refused }
+    if (session.pane) await this.tmux.killPane(session.pane).catch(() => {})
+    await sleep(500)
+    let dest: string
+    try {
+      dest = moveToTrash(folder, this.cfg.trashDir)
+    } catch (err) {
+      return { ok: false, note: `세션은 끝냈지만 폴더를 옮기지 못했습니다: ${describeError(err)}` }
+    }
+    this.logAt('INFO', 'session', 'folder moved to the Trash', this.tag(session, { dest: shortenHome(dest) }))
+    await this.slack.post({ threadTs: session.threadTs, text: `🗑 폴더를 휴지통으로 옮기고 종료했습니다: \`${shortenHome(folder)}\`` }).catch(() => {})
+    return { ok: true, note: `휴지통으로 옮겼습니다: ${shortenHome(dest)}` }
   }
 
   /** 복제: the same conversation continued in a new session (claude --resume <id> --fork-session); the original goes on. */
@@ -2804,7 +2844,9 @@ export class Broker {
     for (const o of this.orphanScan?.items ?? []) if (o.sessionId) taken.add(o.sessionId)
     // Ask for more than shown: some of what comes back is dropped.
     const all = await (this.cfg.listSessions ?? listRecentSessions)(limit + taken.size)
-    return all.filter((r) => !taken.has(r.id)).slice(0, limit)
+    // A conversation whose folder is gone (moved to the Trash) cannot be resumed there.
+    const exists = this.cfg.folderExists ?? existsSync
+    return all.filter((r) => !taken.has(r.id) && exists(r.cwd)).slice(0, limit)
   }
 
   /** The session (or a launch still coming up) that already has this conversation open, in a thread other than `exceptThread`. */

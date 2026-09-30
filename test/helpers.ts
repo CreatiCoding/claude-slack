@@ -200,6 +200,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       revivePath,
       // Every test's FakeSlack numbers threads from 1.000, so a shared event folder would mix their logs.
       eventsDir: join(tmpdir(), `cs-events-${id}`),
+      folderExists: () => true,
       webImagesDir: join(tmpdir(), `cs-web-images-${id}`),
       listSessions: () => [{ id: 'sess-1', cwd: '/home/u/proj', title: '테스트 수정', mtime: 1, when: '5분 전' }],
       archiveDir,
