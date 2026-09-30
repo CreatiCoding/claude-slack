@@ -104,6 +104,15 @@ const api: AdminApi = {
     changed()
     return { ok: true, note: '보냈습니다.' }
   },
+  async webFork(pid) {
+    calls.push(`fork:${pid}`)
+    const D = '4000.0004'
+    events.emit(D, { type: 'user', ts: '4000.1', text: '원래 질문', via: 'web' }, now - 3600_000)
+    events.emit(D, { type: 'notice', text: '여기까지 복제한 대화', icon: 'undo' })
+    sessions = [...sessions, { pid: 14, thread: D, cwd: '/p/alpha', title: '알파 작업 (복제)', state: 'starting', startedAt: Date.now(), held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: Date.now() }]
+    changed()
+    return { ok: true, note: '복제한 세션을 띄웁니다.', thread: D }
+  },
   async webUnhold(pid, ts) {
     calls.push(`unhold:${pid}:${ts}`)
     const s = sessions.find((x) => x.pid === pid)!
@@ -161,13 +170,13 @@ for (const [label, size, phone] of [
   page.on('console', (m) => m.type() === 'error' && !/Failed to load resource/.test(m.text()) && errors.push(m.text()))
   await page.goto(base + '/')
   await page.waitForSelector('.row')
-  check(`${label}: 목록에 세션 세 개`, (await page.locator('.row[data-thread]').count()) === 3)
+  check(`${label}: 목록에 떠 있는 세션들`, (await page.locator('.row[data-thread]').count()) >= 3)
   check(`${label}: 응답 대기 배지`, ((await page.locator('.row[data-thread] .badge').first().textContent()) ?? '').includes('권한 대기'))
   check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row .name').first().textContent()) ?? '') === '베타')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
 
   // Open A and read it.
-  await page.locator('.row', { hasText: '알파' }).click()
+  await page.locator(`.row[data-thread="${A}"]`).click()
   await page.waitForSelector('.item.text')
   await settle(page)
   check(`${label}: 제목`, (await page.locator('#title').textContent()) === '알파 작업')
@@ -299,7 +308,7 @@ for (const [label, size, phone] of [
   check(`${label}: 작업 중이면 활동 상자`, await page.locator('#activity:not([hidden])').count() === 1)
   await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}-busy.png`) })
   if (phone) await page.goBack()
-  await page.locator('.row', { hasText: '알파' }).click()
+  await page.locator(`.row[data-thread="${A}"]`).click()
   await settle(page)
   check(`${label}: 쓰던 글 남음`, (await page.locator('#input').inputValue()) === '쓰던 글')
   await page.locator('#input').fill('')
@@ -316,6 +325,16 @@ for (const [label, size, phone] of [
   await page.locator('.menu .mi', { hasText: '전부 허용 끄기' }).click()
   await page.waitForFunction(() => !document.querySelector('#badge .badge.auto'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 끄기는 묻지 않고 :auto off`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto off')))
+  // 복제 opens the new session, with the copied history and the line where it ends.
+  if (!phone) {
+    await page.locator('#btn-more').click()
+    await page.locator('.menu .mi', { hasText: '복제' }).click()
+    await page.waitForSelector('text=여기까지 복제한 대화', { timeout: 3000 }).catch(() => {})
+    check(`${label}: 복제 → 새 세션을 연다`, calls.includes('fork:11') && (await page.locator('.notice', { hasText: '여기까지 복제한 대화' }).count()) === 1)
+    await page.locator(`.row[data-thread="${A}"]`).click()
+    await page.waitForSelector('.item.text')
+  }
+
   // Settings submenu reaches the model command.
   await page.locator('#btn-more').click()
   await page.locator('.menu .mi', { hasText: '설정 (모델·권한)' }).click()
@@ -367,7 +386,7 @@ for (const [label, size, phone] of [
   const more = await page.locator('#log > .item').count()
   check(`${label}: 위로 올리면 150줄 더 (${more}줄)`, more > drawn && more <= drawn + 150, String(more))
   if (phone) await page.goBack()
-  await page.locator('.row', { hasText: '알파' }).click()
+  await page.locator(`.row[data-thread="${A}"]`).click()
   await page.waitForSelector('.item.text')
 
   // Scroll horizontally never.

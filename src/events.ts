@@ -36,6 +36,8 @@ export type EventBody =
   | { type: 'react'; ts: string; name: string; on: boolean }
   | { type: 'status'; state: string; waiting?: string }
   | { type: 'end'; why: string }
+  /** A line in the middle of the conversation ("여기까지 복제한 대화"). */
+  | { type: 'notice'; text: string; icon?: string }
 
 export type SessionEvent = EventBody & { seq: number; at: number }
 
@@ -78,14 +80,15 @@ export class EventLog {
     return t
   }
 
-  emit(thread: string, body: EventBody): SessionEvent | undefined {
+  /** `at` only when copying history (a fork keeps the original times); otherwise now. */
+  emit(thread: string, body: EventBody, at?: number): SessionEvent | undefined {
     let t: { seq: number; events: SessionEvent[] }
     try {
       t = this.load(thread)
     } catch {
       return undefined
     }
-    const ev = { ...body, seq: t.seq + 1, at: Date.now() } as SessionEvent
+    const ev = { ...body, seq: t.seq + 1, at: at ?? Date.now() } as SessionEvent
     t.seq = ev.seq
     t.events.push(ev)
     if (t.events.length > MEMORY_PER_THREAD) t.events.splice(0, t.events.length - MEMORY_PER_THREAD)

@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { closeSync, existsSync, openSync, readSync, statSync, watch, type FSWatcher } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -8,7 +8,7 @@ import { join } from 'node:path'
  * is appended while a turn is running, so tailing it gives step-level
  * progress: each text block, tool call, and tool result as it lands.
  */
-export type TranscriptEvent =
+export type TranscriptEvent = { uuid?: string } & (
   | { kind: 'text'; text: string }
   | { kind: 'thinking' }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
@@ -17,8 +17,12 @@ export type TranscriptEvent =
   | { kind: 'local'; text: string; isError: boolean }
   | { kind: 'title'; title: string }
   | { kind: 'model'; model: string }
+)
 
-/** Parse one JSONL line into zero or more events. Pure, so it is testable. */
+/**
+ * Parse one JSONL line into zero or more events. Pure, so it is testable. Each event carries its line's
+ * uuid, so a forked transcript's copied history (same uuids as the original) can be told apart.
+ */
 export function parseTranscriptLine(line: string): TranscriptEvent[] {
   let entry: Record<string, unknown>
   try {
@@ -26,6 +30,20 @@ export function parseTranscriptLine(line: string): TranscriptEvent[] {
   } catch {
     return []
   }
+  const events = parseEntry(entry)
+  return typeof entry.uuid === 'string' ? events.map((e) => ({ ...e, uuid: entry.uuid as string })) : events
+}
+
+/** Every line's uuid in a transcript: what a fork of it copies and must not replay. */
+export function transcriptUuids(path: string): Set<string> {
+  const out = new Set<string>()
+  try {
+    for (const m of readFileSync(path, 'utf8').matchAll(/"uuid":"([0-9a-f-]{36})"/g)) out.add(m[1]!)
+  } catch {}
+  return out
+}
+
+function parseEntry(entry: Record<string, unknown>): TranscriptEvent[] {
   if (entry.isSidechain) return []
   if (entry.type === 'ai-title' && typeof entry.aiTitle === 'string') return [{ kind: 'title', title: entry.aiTitle }]
   const message = entry.message as { role?: string; content?: unknown } | undefined

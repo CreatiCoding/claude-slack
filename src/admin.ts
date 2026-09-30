@@ -45,6 +45,7 @@ export interface AdminApi {
   webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
   webSend?(pid: number, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
+  webFork?(pid: number): Promise<{ ok: boolean; note: string; thread?: string }>
   webUnhold?(pid: number, ts: string): Promise<{ ok: boolean; note: string; text?: string }>
   webRetract?(pid: number, ts: string): Promise<{ ok: boolean; note: string }>
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
@@ -285,6 +286,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const body = await readJson(req, 24 * 1024 * 1024)
     const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
+    return send(res, result.ok ? 200 : 400, result)
+  }
+  const fork = /^\/api\/session\/(\d+)\/fork$/.exec(url.pathname)
+  if (req.method === 'POST' && fork && api.webFork) {
+    const result = await api.webFork(Number(fork[1]))
+    log(`web fork ${fork[1]}: ${result.note}`)
     return send(res, result.ok ? 200 : 400, result)
   }
   const onMessage = /^\/api\/session\/(\d+)\/(unhold|retract)$/.exec(url.pathname)

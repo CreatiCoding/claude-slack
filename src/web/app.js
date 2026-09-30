@@ -741,6 +741,9 @@ function apply(ev, live) {
       closeRunningTools()
       addRow('notice', ev, { icon: 'ended', text: `세션 ${ev.why}` })
       return
+    case 'notice':
+      addRow('notice', ev, { icon: ev.icon || 'bell', text: ev.text })
+      return
   }
 }
 
@@ -1594,12 +1597,22 @@ function sessionItems(s) {
         { label: '상태 새로 읽기', icon: 'refresh', run: () => command(s, 'status') },
       ],
     },
+    { label: '복제', icon: 'copy', run: () => forkSession(s) },
     { label: s.autoAllow ? '전부 허용 끄기' : '전부 허용 켜기', icon: 'bolt', on: s.autoAllow, run: () => toggleAuto(s) },
     { label: '새로고침', icon: 'refresh', run: () => (s.state !== 'busy' || confirm('작업 중이에요. 다시 열까요?')) && command(s, 'refresh') },
     'sep',
     { label: '종료', icon: 'ended', danger: true, run: () => confirm(`"${nameOf(s)}" 세션을 종료할까요?`) && command(s, 'exit') },
     { label: '강제 종료', icon: 'deny', danger: true, run: () => confirm('tmux 창을 닫아 강제로 끝낼까요?') && api(`/api/session/${s.pid}/kill`, {}).then((r) => toast(r.note), (e) => toast(e.message, 'err')) },
   ]
+}
+async function forkSession(s) {
+  try {
+    const r = await api(`/api/session/${s.pid}/fork`, {})
+    toast(r.note)
+    if (r.thread) open(r.thread)
+  } catch (err) {
+    toast(err.message, 'err')
+  }
 }
 async function toggleAuto(s) {
   const on = !s.autoAllow

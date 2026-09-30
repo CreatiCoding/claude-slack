@@ -18,7 +18,7 @@ import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
 import { DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
-import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, type TranscriptEvent } from './transcript.ts'
+import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
@@ -346,6 +346,11 @@ export class Broker {
   readonly images: ImageStore
   /** Which thread a message the broker posted lives in, so its edits, deletions and reactions reach the right log. */
   private msgThread = new Map<string, string>()
+  /**
+   * A fork's transcript begins with a copy of the original's lines (same uuids). Read as new, the whole
+   * old conversation would pour into the new thread as if said just now; these uuids are skipped.
+   */
+  private forkSkips = new Map<string, Set<string>>()
   /** The newest thing said in each thread, for the web list's second line. */
   private lastTexts = new Map<string, { text: string; mine: boolean }>()
   private changeListeners = new Set<() => void>()
@@ -640,6 +645,16 @@ export class Broker {
     await this.slack.post({ threadTs: session.threadTs, text: `↩️ 웹: '${quoted}' 를 잘못 보냈다고 알렸습니다.` })
     await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
     return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
+  }
+
+  /** 복제: the same conversation continued in a new session (claude --resume <id> --fork-session); the original goes on. */
+  async webFork(pid: number): Promise<{ ok: boolean; note: string; thread?: string }> {
+    const session = this.registry.byPid(pid)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    if (!session.sessionId) return { ok: false, note: '대화 id 를 아직 모릅니다. 첫 메시지 뒤에 다시 해 보세요.' }
+    this.logAt('INFO', 'launch', 'fork', this.tag(session))
+    const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: ['--fork-session'], fork: { fromThread: session.threadTs, transcript: session.transcriptPath } })
+    return thread ? { ok: true, note: '복제한 세션을 띄웁니다.', thread } : { ok: false, note: '세션을 띄우지 못했습니다.' }
   }
 
   /** A button in the web app: the very handler a Slack click reaches, as the owner. */
@@ -1517,6 +1532,7 @@ export class Broker {
 
   private async onTranscript(session: Session, ev: TranscriptEvent): Promise<void> {
     if (session.ended) return
+    if (ev.uuid && this.forkSkips.get(session.threadTs)?.has(ev.uuid)) return
     if (session.transcriptPath && session.tailer) this.offsets.set(session.key, session.transcriptPath, session.tailer.position)
     if (session.turn) this.noteActivity(session)
     if (ev.kind === 'title') {
@@ -2808,10 +2824,11 @@ export class Broker {
    * Start a Claude Code session in tmux bound to a Slack thread. Without a
    * threadTs (slash command, modal, resume) the bot posts a root message first.
    */
-  async launchSession(o: { cwd: string; prompt: string; user: string; threadTs?: string; rootTs?: string; resumeId?: string; extraArgs?: string[]; queued?: HeldMessage[] }): Promise<void> {
+  async launchSession(o: { cwd: string; prompt: string; user: string; threadTs?: string; rootTs?: string; resumeId?: string; extraArgs?: string[]; queued?: HeldMessage[]; fork?: { fromThread: string; transcript?: string } }): Promise<string | undefined> {
     const cwd = o.cwd
     // One conversation, one process: two of them resuming the same session id write over each other's transcript.
-    if (o.resumeId) {
+    // A fork is the exception: it resumes into a new session id, and the original keeps running.
+    if (o.resumeId && !o.fork) {
       const busy = this.runningOf(o.resumeId, o.threadTs)
       if (busy) {
         this.logAt('WARN', 'launch', `refused to resume ${o.resumeId.slice(0, 8)}: already running in thread ${busy.threadTs}`)
@@ -2823,9 +2840,10 @@ export class Broker {
     let rootTs = o.rootTs
     let threadTs = o.threadTs
     if (!threadTs) {
-      rootTs = await this.slack.post({ text: `🟢 *${basename(cwd)}* · \`${shortenHome(cwd)}\` · ${o.resumeId ? '세션 재개' : 'Slack에서 시작'}${o.prompt ? `\n> ${truncate(o.prompt, 200)}` : ''}` })
+      rootTs = await this.slack.post({ text: `🟢 *${basename(cwd)}* · \`${shortenHome(cwd)}\` · ${o.fork ? '세션 복제' : o.resumeId ? '세션 재개' : 'Slack에서 시작'}${o.prompt ? `\n> ${truncate(o.prompt, 200)}` : ''}` })
       threadTs = rootTs
     }
+    if (o.fork) this.startFork(threadTs, o.fork)
     const sessionKeyForLaunch = randomUUID()
     let launched: { window: string; pane: string }
     try {
@@ -2843,7 +2861,7 @@ export class Broker {
       })
     } catch (err) {
       await this.slack.post({ threadTs, text: `❌ 세션을 띄우지 못했습니다. ${describeError(err)}` })
-      return
+      return threadTs
     }
     const starting = controlPanel({ pid: 0, cwd, origin: 'slack', hasPane: true, window: launched.window, state: 'starting' })
     const statusTs = await this.slack.post({ threadTs, text: starting.text, blocks: starting.blocks })
@@ -2852,6 +2870,32 @@ export class Broker {
     this.confirmDialogs(launched.pane, () => !this.pendingLaunches.has(threadTs!))
       .then((dialogs) => dialogs.length && this.logAt('INFO', 'dialog', `auto-confirmed startup dialogs: ${dialogs.join(', ')}`, { t: threadTs, window: launched.window }))
       .catch((e) => this.logAt('WARN', 'dialog', `auto-confirm failed: ${describeError(e)}`, { t: threadTs }))
+    this.scheduleLaunchTimeout(threadTs, statusTs)
+    return threadTs
+  }
+
+  /**
+   * The new thread of a fork: the original conversation copied over at its original times (without
+   * answered cards or turn marks), a line saying where the copy ends, and the original's transcript lines
+   * remembered so the fork's copy of them is not replayed as new.
+   */
+  private startFork(threadTs: string, fork: { fromThread: string; transcript?: string }): void {
+    if (fork.transcript) this.forkSkips.set(threadTs, transcriptUuids(fork.transcript))
+    let after = 0
+    for (;;) {
+      const page = this.events.since(fork.fromThread, after)
+      if (!page.length) break
+      for (const ev of page) {
+        after = ev.seq
+        if (ev.type !== 'user' && ev.type !== 'text' && ev.type !== 'tool' && ev.type !== 'tool_end') continue
+        const { seq: _s, at, ...body } = ev
+        this.events.emit(threadTs, body as EventBody, at)
+      }
+    }
+    this.emitEvent(threadTs, { type: 'notice', text: '여기까지 복제한 대화', icon: 'undo' })
+  }
+
+  private scheduleLaunchTimeout(threadTs: string, statusTs: string): void {
     const timer = setTimeout(() => {
       const gaveUpOn = this.pendingLaunches.get(threadTs!)
       if (!this.pendingLaunches.delete(threadTs!)) return

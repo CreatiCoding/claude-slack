@@ -217,3 +217,38 @@ test('잘못 보냄: Esc 로 멈추고, 따르지 말라는 정정을 보낸다'
   s.conn.close()
   t.close()
 })
+
+test('복제: --fork-session 으로 새 세션, 원래 대화는 원래 시각으로 옮기고 복사된 transcript 줄은 다시 쏟지 않는다', async () => {
+  const { writeFileSync } = await import('node:fs')
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%41', sessionId: 's1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  const line = (uuid: string, text: string) => JSON.stringify({ type: 'assistant', uuid, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
+  await t.broker.handleSlackMessage({ user: 'U1', text: '원래 질문', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  appendFileSync(t.transcript, line('11111111-1111-1111-1111-111111111111', '원래 답'))
+  await until(() => t.broker.events.since(s.ack, 0).some((e) => e.type === 'text'), '원래 답')
+  const originalAt = t.broker.events.since(s.ack, 0).find((e) => e.type === 'text')!.at
+
+  const r = await t.broker.webFork(100)
+  assert.ok(r.ok && r.thread && r.thread !== s.ack, r.note)
+  const cmd = t.tmux.launches.at(-1)!.command
+  assert.deepEqual(cmd.slice(-3), ['--resume', 's1', '--fork-session'])
+  const copied = t.broker.events.since(r.thread!, 0)
+  assert.deepEqual(copied.map((e) => e.type), ['user', 'text', 'notice'])
+  assert.equal(copied[1]!.at, originalAt, '원래 시각 그대로')
+  assert.ok(copied[2]!.type === 'notice' && copied[2]!.text === '여기까지 복제한 대화')
+
+  // The fork's own transcript starts with the original's lines (same uuid), then goes on.
+  const forkTranscript = t.transcript + '.fork.jsonl'
+  writeFileSync(forkTranscript, '')
+  const f = await shim(t.socketPath, { pid: 200, key: '200', tmuxPane: '%42', sessionId: 's2', threadTs: r.thread })
+  await hook(t.socketPath, 200, { hook_event_name: 'SessionStart', source: 'resume', session_id: 's2' }, forkTranscript)
+  appendFileSync(forkTranscript, line('11111111-1111-1111-1111-111111111111', '원래 답'))
+  appendFileSync(forkTranscript, line('22222222-2222-2222-2222-222222222222', '복제에서 새 답'))
+  await until(() => t.broker.events.since(r.thread!, 0).some((e) => e.type === 'text' && e.text === '복제에서 새 답'), '새 답')
+  const texts = t.broker.events.since(r.thread!, 0).filter((e) => e.type === 'text').map((e) => (e as { text: string }).text)
+  assert.deepEqual(texts, ['원래 답', '복제에서 새 답'], '복사된 줄은 다시 싣지 않는다')
+  s.conn.close()
+  f.conn.close()
+  t.close()
+})
