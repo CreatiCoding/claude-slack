@@ -33,6 +33,8 @@ export interface ReviveEntry {
   title?: string
   manualTitle?: string
   autoAllow?: boolean
+  model?: string
+  effort?: string
 }
 
 export class ReviveStore {

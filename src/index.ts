@@ -1,5 +1,6 @@
 import { startModelRefresh } from './models.ts'
 import { join } from 'node:path'
+import { appendFileSync, mkdirSync } from 'node:fs'
 import { describeError } from './format.ts'
 import { loadConfig } from './config.ts'
 import { Broker } from './broker.ts'
@@ -59,7 +60,16 @@ setInterval(resumePurges, 5 * 60 * 1000).unref()
 
 if (cfg.web.enabled) {
   try {
-    const admin = createAdminServer(broker, { ...cfg.web, log: (m) => log.info('admin', m) })
+    // Screen errors from phones and PCs get their own file, so they are found without digging through broker.log.
+    const clientLogFile = join(DEFAULT_LOG_DIR, 'web-client.log')
+    const clientLog = (entry: string) => {
+      try {
+        mkdirSync(DEFAULT_LOG_DIR, { recursive: true })
+        appendFileSync(clientLogFile, `${new Date().toISOString()} ${entry}\n`)
+      } catch {}
+      log.warn('admin', entry.split('\n')[0]!)
+    }
+    const admin = createAdminServer(broker, { ...cfg.web, log: (m) => log.info('admin', m), clientLog })
     listenWithRetry(admin, cfg.web.port, cfg.web.host, {
       onListening: () => log.info('admin', `http${cfg.web.tlsCert ? 's' : ''}://${cfg.web.host}:${cfg.web.port}${cfg.web.token ? '?t=…' : ''}`),
       // Right after a boot the Tailscale address may not exist yet; say so once, then keep trying quietly.

@@ -190,3 +190,20 @@ test('구독: 페이지가 보고 있는 스레드의 이벤트만 그 페이지
     server.close()
   }
 })
+
+test('화면 오류: 한 줄 요약과 그 아래 들여쓴 스택으로 남긴다', async () => {
+  const entries: string[] = []
+  const server = createAdminServer(fakeApi(), { port: 0, clientLog: (e) => entries.push(e) })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/client-error`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ where: 'sse:sessions', message: 'Unexpected token x\nin JSON', stack: 'SyntaxError: x\n    at JSON.parse\n    at on', view: 'phone', url: '/#1.1' }) })
+    assert.equal(r.status, 204)
+    assert.equal(entries.length, 1)
+    const [head, ...stack] = entries[0]!.split('\n')
+    assert.equal(head, '화면 오류 [phone] sse:sessions: Unexpected token x in JSON (/#1.1)')
+    assert.deepEqual(stack, ['    SyntaxError: x', '    at JSON.parse', '    at on'])
+  } finally {
+    server.close()
+  }
+})

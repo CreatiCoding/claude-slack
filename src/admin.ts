@@ -120,6 +120,8 @@ export interface AdminOptions {
   /** PEM paths. Both set: serve HTTPS (a `.dev` name is HSTS-preloaded, so browsers refuse plain http or a self-signed cert). */
   tlsCert?: string
   tlsKey?: string
+  /** Where screen errors go (index.ts: logs/web-client.log); the admin log otherwise. */
+  clientLog?: (entry: string) => void
 }
 
 /** Re-read the certificate this often, so a renewal is picked up without restarting the broker. */
@@ -191,7 +193,7 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
   meter.start()
   startLive(api)
   const onRequest = (req: IncomingMessage, res: ServerResponse) => {
-    handle(req, res, api, token, log, meter).catch((err) => {
+    handle(req, res, api, token, log, meter, opts).catch((err) => {
       log(`admin request failed: ${err}`)
       send(res, 500, { error: String(err) })
     })
@@ -211,7 +213,7 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
   return Object.assign(server, { meter })
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, token: string | undefined, log: (m: string) => void, meter: TrafficMeter): Promise<void> {
+async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, token: string | undefined, log: (m: string) => void, meter: TrafficMeter, opts?: AdminOptions): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
   // A token, when configured, may travel as a header or as `?t=` so a phone can
   // just open a bookmarked link.
@@ -312,6 +314,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     if (!stream) return send(res, 404, { error: '모르는 연결입니다. 다시 연결하세요.' })
     stream.thread = typeof body.thread === 'string' && /^\d+\.\d+$/.test(body.thread) ? body.thread : null
     stream.live = undefined
+    res.writeHead(204)
+    res.end()
+    return
+  }
+  // An error on a page (a listener that threw, a draw that failed): one summary line, the stack indented under it.
+  if (req.method === 'POST' && url.pathname === '/api/client-error') {
+    const b = await readJson(req, 16 * 1024)
+    const clean = (v: unknown, n: number) => String(v ?? '').replace(/[\r\t]/g, ' ').slice(0, n)
+    const head = `화면 오류 [${clean(b.view, 8)}] ${clean(b.where, 40)}: ${clean(b.message, 500).replace(/\n/g, ' ')} (${clean(b.url, 120)})`
+    const stack = clean(b.stack, 4000).split('\n').filter(Boolean).map((l) => '    ' + l.trim()).join('\n')
+    ;(opts?.clientLog ?? ((line: string) => log(line)))(stack ? `${head}\n${stack}` : head)
     res.writeHead(204)
     res.end()
     return

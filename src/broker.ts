@@ -291,6 +291,9 @@ interface PendingLaunch {
   window: string
   /** Typed while the session was still coming up; delivered once it attaches. */
   queued: Array<{ text: string; user: string; ts: string }>
+  /** What it was launched with (--model / --effort), known before any hook or screen says so. */
+  model?: string
+  effort?: string
 }
 
 /** What a command handler is given. The pane is known to exist. */
@@ -1161,6 +1164,8 @@ export class Broker {
         ...(s.title ? { title: s.title } : {}),
         ...(s.manualTitle ? { manualTitle: s.manualTitle } : {}),
         ...(s.autoAllow ? { autoAllow: true } : {}),
+        ...(s.model ? { model: s.model } : {}),
+        ...(s.effort ? { effort: s.effort } : {}),
       })
     }
     this.offsets.flush()
@@ -1228,6 +1233,8 @@ export class Broker {
       session.window = pending?.window
       if (pending) this.pendingLaunches.delete(hello.threadTs)
       if (pending?.statusTs) session.panelTs = pending.statusTs
+      session.model ??= pending?.model
+      session.effort ??= pending?.effort
     } else if (!session.threadTs) {
       const rootTs = await this.slack.post({ text: this.rootText(session, '🟢', '터미널 세션') })
       session.threadTs = rootTs
@@ -1251,8 +1258,9 @@ export class Broker {
       // Broker restarted under a live session: reuse the panel already in the thread instead of stacking a new one,
       // and recover what the panel shows from the terminal and the transcript.
       if (!session.panelTs) session.panelTs = await this.findPanelInThread(session.threadTs)
-      await this.restoreSessionFacts(session)
+      // The record first: what it restores (전부 허용 above all) decides how a dialog already on screen is handled.
       this.restoreFromRecord(session)
+      await this.restoreSessionFacts(session)
       const panel = controlPanel(this.panelState(session))
       try {
         if (session.panelTs) await this.slack.update(session.panelTs, panel.text, panel.blocks)
@@ -1295,6 +1303,8 @@ export class Broker {
     session.view = rec.view ?? session.view
     session.autoAllow = rec.autoAllow ?? session.autoAllow
     session.manualTitle = rec.manualTitle ?? session.manualTitle
+    session.model ??= rec.model
+    session.effort ??= rec.effort
     if (rec.title && !session.title) session.title = rec.title
     if (rec.holdNoticeTs) {
       if (rec.held?.length) session.holdNoticeTs = rec.holdNoticeTs
@@ -2256,6 +2266,13 @@ export class Broker {
    * conversation again. The thread keeps one status line — the old panel goes,
    * because its buttons address a pid that no longer exists.
    */
+  /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
+  private settingsArgs(session: Session): string[] {
+    const model = session.model && /^[\w.\[\]-]+$/.test(session.model) && !session.model.startsWith('<') ? session.model : undefined
+    const effort = session.effort && EFFORT_OPTIONS.includes(session.effort) ? session.effort : undefined
+    return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+  }
+
   private async reopenForRefresh(session: Session, carried: HeldMessage[]): Promise<void> {
     session.refreshing = false
     const threadTs = session.threadTs
@@ -2265,7 +2282,7 @@ export class Broker {
     }
     if (session.panelTs) await this.slack.delete(session.panelTs).catch(() => {})
     try {
-      await this.launchSession({ cwd: session.cwd, prompt: '', resumeId: session.sessionId, user: session.recipient, threadTs, rootTs: session.rootTs, queued: carried })
+      await this.launchSession({ cwd: session.cwd, prompt: '', resumeId: session.sessionId, user: session.recipient, threadTs, rootTs: session.rootTs, queued: carried, extraArgs: this.settingsArgs(session) })
     } catch (err) {
       this.waking.delete(threadTs)
       this.logAt('ERROR', 'session', `refresh relaunch failed: ${describeError(err)}`, this.tag(session))
@@ -3064,7 +3081,11 @@ export class Broker {
     }
     const starting = controlPanel({ pid: 0, cwd, origin: 'slack', hasPane: true, window: launched.window, state: 'starting' })
     const statusTs = await this.slack.post({ threadTs, text: starting.text, blocks: starting.blocks })
-    this.pendingLaunches.set(threadTs, { threadTs, resumeId: o.resumeId, rootTs, statusTs, cwd, prompt: o.prompt, queued: [...(o.queued ?? [])], ...launched })
+    const argAfter = (flag: string) => {
+      const i = (o.extraArgs ?? []).indexOf(flag)
+      return i >= 0 ? o.extraArgs![i + 1] : undefined
+    }
+    this.pendingLaunches.set(threadTs, { threadTs, resumeId: o.resumeId, rootTs, statusTs, cwd, prompt: o.prompt, queued: [...(o.queued ?? [])], ...launched, ...(argAfter('--model') ? { model: argAfter('--model') } : {}), ...(argAfter('--effort') ? { effort: argAfter('--effort') } : {}) })
     // The startup dialogs are over once the session's shim says hello; polling past that is wasted captures.
     this.confirmDialogs(launched.pane, () => !this.pendingLaunches.has(threadTs!))
       .then((dialogs) => dialogs.length && this.logAt('INFO', 'dialog', `auto-confirmed startup dialogs: ${dialogs.join(', ')}`, { t: threadTs, window: launched.window }))

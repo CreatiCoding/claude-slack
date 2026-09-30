@@ -196,7 +196,8 @@ const api: AdminApi = {
   },
 }
 
-const server = createAdminServer(api, { port: 0 })
+const clientErrors: string[] = []
+const server = createAdminServer(api, { port: 0, clientLog: (e) => clientErrors.push(e) })
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
@@ -208,6 +209,24 @@ const check = (name: string, cond: unknown, detail = '') => {
 const settle = (p: Page, ms = 400) => p.waitForTimeout(ms)
 
 const browser = await chromium.launch()
+// A frame that cannot be parsed is recorded (screen error log) and does not stop the frames after it.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  let served = false
+  await page.route('**/api/stream*', async (route) => {
+    if (served) return route.continue()
+    served = true
+    await route.fulfill({ status: 200, headers: { 'content-type': 'text/event-stream' }, body: `retry: 100\n\nevent: sessions\ndata: {not json\n\nevent: sessions\ndata: ${JSON.stringify(sessions)}\n\n` })
+  })
+  await page.goto(base + '/')
+  await page.waitForSelector('.row[data-thread]', { timeout: 5000 }).catch(() => {})
+  await page.waitForTimeout(300)
+  check('깨진 프레임: 다음 프레임은 그대로 그린다', (await page.locator('.row[data-thread]').count()) >= 3)
+  check('깨진 프레임: 화면 오류 기록으로 간다', clientErrors.some((e) => /화면 오류 \[pc\] sse:sessions:/.test(e)), clientErrors.join(' | '))
+  await ctx.close()
+}
+
 for (const [label, size, phone] of [
   ['PC', { width: 1440, height: 820 }, false],
   ['폰', { width: 390, height: 844 }, true],

@@ -124,6 +124,26 @@ function toast(text, kind = 'ok', ms = 2600) {
   toast.t = setTimeout(() => (el.hidden = true), ms)
 }
 
+// ------------------------------------------------------------------ screen errors
+// What went wrong on this screen goes to the broker's log (web-client.log), not only to a toast nobody reads
+// on a phone. The same error is sent once a minute at most.
+const reported = new Map()
+function reportError(where, err) {
+  const message = String(err?.message ?? err ?? '알 수 없는 오류').slice(0, 500)
+  const key = where + '|' + message
+  if (Date.now() - (reported.get(key) ?? 0) < 60_000) return
+  reported.set(key, Date.now())
+  try {
+    fetch(withToken('/api/client-error'), {
+      method: 'POST',
+      headers: { ...authHeaders, 'content-type': 'application/json' },
+      body: JSON.stringify({ where, message, stack: String(err?.stack ?? '').slice(0, 4000), view: isPhone() ? 'phone' : 'pc', url: location.pathname + location.hash, ua: navigator.userAgent.slice(0, 200) }),
+    }).catch(() => {})
+  } catch {}
+}
+addEventListener('error', (e) => reportError('window', e.error ?? e.message))
+addEventListener('unhandledrejection', (e) => reportError('promise', e.reason))
+
 // ------------------------------------------------------------------ measurement
 // Once a minute the page tells the broker what it received and what showing it cost, for the log.
 const metrics = { recvBytes: 0, recvEvents: 0, apply: { n: 0, sum: 0, max: 0 }, catchups: [], stalls: { n: 0, max: 0 } }
@@ -191,7 +211,16 @@ function connect() {
   if (!lostAt && !connected) lostAt = Date.now()
   if (es) es.close()
   es = new EventSource(withToken('/api/stream'))
-  es.addEventListener('open', () => {
+  // Each listener on its own: one frame that fails (a parse, a draw) is recorded and the rest keep coming.
+  const on = (name, fn) =>
+    es.addEventListener(name, (e) => {
+      try {
+        fn(e)
+      } catch (err) {
+        reportError(`sse:${name}`, err)
+      }
+    })
+  on('open', () => {
     connected = true
     lostAt = 0
     restarting = false
@@ -199,29 +228,29 @@ function connect() {
     flushWaiting()
   })
   // Each stream has an id; the page tells the broker which thread it shows, and only that thread's events come.
-  es.addEventListener('hello', (e) => {
+  on('hello', (e) => {
     connId = JSON.parse(e.data).conn
     if (current) subscribe(current).then(() => catchUp(current))
   })
-  es.addEventListener('error', () => {
+  on('error', () => {
     if (connected || !lostAt) lostAt = Date.now()
     connected = false
     renderConn()
     // Is it the broker that is gone (the proxy answers) or the network? The first is a restart.
     fetch(withToken('/api/options'), { headers: authHeaders }).then((r) => AWAY.has(r.status) && brokerAway(), () => {})
   })
-  es.addEventListener('sessions', (e) => {
+  on('sessions', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
     applySessions(JSON.parse(e.data))
   })
-  es.addEventListener('groups', (e) => {
+  on('groups', (e) => {
     groups = JSON.parse(e.data)
     store.set('groups-cache', groups)
     renderList()
   })
   // After the first full list, only the sessions that changed, with the order as thread keys.
-  es.addEventListener('sessions_delta', (e) => {
+  on('sessions_delta', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
     const { order, changed } = JSON.parse(e.data)
@@ -230,7 +259,7 @@ function connect() {
     applySessions(order.map((k) => by.get(k)).filter(Boolean))
   })
   // What is being written right now (not stored): the activity box shows its last two lines.
-  es.addEventListener('live', (e) => {
+  on('live', (e) => {
     const { thread: ts, text } = JSON.parse(e.data)
     if (ts !== current || !view) return
     view.live = text
@@ -238,7 +267,7 @@ function connect() {
     if (!text) view.liveAt = null
     renderActivity()
   })
-  es.addEventListener('ev', (e) => {
+  on('ev', (e) => {
     metrics.recvBytes += e.data.length
     metrics.recvEvents++
     const { thread: ts, ev } = JSON.parse(e.data)
