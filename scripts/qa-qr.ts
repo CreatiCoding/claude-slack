@@ -8,7 +8,8 @@ import { chromium } from 'playwright'
 
 const src = readFileSync(new URL('../src/web/qr.js', import.meta.url), 'utf8').replace(/^export /gm, '')
 const dir = mkdtempSync(join(tmpdir(), 'qa-qr-'))
-const texts = ['https://claude-slack.internal.creco.dev/', 'https://claude-slack.internal.creco.dev/?t=abcdef0123456789abcdef0123456789#1790681234.661739', '한글 주소 https://예시.com/경로', 'x'.repeat(120), 'https://example.com/' + 'a'.repeat(190)]
+// The same strings as the known vectors npm test compares against (test/fixtures/qr-vectors.json), plus a long one.
+const texts = [...(JSON.parse(readFileSync(new URL('../test/fixtures/qr-vectors.json', import.meta.url), 'utf8')) as Array<{ text: string }>).map((v) => v.text), 'https://example.com/' + 'a'.repeat(190)]
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 420, height: 420 } })
 const files: string[] = []

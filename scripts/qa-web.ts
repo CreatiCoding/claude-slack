@@ -203,7 +203,11 @@ const api: AdminApi = {
 }
 
 const clientErrors: string[] = []
-const server = createAdminServer(api, { port: 0, clientLog: (e) => clientErrors.push(e) })
+const server = createAdminServer(api, { port: 0, clientLog: (e) => clientErrors.push(e), publicUrl: 'https://qa.example.dev' })
+// The same API without an outside address, as a PC opened on localhost: the QR must not point at 127.0.0.1.
+const localServer = createAdminServer(api, { port: 0 })
+await new Promise<void>((r) => localServer.listen(0, '127.0.0.1', r))
+const localBase = `http://127.0.0.1:${(localServer.address() as { port: number }).port}`
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
@@ -225,11 +229,23 @@ const browser = await chromium.launch()
   await page.waitForSelector('#qr-box svg.qr')
   const qr = await page.locator('#qr-box svg.qr').boundingBox()
   check('빈 칸: 폰으로 여는 QR(176px, 줄지 않음)', !!qr && Math.round(qr.width) === 176 && Math.round(qr.height) === 176, JSON.stringify(qr))
+  check('빈 칸: QR 은 설정된 외부 주소', (await page.locator('#qr-box').getAttribute('data-url')) === 'https://qa.example.dev/')
+  check('빈 칸: QR 주소에 토큰이 없다', !((await page.locator('#qr-box').getAttribute('data-url')) ?? 't=').includes('t='))
   await page.clock.runFor(2000)
   check('빈 칸: 2초에는 "꺼져 있어요"를 띄우지 않는다', await page.locator('#offline').isHidden())
   await page.clock.runFor(1500)
   check('빈 칸: 2.5초 넘게 꺼져 있으면 켜는 법', (await page.locator('#offline').isVisible()) && ((await page.locator('#offline').textContent()) ?? '').includes('launchctl kickstart'))
   await page.screenshot({ path: join(tmpdir(), 'qa-web-pc-offline.png') })
+  await ctx.close()
+}
+
+// Opened on localhost with no outside address: say so instead of a QR a phone cannot use.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  await page.goto(localBase + '/')
+  await page.waitForSelector('#qr-box .qr-note')
+  check('빈 칸: localhost 로 열렸고 외부 주소가 없으면 QR 대신 안내', (await page.locator('#qr-box svg').count()) === 0 && ((await page.locator('#qr-box').textContent()) ?? '').includes('설정되지 않았어요'))
   await ctx.close()
 }
 
@@ -813,5 +829,6 @@ for (const [label, size, phone] of [
 }
 await browser.close()
 server.close()
+localServer.close()
 console.log(failed ? `\n${failed} FAIL` : '\nALL PASS')
 process.exit(failed ? 1 : 0)

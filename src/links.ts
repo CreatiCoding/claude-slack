@@ -65,26 +65,48 @@ export function branchPr(repo: string, gh = 'gh'): Promise<Link | undefined> {
 
 /** A merged or closed PR does not change again: remembered for good. An open one is asked again after a minute. */
 const prStates = new Map<string, { at: number; link: Link }>()
+/** Asks under way, so the same address asked twice at once is one gh call. */
+const inflight = new Map<string, Promise<Link>>()
+/** gh failed (or timed out) for this address: not asked again for a minute, so a dead host is not waited on each time. */
+const failed = new Map<string, number>()
+const PR_STATES_MAX = 500
+export const _prStateCount = () => prStates.size
+
+function remember(url: string, link: Link): void {
+  prStates.delete(url)
+  prStates.set(url, { at: Date.now(), link })
+  while (prStates.size > PR_STATES_MAX) prStates.delete(prStates.keys().next().value!)
+}
 
 /** The state and title of PRs by address, asked of gh four at a time. */
 export async function prInfo(urls: string[], gh = 'gh'): Promise<Link[]> {
-  const ask = (url: string) =>
-    new Promise<Link>((resolve) => {
-      const known = prStates.get(url)
-      if (known && (known.link.state !== 'OPEN' || Date.now() - known.at < 60_000)) return resolve(known.link)
-      const fallback: Link = { url, label: url.replace(/^https:\/\/github\.com\//, '').replace('/pull/', ' #'), number: Number(/\/pull\/(\d+)/.exec(url)?.[1]) || undefined }
+  const fallback = (url: string): Link => ({ url, label: url.replace(/^https:\/\/github\.com\//, '').replace('/pull/', ' #'), number: Number(/\/pull\/(\d+)/.exec(url)?.[1]) || undefined })
+  const ask = (url: string): Promise<Link> => {
+    const known = prStates.get(url)
+    if (known && (known.link.state !== 'OPEN' || Date.now() - known.at < 60_000)) return Promise.resolve(known.link)
+    if (Date.now() - (failed.get(url) ?? 0) < 60_000) return Promise.resolve(known?.link ?? fallback(url))
+    const running = inflight.get(url)
+    if (running) return running
+    const p = new Promise<Link>((resolve) => {
       execFile(gh, ['pr', 'view', url, '--json', 'url,title,number,state'], { timeout: 8000 }, (err, out) => {
-        if (err) return resolve(known?.link ?? fallback)
+        if (err) {
+          failed.set(url, Date.now())
+          if (failed.size > PR_STATES_MAX) failed.delete(failed.keys().next().value!)
+          return resolve(known?.link ?? fallback(url))
+        }
         try {
           const pr = JSON.parse(out) as { title: string; number: number; state: Link['state'] }
           const link: Link = { url, label: `#${pr.number} ${pr.title}`, state: pr.state, number: pr.number }
-          prStates.set(url, { at: Date.now(), link })
+          remember(url, link)
           resolve(link)
         } catch {
-          resolve(fallback)
+          resolve(fallback(url))
         }
       })
-    })
+    }).finally(() => inflight.delete(url))
+    inflight.set(url, p)
+    return p
+  }
   const out: Link[] = []
   for (let i = 0; i < urls.length; i += 4) out.push(...(await Promise.all(urls.slice(i, i + 4).map(ask))))
   return out

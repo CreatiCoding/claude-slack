@@ -341,13 +341,28 @@ function renderEmpty() {
     box.innerHTML = `<div class="off-title">${icon('alert')}브로커가 꺼져 있어요</div><ol class="steps">${step(1, '맥에서 브로커 켜기', 'launchctl kickstart gui/$(id -u)/com.claude-slack', '안 되면 <code>cd ~/projects/claude-slack && npm start</code>')}${step(2, '처음이라면 로그인', 'claude', 'Claude Code 를 한 번 띄워 로그인하고, .env 에 Slack 토큰을 넣어요.')}${step(3, '연결 확인', 'tail -f ~/.claude-slack/logs/broker.log', '<code>[broker] up</code> 이 보이면 이 화면이 저절로 다시 붙어요.')}</ol>`
   }
   box.hidden = !off
-  const qr = $('qr-box')
-  if (!qr.firstChild) {
-    // The address without the session in it; with the token if this page has one, so the phone gets in too.
-    const url = location.origin + location.pathname + (token ? '?t=' + encodeURIComponent(token) : '')
-    try {
-      qr.innerHTML = `${qrSvg(url, 176)}<div class="qr-note">폰으로 열기</div>`
-    } catch {}
+  if (!$('qr-box').firstChild) drawQr()
+}
+/**
+ * The phone QR: the address a phone can reach (the configured one, not a PC's localhost) and, when a token is
+ * needed, a one-time code in place of the token: a screen share or a photo must not leak it. Codes last five
+ * minutes, so the QR is redrawn every four.
+ */
+let qrTimer = null
+async function drawQr() {
+  const box = $('qr-box')
+  clearTimeout(qrTimer)
+  try {
+    const r = await api('/api/qr-code', {})
+    if (r.local) {
+      box.innerHTML = `<div class="qr-note">폰에서 열 주소가 설정되지 않았어요 (CLAUDE_SLACK_WEB_PUBLIC_URL)</div>`
+      return
+    }
+    box.innerHTML = `${qrSvg(r.url, 176)}<div class="qr-note">폰으로 열기</div>`
+    box.dataset.url = r.url
+    if (r.expiresAt) qrTimer = setTimeout(drawQr, 4 * 60_000)
+  } catch {
+    box.innerHTML = ''
   }
 }
 function renderConn() {

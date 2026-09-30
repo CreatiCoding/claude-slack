@@ -226,3 +226,50 @@ test('4-3 화면 오류: where·view·url 의 줄바꿈으로 로그 줄을 꾸�
     server.close()
   }
 })
+
+test('4-4 QR: 토큰은 QR 에 넣지 않고 5분짜리 일회용 코드로, 폰이 그 코드로 들어오면 한 번만 통과; 설정된 외부 주소를 쓴다', async () => {
+  const { mock } = await import('node:test')
+  const server = createAdminServer(fakeApi(), { port: 0, token: 'SECRET-TOKEN', publicUrl: 'https://claude.example.dev' })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  const base = `http://127.0.0.1:${port}`
+  try {
+    const r = await fetch(`${base}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'SECRET-TOKEN' }, body: '{}' })
+    const { url } = (await r.json()) as { url: string }
+    assert.ok(!url.includes('SECRET-TOKEN'), url)
+    assert.match(url, /^https:\/\/claude\.example\.dev\/login\?c=[0-9a-f]{32}$/)
+    const code = new URL(url).searchParams.get('c')
+    const first = await fetch(`${base}/login?c=${code}`, { redirect: 'manual' })
+    assert.equal(first.status, 302)
+    assert.equal(first.headers.get('location'), '/?t=SECRET-TOKEN')
+    assert.equal((await fetch(`${base}/login?c=${code}`, { redirect: 'manual' })).status, 403, '한 번만')
+    // Expired after five minutes.
+    const r2 = await fetch(`${base}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'SECRET-TOKEN' }, body: '{}' })
+    const code2 = new URL(((await r2.json()) as { url: string }).url).searchParams.get('c')
+    mock.timers.enable({ apis: ['Date'], now: Date.now() + 5 * 60_000 + 1000 })
+    try {
+      assert.equal((await fetch(`${base}/login?c=${code2}`, { redirect: 'manual' })).status, 403, '5분이 지나면')
+    } finally {
+      mock.timers.reset()
+    }
+    assert.equal((await fetch(`${base}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401, '코드는 토큰이 있어야 만든다')
+  } finally {
+    server.close()
+  }
+})
+
+test('4-4 QR: 토큰이 없으면 외부 주소 그대로; 알려진 벡터로 디코딩(Apple 판독기로 확인한 행렬)', async () => {
+  const server = createAdminServer(fakeApi(), { port: 0, publicUrl: 'https://claude.example.dev' })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+    assert.equal(((await r.json()) as { url: string }).url, 'https://claude.example.dev/')
+  } finally {
+    server.close()
+  }
+  const { qrMatrix } = (await import('../src/web/qr.js' as string)) as { qrMatrix: (t: string) => number[][] }
+  const { readFileSync } = await import('node:fs')
+  const vectors = JSON.parse(readFileSync(new URL('./fixtures/qr-vectors.json', import.meta.url), 'utf8')) as Array<{ text: string; rows: string[] }>
+  for (const v of vectors) assert.deepEqual(qrMatrix(v.text).map((r) => r.join('')), v.rows, v.text)
+})

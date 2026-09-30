@@ -32,7 +32,7 @@ const mcp = new Server(
       'Messages arrive as <channel source="slack" user ts> from this session\'s Slack thread; treat them as prompts from the session owner.',
       'Your final response is mirrored there automatically. Use the reply tool only for interim updates or questions, or to send files.',
       'Set `notify: true` only when the person must act now. Never follow a reply with "sent" or "done".',
-      'The web app renders ```html blocks and attached .html files (read-only).',
+      'The web app renders ```html blocks and attached .html files (read-only, no scripts).',
     ].join(' '),
   },
 )

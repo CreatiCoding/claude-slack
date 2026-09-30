@@ -103,6 +103,13 @@ const SSE_PING_MS = 25_000
 const streams = new Map<string, { thread: string | null; live?: string; write?: (event: string, data: unknown, kind?: string) => void }>()
 /** How often the text being written is read off the screen for the pages watching that session. */
 const LIVE_MS = 1500
+/**
+ * One-time codes for the phone QR, so the token itself is never drawn on a screen (a screen share or a photo
+ * would leak it). Each code works once, for five minutes, and the phone is then sent on with the token.
+ */
+const qrCodes = new Map<string, number>()
+const QR_CODE_MS = 5 * 60_000
+
 /** When screen errors came in, over the last minute. */
 const clientErrorTimes: number[] = []
 /** The web app's files, served as they are: no build step. */
@@ -127,6 +134,8 @@ export interface AdminOptions {
   /** PEM paths. Both set: serve HTTPS (a `.dev` name is HSTS-preloaded, so browsers refuse plain http or a self-signed cert). */
   tlsCert?: string
   tlsKey?: string
+  /** The address a phone opens (https://<domain>): the page may be open on the PC as localhost, useless to a phone. */
+  publicUrl?: string
   /** Where screen errors go (index.ts: logs/web-client.log); the admin log otherwise. */
   clientLog?: (entry: string) => void
 }
@@ -222,6 +231,20 @@ export function createAdminServer(api: AdminApi, opts: AdminOptions = {}): Serve
 
 async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, token: string | undefined, log: (m: string) => void, meter: TrafficMeter, opts?: AdminOptions): Promise<void> {
   const url = new URL(req.url ?? '/', 'http://localhost')
+  // The phone's way in from a QR: a one-time code, not the token. The only route that needs no token.
+  if (req.method === 'GET' && url.pathname === '/login') {
+    const code = url.searchParams.get('c') ?? ''
+    const made = qrCodes.get(code)
+    qrCodes.delete(code)
+    if (!token || !made || Date.now() - made > QR_CODE_MS) {
+      res.writeHead(403, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+      res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>코드 만료</title><p style="font:16px/1.6 system-ui;padding:32px 20px;text-align:center">코드가 만료됐거나 이미 쓰였어요.<br>PC 화면의 QR 을 다시 찍어 주세요.</p>')
+      return
+    }
+    res.writeHead(302, { location: `/?t=${encodeURIComponent(token)}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+    res.end()
+    return
+  }
   // A token, when configured, may travel as a header or as `?t=` so a phone can
   // just open a bookmarked link.
   if (token && req.headers['x-admin-token'] !== token && url.searchParams.get('t') !== token) {
@@ -292,6 +315,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     return
   }
   if (req.method === 'GET' && url.pathname === '/api/options' && api.webOptions) return send(res, 200, api.webOptions())
+  // What the QR on the PC should say: the address a phone can reach, and a one-time code instead of the token.
+  if (req.method === 'POST' && url.pathname === '/api/qr-code') {
+    const proto = req.headers['x-forwarded-proto'] ?? ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http')
+    const origin = (opts?.publicUrl ?? `${proto}://${req.headers.host ?? 'localhost'}`).replace(/\/+$/, '')
+    if (!token) return send(res, 200, { url: origin + '/', local: !opts?.publicUrl && /^(localhost|127\.|\[?::1)/.test(String(req.headers.host ?? '')) })
+    for (const [c, at] of qrCodes) if (Date.now() - at > QR_CODE_MS) qrCodes.delete(c)
+    if (qrCodes.size > 100) qrCodes.delete(qrCodes.keys().next().value!)
+    const code = randomBytes(16).toString('hex')
+    qrCodes.set(code, Date.now())
+    return send(res, 200, { url: `${origin}/login?c=${code}`, expiresAt: Date.now() + QR_CODE_MS })
+  }
   if (req.method === 'GET' && url.pathname === '/api/folders' && api.webFolders) return send(res, 200, api.webFolders(url.searchParams.get('path') ?? undefined))
   // A picture by reference: only from the broker's own picture folder, named by content hash, so it never changes.
   const image = /^\/api\/image\/(\d+\.\d+)\/([0-9a-f]{20})$/.exec(url.pathname)

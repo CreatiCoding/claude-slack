@@ -57,3 +57,28 @@ setTimeout(() => console.log(JSON.stringify({ title: 't' + n, number: n, state: 
   const calls = readFileSync(log, 'utf8').trim().split('\n').filter((l) => l.endsWith('/pull/1')).length
   assert.equal(calls, 1, '머지된 PR 은 다시 묻지 않는다')
 })
+
+test('4-5 PR 상태: 같은 요청이 동시에 오면 하나로, gh 실패는 1분 기억, 기억은 상한까지', async () => {
+  const { prInfo, _prStateCount } = await import('../src/links.ts')
+  const { mkdtempSync, writeFileSync, chmodSync, readFileSync } = await import('node:fs')
+  const dir = mkdtempSync(join(tmpdir(), 'gh-'))
+  const log = join(dir, 'calls')
+  const gh = join(dir, 'gh')
+  // Every call is logged; PR 404 fails (as a timeout would), others answer after 200ms.
+  writeFileSync(gh, `#!/usr/bin/env node
+require('fs').appendFileSync(${JSON.stringify(log)}, process.argv[4] + '\\n')
+const n = Number(process.argv[4].split('/pull/')[1])
+if (n === 404) process.exit(1)
+setTimeout(() => console.log(JSON.stringify({ title: 't', number: n, state: 'OPEN' })), 200)
+`)
+  chmodSync(gh, 0o755)
+  const calls = (n: number) => readFileSync(log, 'utf8').split('\n').filter((l) => l.endsWith(`/pull/${n}`)).length
+  const url = 'https://github.com/z/z/pull/77'
+  await Promise.all([prInfo([url], gh), prInfo([url], gh), prInfo([url], gh)])
+  assert.equal(calls(77), 1, '동시에 온 같은 요청은 한 번만')
+  const bad = 'https://github.com/z/z/pull/404'
+  await prInfo([bad], gh)
+  await prInfo([bad], gh)
+  assert.equal(calls(404), 1, '실패는 1분 기억')
+  assert.ok(_prStateCount() <= 500)
+})

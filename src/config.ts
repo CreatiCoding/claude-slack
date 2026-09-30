@@ -14,7 +14,7 @@ export interface Config {
   defaultCwd: string
   launcher: string
   /** Admin page. Loopback by default; binding elsewhere requires a token. */
-  web: { host: string; port: number; token?: string; enabled: boolean; tlsCert?: string; tlsKey?: string }
+  web: { host: string; port: number; token?: string; enabled: boolean; tlsCert?: string; tlsKey?: string; publicUrl?: string }
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
@@ -44,6 +44,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       token: env.CLAUDE_SLACK_WEB_TOKEN || undefined,
       tlsCert: env.CLAUDE_SLACK_WEB_TLS_CERT || undefined,
       tlsKey: env.CLAUDE_SLACK_WEB_TLS_KEY || undefined,
+      // The address a phone opens (for the QR): explicit, or the domain the certificate is for.
+      publicUrl: env.CLAUDE_SLACK_WEB_PUBLIC_URL || (env.CLAUDE_SLACK_WEB_DOMAIN ? `https://${env.CLAUDE_SLACK_WEB_DOMAIN}` : undefined),
     },
   }
 }

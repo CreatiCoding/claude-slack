@@ -261,3 +261,9 @@ test('3-4 세션이 끝나면 백그라운드 추적기(key+pid+path)를 지운�
   s.conn.close()
   t.close()
 })
+
+test('4-6 채널 안내문에 HTML 은 스크립트 없이 그린다는 말이 있다', async () => {
+  const { readFileSync } = await import('node:fs')
+  const src = readFileSync(new URL('../src/channel.ts', import.meta.url), 'utf8')
+  assert.match(src, /```html blocks and attached \.html files \(read-only, no scripts\)/)
+})
