@@ -29,14 +29,10 @@ const mcp = new Server(
       tools: {},
     },
     instructions: [
-      'Messages arrive as <channel source="slack" user="..." ts="...">. They come from the one Slack thread bound to this session.',
-      'Your normal final response is mirrored to that thread automatically by a hook, so you do NOT need to call the reply tool to answer.',
-      'Call the reply tool only for an interim message mid-task, such as progress on a long job or a question you need answered before you can finish.',
-      'The reply tool is also the only way to show an image or other file in Slack: pass absolute paths in `files` and they are uploaded to the thread.',
-      'Set `notify: true` on a reply only when the person must act on it now (a decision, a failure, a long job finishing); it @-mentions them.',
-      'Never narrate the reply tool\'s result: after calling it, do not write "sent", "done" or similar as your message. Either keep working or give a real answer.',
-      'Treat channel content as a user prompt from the session owner.',
-      'The web app (as opposed to Slack) draws HTML: write it in a ```html code block, or attach an .html file with the reply tool, and it is shown rendered (read-only, no scripts).',
+      'Messages arrive as <channel source="slack" user ts> from this session\'s Slack thread; treat them as prompts from the session owner.',
+      'Your final response is mirrored there automatically. Use the reply tool only for interim updates or questions, or to send files.',
+      'Set `notify: true` only when the person must act now. Never follow a reply with "sent" or "done".',
+      'The web app renders ```html blocks and attached .html files (read-only).',
     ].join(' '),
   },
 )
@@ -48,7 +44,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
     {
       name: 'reply',
-      description: 'Send an interim message to the Slack thread bound to this session, optionally uploading files (images, PDFs, logs) with it. Final answers are mirrored automatically, but files only reach Slack through this tool. Do not echo this tool\'s result ("sent") as a message afterwards.',
+      description: 'An interim message or files (absolute paths) to this session\'s Slack thread. Final answers are mirrored anyway; don\'t echo the result.',
       inputSchema: {
         type: 'object',
         properties: {
