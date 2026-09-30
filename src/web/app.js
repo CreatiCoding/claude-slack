@@ -846,7 +846,25 @@ function userEl(row) {
   const el = document.createElement('div')
   el.className = 'item user'
   el.innerHTML = `<div class="bubble"></div><div class="meta"></div>`
-  el.firstElementChild.innerHTML = linkify(ev.text)
+  // A long message (over 12 lines or 1200 characters) shows its first 8 lines, with "펼치기 (N줄 더)".
+  const lines = ev.text.split('\n')
+  const long = lines.length > 12 || ev.text.length > 1200
+  const head = long ? (lines.length > 12 ? lines.slice(0, 8).join('\n') : ev.text.slice(0, 600) + '…') : ev.text
+  el.firstElementChild.innerHTML = linkify(head)
+  if (long) {
+    const more = Math.max(1, lines.length - 8)
+    const t = document.createElement('button')
+    t.type = 'button'
+    t.className = 'linkish more-toggle'
+    t.textContent = lines.length > 12 ? `펼치기 (${more}줄 더)` : '펼치기'
+    let openNow = false
+    t.addEventListener('click', () => {
+      openNow = !openNow
+      el.firstElementChild.innerHTML = linkify(openNow ? ev.text : head)
+      t.textContent = openNow ? '접기' : lines.length > 12 ? `펼치기 (${more}줄 더)` : '펼치기'
+    })
+    el.firstElementChild.after(t)
+  }
   if (!ev.text) el.firstElementChild.remove()
   if (ev.images?.length) el.insertAdjacentHTML('afterbegin', imagesHtml(ev.images))
   const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''

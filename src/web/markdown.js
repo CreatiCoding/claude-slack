@@ -39,7 +39,7 @@ export function linkify(text) {
 // Inline constructs, applied to escaped text. Code spans are cut out first so nothing inside them changes.
 function inline(escaped, { slack = false } = {}) {
   const codes = []
-  let s = escaped.replace(/`([^`\n]+)`/g, (_, c) => {
+  let s = escaped.replace(/(`+)([^`\n]|[^`\n][^\n]*?[^`\n])\1(?!`)/g, (_, _ticks, c) => {
     codes.push(`<code>${autolink(c)}</code>`)
     return `\u0000${codes.length - 1}\u0000`
   })
@@ -98,7 +98,26 @@ function blocks(text, opts) {
   }
   while (i < lines.length) {
     const line = lines[i]
-    const fence = /^\s*```/.exec(line)
+    // Markdown fences by CommonMark's rule: three or more backticks (or tildes) at the start of the line
+    // (indented, as inside a list item), closed by at least as many of the same, alone on a line. A ```
+    // in the middle of a line is not a fence, and shorter runs inside a longer fence are code.
+    const open = !opts.slack && /^( {0,8})(`{3,}|~{3,})([^`]*)$/.exec(line)
+    if (open) {
+      flush()
+      const indent = open[1].length
+      const mark = open[2]
+      const close = new RegExp(`^ {0,${indent + 3}}${mark[0] === '`' ? '`' : '~'}{${mark.length},}\\s*$`)
+      const body = []
+      i++
+      while (i < lines.length && !close.test(lines[i])) {
+        const l = lines[i++]
+        body.push(l.startsWith(' '.repeat(indent)) ? l.slice(indent) : l.replace(/^ +/, ''))
+      }
+      i++ // the closing fence (or the end)
+      out.push(codeBox(linkify(body.join('\n')), open[3].trim()))
+      continue
+    }
+    const fence = opts.slack && /^\s*```/.exec(line)
     if (fence) {
       flush()
       const lang = line.trim().slice(3).trim()
@@ -149,6 +168,8 @@ function blocks(text, opts) {
       while (i < lines.length) {
         const m = /^(\s*)([-*•]|\d+[.)])\s+(.*)$/.exec(lines[i])
         if (!m) {
+          // A fence under the item ends the list here, so the code block is drawn as one.
+          if (!opts.slack && /^ {0,8}(`{3,}|~{3,})[^`]*$/.test(lines[i])) break
           // A continuation line indented under the item.
           if (/^\s{2,}\S/.test(lines[i]) && items.length) {
             items[items.length - 1] += '<br>' + inline(esc(lines[i].trim()), opts)

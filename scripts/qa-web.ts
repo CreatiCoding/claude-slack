@@ -59,6 +59,7 @@ const permBlocks = (pid: number) => [
 ]
 
 // A conversation already in progress.
+events.emit(A, { type: 'user', ts: '999.1', text: Array.from({ length: 20 }, (_, i) => `긴 줄 ${i + 1}`).join('\n'), via: 'web' })
 events.emit(A, { type: 'user', ts: '1000.1', text: '테스트 돌려 줘 https://example.com/a).', via: 'slack' })
 events.emit(A, { type: 'text', text: '## 결과\n\n- **통과** 286개\n- 링크: https://example.com/x.\n\n| 이름 | 값 |\n|---|---|\n| a | `1` |\n\n```ts\nconst a = 1\n```' })
 events.emit(A, { type: 'tool', id: 't1', name: 'Bash', title: '💻 npm test https://example.com/t', detail: 'npm test' })
@@ -206,6 +207,10 @@ for (const [label, size, phone] of [
   check(`${label}: 내 메시지 속 주소가 링크, 끝 ). 빠짐`, userLink === 'https://example.com/a', String(userLink))
   const textLink = await page.locator('.item.text a').first().getAttribute('href')
   check(`${label}: 답변 속 주소 끝 . 빠짐`, textLink === 'https://example.com/x', String(textLink))
+  const longMsg = page.locator('.item.user', { hasText: '긴 줄 1' })
+  check(`${label}: 긴 메시지는 앞 8줄만`, ((await longMsg.locator('.bubble').textContent()) ?? '').includes('긴 줄 8') && !((await longMsg.locator('.bubble').textContent()) ?? '').includes('긴 줄 9'))
+  await longMsg.locator('.more-toggle').click()
+  check(`${label}: 펼치기 (12줄 더) → 전부, 접기`, ((await longMsg.locator('.bubble').textContent()) ?? '').includes('긴 줄 20') && (await longMsg.locator('.more-toggle').textContent()) === '접기')
   check(`${label}: 도구 줄 완료 배지`, (await page.locator('.tool .st').first().textContent()) === '완료')
   check(`${label}: 도구 줄 앞 이모지 대신 SVG`, !((await page.locator('.tool .label').first().textContent()) ?? '').includes('💻') && (await page.locator('.tool .label svg').count()) >= 1)
   check(`${label}: 도구 출력은 펼치기 전엔 없음`, (await page.locator('.tool .detail').count()) === 0)

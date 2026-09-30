@@ -367,3 +367,4 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .ns-missing { display: flex; align-items: center; gap: 10px; font-size: var(--fs-s); color: var(--yellow); }
 .ns-actions { display: flex; justify-content: flex-end; }
 @media (max-width: 899px) { .ns-dirs .row { min-height: 40px; display: flex; } .ns-dirs .row .lead { display: inline-grid; } .ns-prompt { font-size: 16px; } }
+.user .more-toggle { margin-top: 4px; font-size: var(--fs-s); }
