@@ -298,6 +298,72 @@ const browser = await chromium.launch()
   await ctx.close()
 }
 
+// Phone long press: scrolling while held is not a press; the release after a long press does not close the menu
+// it opened; a release that never comes does not eat the next real tap; section heads open their menu too.
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  await page.goto(base + '/')
+  await page.waitForSelector('.row[data-thread]')
+  if (await page.locator('.perm-modal').count()) await page.mouse.click(5, 120)
+  const touch = (sel: string, type: string, dx = 0, dy = 0) =>
+    page.evaluate(
+      ({ sel, type, dx, dy }) => {
+        const el = document.querySelector(sel) as HTMLElement
+        const r = el.getBoundingClientRect()
+        const t = new Touch({ identifier: 1, target: el, clientX: r.left + 40 + dx, clientY: r.top + 20 + dy })
+        el.dispatchEvent(new TouchEvent(type, { bubbles: true, cancelable: true, touches: type === 'touchend' || type === 'touchcancel' ? [] : [t], changedTouches: [t] }))
+      },
+      { sel, type, dx, dy },
+    )
+  const row = `.row[data-thread="${A}"]`
+  await touch(row, 'touchstart')
+  await touch(row, 'touchmove', 0, 30) // scrolling down while holding
+  await page.waitForTimeout(650)
+  check('꾹 누르기: 세로로 스크롤하면 메뉴를 띄우지 않는다', (await page.locator('.menu').count()) === 0)
+  await touch(row, 'touchend', 0, 30)
+  await touch(row, 'touchstart')
+  await page.waitForTimeout(650)
+  check('꾹 누르기: 메뉴가 아래 시트로', (await page.locator('.menu.sheet').count()) === 1)
+  await touch(row, 'touchend')
+  // The click the release makes lands on the dim backdrop of the new sheet.
+  await page.mouse.click(195, 100)
+  await page.waitForTimeout(100)
+  check('꾹 누르기: 손을 뗄 때의 누르기가 막 뜬 메뉴를 닫지 않는다', (await page.locator('.menu.sheet').count()) === 1)
+  await page.keyboard.press('Escape')
+  // A long press whose release click never came: the next real tap opens the session.
+  await touch(row, 'touchstart')
+  await page.waitForTimeout(650)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(900)
+  await page.locator(row).click()
+  await page.waitForTimeout(200)
+  check('꾹 누르기: 오지 않은 누르기 때문에 다음 진짜 누르기를 먹지 않는다', await page.locator('#app.in-convo').count() === 1)
+  await page.goBack()
+  await page.waitForTimeout(200)
+  // touchcancel (the system took the touch) cancels too.
+  await touch(row, 'touchstart')
+  await touch(row, 'touchcancel')
+  await page.waitForTimeout(650)
+  check('꾹 누르기: touchcancel 이면 취소', (await page.locator('.menu').count()) === 0)
+  // A section head (iOS sends no contextmenu): a long press opens its menu.
+  const headSel = '.sec-head:nth-of-type(2)'
+  await page.evaluate(() => {
+    const heads = [...document.querySelectorAll('.sec-head')] as HTMLElement[]
+    heads.forEach((h, i) => (h.dataset.qa = String(i)))
+  })
+  const recentHead = await page.evaluate(() => ([...document.querySelectorAll('.sec-head')] as HTMLElement[]).findIndex((h) => h.textContent?.includes('이어서 하기')))
+  await touch(`.sec-head[data-qa="${recentHead}"]`, 'touchstart')
+  await page.waitForTimeout(650)
+  check('꾹 누르기: 묶음 머리도 메뉴를 연다', ((await page.locator('.menu.sheet').textContent()) ?? '').includes('이어서 하기 비우기'))
+  // Chromium does not know the property (iOS does), so read the rule as written.
+  const callout = await page.evaluate(() => [...document.styleSheets].flatMap((sh) => [...sh.cssRules]).some((r) => (r as CSSStyleRule).selectorText === '.sec-head' && /-webkit-touch-callout:\s*none/.test(r.cssText)))
+  const css = (await (await fetch(base + '/web/app.css')).text()).match(/\.sec-head \{[^}]*\}/)?.[0] ?? ''
+  check('꾹 누르기: 머리에 -webkit-touch-callout: none', callout || css.includes('-webkit-touch-callout: none'), css)
+  void headSel
+  await ctx.close()
+}
+
 // A page in an error loop sends at most 20 errors a minute.
 {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })

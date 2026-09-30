@@ -490,6 +490,7 @@ function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
   })
   if (sectionMenu) {
     const menu = (at) => openMenu(at, sectionMenu)
+    longPress(el, () => menu(null))
     el.querySelector('.gmore').addEventListener('click', (e) => {
       const r = e.currentTarget.getBoundingClientRect()
       menu({ x: r.right, y: r.bottom + 4, end: true })
@@ -498,6 +499,7 @@ function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
   }
   if (group) {
     const menu = (at) => openMenu(at, groupItems(group))
+    longPress(el, () => menu(null))
     el.querySelector('.gmore').addEventListener('click', (e) => {
       const r = e.currentTarget.getBoundingClientRect()
       menu({ x: r.left, y: r.bottom + 4 })
@@ -690,35 +692,62 @@ function plainRow(o, onOpen, onMenu) {
 
 // Click opens; right-click (PC), a long press or a swipe to the left (phone) opens the row's menu.
 function wireRow(row, onOpen, onMenu) {
-  let press = null
-  let startX = 0
-  let swiped = false
-  row.addEventListener('click', () => {
-    if (swiped) return void (swiped = false)
-    onOpen()
-  })
+  row.addEventListener('click', onOpen)
   row.addEventListener('keydown', (e) => e.key === 'Enter' && onOpen())
   row.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     onMenu({ x: e.clientX, y: e.clientY })
   })
-  row.addEventListener('touchstart', (e) => {
-    startX = e.touches[0].clientX
-    press = setTimeout(() => {
-      press = null
-      swiped = true
-      onMenu(null)
-    }, 500)
+  longPress(row, () => onMenu(null), { swipeLeft: true })
+}
+
+/**
+ * A long press (or a swipe to the left): moving more than 10px any way cancels it, as scrolling does, and so does
+ * touchcancel. The click the release makes is swallowed once, document-wide and for 800ms at most: on the row it
+ * would open the session, on the sheet's backdrop it would close the menu just opened; and one that never comes
+ * must not eat the next real tap.
+ */
+function longPress(el, onPress, { swipeLeft = false } = {}) {
+  let timer = null
+  let x0 = 0
+  let y0 = 0
+  let fired = false
+  const cancel = () => timer && (clearTimeout(timer), (timer = null))
+  const fire = () => {
+    if (fired) return
+    fired = true
+    cancel()
+    swallowNextClick()
+    onPress()
+  }
+  el.addEventListener('touchstart', (e) => {
+    fired = false
+    x0 = e.touches[0].clientX
+    y0 = e.touches[0].clientY
+    cancel()
+    timer = setTimeout(fire, 500)
   }, { passive: true })
-  row.addEventListener('touchmove', (e) => {
-    const dx = e.touches[0].clientX - startX
-    if (Math.abs(dx) > 10 && press) clearTimeout(press), (press = null)
-    if (dx < -60 && !swiped) {
-      swiped = true
-      onMenu(null)
-    }
+  el.addEventListener('touchmove', (e) => {
+    const dx = e.touches[0].clientX - x0
+    const dy = e.touches[0].clientY - y0
+    if (swipeLeft && dx < -60 && Math.abs(dy) < 30 && !fired) return fire()
+    if (Math.hypot(dx, dy) > 10) cancel()
   }, { passive: true })
-  row.addEventListener('touchend', () => press && (clearTimeout(press), (press = null)))
+  el.addEventListener('touchend', cancel)
+  el.addEventListener('touchcancel', cancel)
+}
+function swallowNextClick() {
+  const eat = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    stop()
+  }
+  const stop = () => {
+    document.removeEventListener('click', eat, true)
+    clearTimeout(t)
+  }
+  document.addEventListener('click', eat, true)
+  const t = setTimeout(stop, 800)
 }
 $('search').addEventListener('input', renderList)
 setInterval(() => {
