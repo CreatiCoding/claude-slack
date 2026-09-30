@@ -736,7 +736,7 @@ function renderHeader() {
   sub.hidden = !current
   if (current) {
     $('badge').innerHTML = s ? badgeHtml(s) + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
-    $('meta').textContent = s ? [s.model, s.effort, s.permissionMode, s.contextLabel].filter(Boolean).join(' · ') : ''
+    renderMeta(s)
     // A reserved refresh is shown where the session's state is, with a way to take it back.
     let plan = $('subbar').querySelector('.refresh-plan')
     if (s?.refreshAfter) {
@@ -751,6 +751,36 @@ function renderHeader() {
   }
   const waiting = sessions.filter((x) => x.state === 'waiting').length
   document.title = waiting ? `(${waiting}) 응답 대기 · Claude` : 'Claude'
+}
+/** claude-opus-5-5 → opus 5.5 on a phone; the full id on a PC. */
+function shortModel(m) {
+  if (!m || !isPhone()) return m
+  const x = /^claude-(opus|sonnet|haiku|fable)-(\d+)-(\d+)/.exec(m)
+  return x ? `${x[1]} ${x[2]}.${x[3]}` : m.replace(/^claude-/, '')
+}
+/**
+ * The line under the title: model · effort · permission mode · context · the user's plugins as this process
+ * runs them. It stays the same while working (what runs is in the tool lines); only a long silence is added.
+ */
+function renderMeta(s) {
+  const meta = $('meta')
+  if (!s) return void (meta.textContent = '')
+  meta.innerHTML = ''
+  const parts = [shortModel(s.model), s.effort, s.permissionMode, s.contextLabel].filter(Boolean)
+  meta.append(document.createTextNode(parts.join(' · ')))
+  for (const p of s.plugins || []) {
+    meta.append(document.createTextNode(`${meta.textContent ? ' · ' : ''}${p.market} ${p.version}`))
+    if (p.latest) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'linkish plugin-new'
+      b.textContent = p.latest === '최신' ? '새로고침하면 최신' : `새로고침하면 ${p.latest}`
+      b.addEventListener('click', () => refreshSession(s))
+      meta.append(document.createTextNode(' '), b)
+    }
+  }
+  const quietMin = s.state === 'busy' && view?.lastAt ? Math.floor((Date.now() - view.lastAt) / 60_000) : 0
+  if (quietMin >= 2) meta.append(document.createTextNode(` · ${quietMin}분째 새 출력 없음`))
 }
 $('title').addEventListener('click', () => {
   const s = current && sessionOf(current)
@@ -1662,7 +1692,7 @@ function renderComposerBits() {
   linkChip('pr', 'PR', links?.prs)
   linkChip('link', 'Slack 스레드', links?.threads, links ? undefined : withToken('/go/thread?ts=' + encodeURIComponent(s.thread)))
   if (s.held) chip('play', `지금 보내기 (${s.held})`, () => command(s, 'sendnow'), { hot: true })
-  if (s.state === 'busy' || s.state === 'waiting') chip('stop', '중단', () => command(s, 'esc'))
+  if (s.state === 'busy' || s.state === 'waiting') chip('stop', hasMouse ? '중단 · Esc' : '중단', () => command(s, 'esc'))
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
   chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('chat', '/btw', () => prefill(':btw '))
@@ -2074,6 +2104,8 @@ function openFinder() {
   scrim.className = 'scrim dim'
   const el = document.createElement('div')
   el.className = 'finder'
+  el.setAttribute('role', 'dialog')
+  el.setAttribute('aria-modal', 'true')
   el.innerHTML = `<input class="search" placeholder="세션 찾기" aria-label="세션 찾기"><div class="finder-list" role="listbox"></div>`
   const q = el.querySelector('input')
   let items = []
@@ -2141,6 +2173,8 @@ function checkPermissionModal() {
   scrim.className = 'scrim dim'
   const el = document.createElement('div')
   el.className = 'perm-modal'
+  el.setAttribute('role', 'dialog')
+  el.setAttribute('aria-modal', 'true')
   el.dataset.ts = s.permission.ts
   el.innerHTML = `<div class="pm-head">${icon('lock')}<div><div class="pm-name"></div><div class="pm-where"></div></div></div>`
   el.querySelector('.pm-name').textContent = nameOf(s)
@@ -2177,6 +2211,8 @@ async function editDefaultPrompt() {
   scrim.className = 'scrim dim'
   const el = document.createElement('div')
   el.className = 'menu sheet prompt-sheet'
+  el.setAttribute('role', 'dialog')
+  el.setAttribute('aria-modal', 'true')
   el.innerHTML = `<div class="ns-head"><h2>기본 프롬프트</h2></div><p class="hint">모든 세션에 넣는 지시예요(예: "한국어로 답해"). 새로 띄우거나 다시 연 세션부터 적용돼요. 비우면 넣지 않아요.</p><textarea class="ns-prompt" rows="6"></textarea><div class="ns-actions"><button class="btn" type="button" data-x="cancel">취소</button><button class="btn primary" type="button" data-x="save">저장</button></div>`
   el.querySelector('textarea').value = text
   const close = () => (scrim.remove(), el.remove())
@@ -2304,8 +2340,21 @@ $('btn-new').addEventListener('click', newSession)
 $('btn-new-big').addEventListener('click', newSession)
 
 // ------------------------------------------------------------------ keys
+/** Anything on top that Esc should close instead: a menu, a dialog or sheet, a picture or HTML shown large. */
+const overlayOpen = () => !!document.querySelector('[role="dialog"], [role="menu"], [aria-modal="true"], .viewer, .hp-full, .finder, .newsess.sheet')
 addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && menuState) return closeMenu()
+  // Esc on a PC stops the session being watched, like the 중단 chip: not over a menu or dialog, not while
+  // composing Korean, not a held-down key.
+  if (e.key === 'Escape' && hasMouse && current && !e.isComposing && !e.repeat && !overlayOpen()) {
+    const s = sessionOf(current)
+    if (s && (s.state === 'busy' || s.state === 'waiting')) {
+      e.preventDefault()
+      command(s, 'esc')
+      toast('중단했어요')
+      return
+    }
+  }
   const mod = isMac ? e.metaKey : e.ctrlKey
   if (mod && e.key === '\\') {
     e.preventDefault()

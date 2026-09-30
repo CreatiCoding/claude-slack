@@ -44,7 +44,7 @@ const A = '1000.0001'
 const B = '2000.0002'
 const C = '3000.0003' // a long session: thousands of events
 let sessions: WebSession[] = [
-  { pid: 11, thread: A, cwd: '/p/alpha', title: '알파 작업', state: 'idle', model: 'opus', effort: 'high', permissionMode: 'default', contextLabel: '12%', startedAt: now - 60_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 60_000, preview: '첫 메시지 A' },
+  { pid: 11, thread: A, cwd: '/p/alpha', title: '알파 작업', state: 'idle', model: 'claude-opus-5-5', plugins: [{ market: 'cdt-skills', version: '0.4.2', latest: '0.5.0' }], effort: 'high', permissionMode: 'default', contextLabel: '12%', startedAt: now - 60_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 60_000, preview: '첫 메시지 A' },
   { pid: 13, thread: C, cwd: '/p/long', title: '긴 세션', state: 'idle', startedAt: now - 300_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 300_000 },
   { pid: 12, thread: B, cwd: '/p/beta', title: '베타', state: 'waiting', waiting: '권한 대기', startedAt: now - 120_000, held: 0, canKeys: true, autoAllow: false, lastSeq: 0, lastAt: now - 120_000 },
 ]
@@ -257,6 +257,9 @@ for (const [label, size, phone] of [
   await page.waitForSelector('.item.text')
   await settle(page)
   check(`${label}: 제목`, (await page.locator('#title').textContent()) === '알파 작업')
+  const metaText = (await page.locator('#meta').textContent()) ?? ''
+  check(`${label}: 헤더에 세션이 쓰는 플러그인 버전과 "새로고침하면"`, metaText.includes('cdt-skills 0.4.2') && metaText.includes('새로고침하면 0.5.0'), metaText)
+  check(`${label}: 모델 이름(${phone ? '폰은 줄여서' : 'PC 는 그대로'})`, phone ? metaText.startsWith('opus 5.5') : metaText.startsWith('claude-opus-5-5'), metaText)
   const answer = page.locator('.item.text', { hasText: '통과' }).first()
   check(`${label}: 마크다운 제목·표·코드`, (await answer.locator('.md-h').count()) === 1 && (await answer.locator('table').count()) === 1 && (await answer.locator('pre').count()) === 1)
   const userLink = await page.locator('.item.user a').first().getAttribute('href')
@@ -422,6 +425,18 @@ for (const [label, size, phone] of [
   check(`${label}: 취소 → refresh cancel`, calls.some((c) => c.startsWith('action:ctl_btn_web:12:refresh cancel')))
   sessions = sessions.map((x) => (x.thread === B ? { ...x, refreshAfter: undefined } : x))
   changed()
+
+  if (!phone) {
+    // Esc stops the session being watched (like the chip), but not while a menu is open.
+    await page.locator('#btn-more').click()
+    await page.keyboard.press('Escape')
+    check(`${label}: 메뉴가 떠 있으면 Esc 는 메뉴만 닫는다`, !calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')) && (await page.locator('.menu').count()) === 0)
+    await page.locator('#input').focus()
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(150)
+    check(`${label}: 작업 중 Esc 는 중단`, calls.some((c) => c.startsWith('action:ctl_btn_web:12:esc')), calls.join(' | '))
+    check(`${label}: 칩에 "중단 · Esc"`, (await page.locator('.chip', { hasText: '중단 · Esc' }).count()) === 1)
+  }
 
   // B is busy now: the activity box shows at the bottom.
   await page.waitForSelector('#activity:not([hidden])', { timeout: 3000 }).catch(() => {})

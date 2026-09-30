@@ -35,6 +35,8 @@ import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, repos, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
+import { sessionPlugins, type PluginLine } from './plugins.ts'
+import { execFile } from 'node:child_process'
 import { REPO_ROOT } from './config.ts'
 import { AsyncLocalStorage } from 'node:async_hooks'
 
@@ -74,6 +76,8 @@ export interface WebSession {
   autoAllow: boolean
   /** "끝나면 새로고침" is waiting for the work to end. */
   refreshAfter?: boolean
+  /** The user's own plugins as this process runs them (and a newer installed version). */
+  plugins?: Array<{ market: string; version: string; latest?: string }>
   lastSeq: number
   lastAt: number
   preview?: string
@@ -153,6 +157,10 @@ export interface BrokerConfig {
   trashDir?: string
   /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
   homeDir?: string
+  /** The GitHub account whose marketplaces count as the user's own (default: asked of gh once). */
+  githubUser?: string
+  /** Where Claude Code keeps plugins (tests use a temporary one). */
+  pluginsDir?: string
   /** How often a scheduled refresh looks again (default a minute). */
   refreshCheckMs?: number
   /** When a process started and how many shells it has open (tests fake it). */
@@ -594,6 +602,41 @@ export class Broker {
   }
 
   /** The session list as the web app shows it: cheap enough to send on every change. */
+  /**
+   * The user's plugins as this process runs them, by key+pid (a refresh keeps the key; a key-only cache once
+   * showed the old process's versions for half a minute). Worked out off the list's path, at most every 30s.
+   */
+  private pluginCache = new Map<string, { at: number; lines: PluginLine[]; busy?: boolean }>()
+  private githubUser?: Promise<string | undefined>
+  private pluginsFor(s: Session): PluginLine[] | undefined {
+    const k = `${s.key}:${s.pid}`
+    const c = this.pluginCache.get(k)
+    if (!c || (Date.now() - c.at > 30_000 && !c.busy)) {
+      const entry = c ?? { at: 0, lines: [] }
+      entry.busy = true
+      this.pluginCache.set(k, entry)
+      void this.computePlugins(s).then((lines) => {
+        const changed = JSON.stringify(lines) !== JSON.stringify(entry.lines)
+        Object.assign(entry, { at: Date.now(), lines, busy: false })
+        if (changed) this.changed()
+      })
+    }
+    return c?.lines.length ? c.lines : undefined
+  }
+  private async computePlugins(s: Session): Promise<PluginLine[]> {
+    this.githubUser ??= this.cfg.githubUser
+      ? Promise.resolve(this.cfg.githubUser)
+      : new Promise((resolve) => execFile('gh', ['api', 'user', '--jq', '.login'], { timeout: 8000 }, (err, out) => resolve(err ? process.env.CLAUDE_SLACK_GITHUB_USER : out.trim() || undefined)))
+    const user = await this.githubUser
+    if (!user) return []
+    const facts = await (this.cfg.processFacts ?? processFacts)(s.pid).catch(() => ({}) as { startedAt?: number })
+    try {
+      return sessionPlugins({ pluginsDir: this.cfg.pluginsDir, user, processStart: facts.startedAt, transcript: s.transcriptPath })
+    } catch {
+      return []
+    }
+  }
+
   /** Last rows shown, so a session being refreshed keeps its line (name and place) as "뜨는 중". */
   private lastRows = new Map<string, WebSession>()
   private refreshFailed = new Map<string, number>()
@@ -632,6 +675,7 @@ export class Broker {
         canKeys: !!s.pane,
         autoAllow: !!s.autoAllow,
         ...(s.refreshAfter ? { refreshAfter: true } : {}),
+        ...(this.pluginsFor(s) ? { plugins: this.pluginsFor(s) } : {}),
         lastSeq: this.events.last(s.threadTs),
         lastAt: this.lastEventAt(s.threadTs) ?? s.startedAt,
         preview: s.transcriptPath ? this.firstMessages.get(s.transcriptPath) : undefined,

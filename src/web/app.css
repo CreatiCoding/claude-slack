@@ -122,7 +122,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .sdot.starting { background: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
 .sdot.ended { background: var(--line); }
 @keyframes pulse { 50% { opacity: .35; } }
-.badge { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-s); line-height: 18px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
+.badge { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: var(--fs-s); line-height: 18px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
 .badge.idle { background: var(--green-soft); color: var(--green); }
 .badge.busy { background: var(--blue-soft); color: var(--blue); }
 .badge.waiting { background: var(--yellow-soft); color: var(--yellow); }
@@ -416,3 +416,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .choice-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 .refresh-plan { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--accent); font-size: var(--fs-s); }
 .refresh-plan .ic { width: 13px; height: 13px; }
+
+/* header line: the badge keeps its width when 대기 ↔ 작업 중, so the text after it does not move */
+#badge .badge:first-child { min-width: 4.6em; }
+.plugin-new { font-size: var(--fs-s); color: var(--accent); }
