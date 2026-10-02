@@ -1870,3 +1870,45 @@ test('관리 페이지 상태: tmux 창을 읽을 수 있는 세션은 canScreen
   s.conn.close()
   t.close()
 })
+
+test('이어서 하기 선택 상자: ~ 로 줄인 경로를 홈으로 펼쳐서 띄운다 (SPEC REQ-F-074 §4단계)', async () => {
+  const { encodeResume } = await import('../src/actions.ts')
+  const home = process.env.HOME ?? '/Users/u'
+  const t = await setup({ listSessions: () => [{ id: 'sess-1', cwd: `${home}/projects/my-long-project-name`, title: '제목', mtime: 1, when: '5분 전' }] })
+  await t.broker.handleAction({ user: 'U1', actionId: 'ctl_resume', value: encodeResume('sess-1', `${home}/projects/my-long-project-name`), messageTs: 'm1', channel: 'C1' })
+  await tick()
+  assert.equal(t.tmux.launches.at(-1)?.cwd, `${home}/projects/my-long-project-name`, '~ 는 홈으로 펼친다')
+  t.close()
+})
+
+test('이어서 하기 선택 상자: 길이 제한으로 잘린(…) 경로는 최근 목록에서 같은 id 의 실제 cwd 를 찾아 쓴다 (SPEC REQ-F-074 §4단계)', async () => {
+  const home = process.env.HOME ?? '/Users/u'
+  const t = await setup({ listSessions: () => [{ id: 'sess-2', cwd: `${home}/projects/my-long-project-name`, title: '제목', mtime: 1, when: '5분 전' }] })
+  await t.broker.handleAction({ user: 'U1', actionId: 'ctl_resume', value: 'resume:sess-2:…ng-project-name', messageTs: 'm1', channel: 'C1' })
+  await tick()
+  assert.equal(t.tmux.launches.at(-1)?.cwd, `${home}/projects/my-long-project-name`, '잘린 경로는 목록에서 실제 경로를 찾는다')
+  t.close()
+})
+
+test('이어서 하기 선택 상자: 잘린 경로인데 목록에 없으면 누른 사람에게만 알리고 세션을 안 띄운다', async () => {
+  const t = await setup({ listSessions: () => [] })
+  await t.broker.handleAction({ user: 'U1', actionId: 'ctl_resume', value: 'resume:sess-missing:…one', messageTs: 'm1', channel: 'C1' })
+  await tick()
+  assert.equal(t.tmux.launches.length, 0)
+  assert.ok(t.slack.ephemerals.some((e) => e.text.includes('이어서 할 수 있는 세션 목록에 없습니다')))
+})
+
+test('주입 확인: Enter 로 다시 거는 재시도는 횟수가 이어져 3번째에서 멈춘다 (SPEC REQ-F-013 §3단계·경계값)', async () => {
+  const t = await setup({ injectVerifyMs: 20 })
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  const rule = '─'.repeat(60)
+  t.tmux.screen = `⏺ 이전 답변\n\n${rule}\n❯ 안 보내진 글입니다\n${rule}\n  ⏵⏵ auto mode on\n`
+  await t.broker.handleSlackMessage({ user: 'U1', text: '안 보내진 글입니다', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  // attempts 는 1부터 시작해 Enter 를 누를 때마다 이어진다: 1→Enter(→2)→Enter(→3), 3에서는 더 누르지 않고 멈춘다. 즉 Enter 는 두 번만 간다.
+  await until(() => t.tmux.keys.filter((k) => k === '%3:Enter').length >= 2, 'Enter 를 두 번 누른다')
+  await tick(200)
+  assert.equal(t.tmux.keys.filter((k) => k === '%3:Enter').length, 2, '시도 횟수가 3 이 된 뒤로는 더 누르지 않는다')
+  s.conn.close()
+  t.close()
+})

@@ -2638,7 +2638,19 @@ export class Broker {
     }
     if (isAction(a.actionId, ACTION.ctlResume)) {
       const r = decodeResume(a.value)
-      if (r) await this.launchSession({ cwd: r.cwd, prompt: '', resumeId: r.sessionId, user: a.user })
+      if (!r) return
+      // `~` is the home directory abbreviated to fit the option; `…` is a path cut from the left for the same reason,
+      // only the project's tail survives, so the full path is looked up by the conversation's own id instead.
+      let cwd = r.cwd.startsWith('~') ? expandHome(r.cwd) : r.cwd
+      if (r.cwd.startsWith('…')) {
+        const found = (await this.resumable(25)).find((x) => x.id === r.sessionId)
+        if (!found) {
+          await this.slack.postEphemeral(a.user, '이어서 할 수 있는 세션 목록에 없습니다.')
+          return
+        }
+        cwd = found.cwd
+      }
+      await this.launchSession({ cwd, prompt: '', resumeId: r.sessionId, user: a.user })
       return
     }
     const decoded = decodeValue(a.value)
@@ -3172,9 +3184,13 @@ export class Broker {
    * input box means it was typed but never sent, and Enter finishes the job.
    * Otherwise send it again, once, and then say so.
    */
-  private watchInjected(session: Session, text: string, user: string, ts: string): void {
+  /**
+   * `fromAttempts` carries the count across a retry: verifyInjected clears `session.injectCheck` before calling back in,
+   * so inferring the count from what is still there (as a plain re-delivery does) would always read as the first attempt.
+   */
+  private watchInjected(session: Session, text: string, user: string, ts: string, fromAttempts?: number): void {
     if (session.injectCheck?.timer) clearTimeout(session.injectCheck.timer)
-    const attempts = session.injectCheck?.ts === ts ? session.injectCheck.attempts + 1 : 1
+    const attempts = fromAttempts ?? (session.injectCheck?.ts === ts ? session.injectCheck.attempts + 1 : 1)
     const check = { text, ts, user, attempts, timer: undefined as ReturnType<typeof setTimeout> | undefined }
     check.timer = setTimeout(() => {
       this.verifyInjected(session, check).catch((e) => this.logAt('WARN', 'inject', `verify failed: ${describeError(e)}`, this.tag(session)))
@@ -3209,7 +3225,7 @@ export class Broker {
       }
       this.logAt('WARN', 'inject', 'text sits in the input box unsent; pressing Enter', this.tag(session, { ts: check.ts }))
       await this.tmux.sendKeys(session.pane, ['Enter'])
-      this.watchInjected(session, check.text, check.user, check.ts)
+      this.watchInjected(session, check.text, check.user, check.ts, check.attempts + 1)
       return
     }
     // Claude Code may simply be holding it until the turn ends; only an idle session is evidence of loss.
