@@ -39,6 +39,8 @@ export type ToChannel =
   | { type: 'hello_ack'; threadTs: string }
   | { type: 'inbound'; text: string; user: string; ts: string }
   | { type: 'permission'; requestId: string; behavior: 'allow' | 'deny' }
+  /** Sent instead of `hello_ack`: another, still-live process already owns this run; this one should not reconnect. */
+  | { type: 'bye'; reason: string }
 
 export const SOCKET_PATH = process.env.CLAUDE_SLACK_SOCKET ?? join(homedir(), '.claude-slack.sock')
 

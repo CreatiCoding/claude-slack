@@ -790,6 +790,7 @@ cache-control: no-store
 | IF-064 | `hello_ack` | 브로커 → 채널 심 | `type: "hello_ack"`, `threadTs`: string 필수 | 없음 |
 | IF-065 | `inbound` | 브로커 → 채널 심 | `type: "inbound"`, `text`: string 필수, `user`: string 필수, `ts`: string 필수 | 채널 심이 IF-067 의 채널 알림을 보낸다 |
 | IF-066 | `permission` | 브로커 → 채널 심 | `type: "permission"`, `requestId`: string 필수, `behavior`: `"allow"`｜`"deny"` 필수 | 채널 심이 IF-067 의 권한 알림을 보낸다 |
+| IF-084 | `bye` | 브로커 → 채널 심 | `type: "bye"`, `reason`: string 필수 | `hello_ack` 대신 온다: 같은 실행 키를 살아 있는 다른 프로세스가 이미 쥐고 있다는 뜻. 채널 심은 재접속 간격을 60,000 ms 로 늘린다. REQ-F-002 |
 
 ```json
 {
@@ -1009,7 +1010,7 @@ cache-control: no-store
 - 입력: IF-061 의 필드
 - 처리 규칙:
   1. `hello` 뒤에 같은 연결로 온 메시지는 붙이기가 끝날 때까지 모아 둔다.
-  2. 실행 키로 살아 있는 세션을 찾는다. 있으면 그 세션의 이전 연결을 닫고 재사용한다("재접속"). 없으면 새 세션을 만든다: `origin` = `threadTs` 가 있으면 `slack` 아니면 `terminal`, `state = idle`, `recipient` = 기본 수신자, `startedAt` = 지금.
+  2. 실행 키로 살아 있는 세션을 찾는다. 있는데 이 `hello` 의 `pid` 가 그 세션의 `pid` 와 다르고 그 `pid` 가 살아 있으면(`processAlive`, §4.3.9 류): 지금 연결에 `bye`(IF-084)를 보내고 닫는다. 그 키·pid 조합은 처음 한 번만 WARN 로그와 스레드 경고(``⚠️ 같은 대화가 다른 Claude 프로세스로도 떠 있어요. 하나를 끄세요: `tmux kill-pane -t <pane>` ``)를 올린다. 기존 세션은 건드리지 않고 끝낸다(8~11단계로 가지 않는다). 그 pid 가 이미 죽었으면(또는 `pid` 가 같으면) 그 세션의 이전 연결을 닫고 재사용하며 `pid` 를 새 값으로 바꾼다("재접속"). 살아 있는 세션이 없으면 새 세션을 만든다: `origin` = `threadTs` 가 있으면 `slack` 아니면 `terminal`, `state = idle`, `recipient` = 기본 수신자, `startedAt` = 지금.
   3. IF `hello.threadTs` 가 있음 THEN 세션의 `threadTs` 로 삼고, 그 스레드의 대기 중 시작(DM-004)이 있으면 그 페인·창·시작 패널 `ts`·모델·effort·루트 `ts` 를 세션에 옮기고 대기 중 시작을 지운다. ELSE IF 세션에 `threadTs` 가 없음 THEN 채널에 루트 메시지를 올리고(§4.3.15 의 루트 줄, 아이콘 🟢, 상태문 `터미널 세션`) 그 `ts` 를 `threadTs`·`rootTs` 로 삼는다.
   4. 새 세션이면 저장된 기록을 돌려준다(REQ-F-051).
   5. 레지스트리에 등록하고 INFO 로그 `attached (<origin>)` 를 남긴다. 홈 탭 갱신을 예약한다. 정지 감시를 건다(REQ-F-032).
@@ -1028,10 +1029,10 @@ cache-control: no-store
   | 패널 올리기 실패 | 해당 없음 | WARN 로그, 붙이기는 계속한다 |
   | 처리 중 예외 | 해당 없음 | ERROR 로그 `attach failed: …` |
 - 경계값: `key` 가 없으면 `String(pid)` 를 실행 키로 쓴다. `sessionId` 가 `""` 여도 붙인다. 같은 실행 키의 `hello` 가 다시 오면 2단계의 재접속이다(새 스레드를 만들지 않는다)
-- 동시성: 같은 실행 키의 `hello` 2개가 겹치면 뒤의 것이 앞 연결을 닫는다. 닫힌 연결의 close 는 현재 연결이 아니므로 세션을 끝내지 않는다
-- 수용 기준: AC-002
-- 근거: `src/broker.ts` `onConn`·`attachSession`·`restoreSessionFacts`(ASM-002)
-- 추적: IF-061, IF-064, DM-001, DM-004, ST-001, ST-006
+- 동시성: 같은 실행 키의 `hello` 2개가 겹치고 `pid` 가 같으면(재접속) 뒤의 것이 앞 연결을 닫는다. `pid` 가 다르면 2단계의 생존 검사가 가린다(둘 다 살아 있는 레이스는 없다 — 뒤에 붙은 쪽은 아직 자기 pid 로 세션을 갖지 못했다). 닫힌 연결의 close 는 현재 연결이 아니므로 세션을 끝내지 않는다
+- 수용 기준: AC-002, AC-119
+- 근거: `src/broker.ts` `onConn`·`attachSession`·`restoreSessionFacts`, `src/format.ts` `processAlive`(ASM-002)
+- 추적: IF-061, IF-064, IF-084, DM-001, DM-004, ST-001, ST-006
 
 ### REQ-F-003 훅 이벤트를 표에 따라 처리한다
 - 의무: MUST
@@ -3039,7 +3040,7 @@ cache-control: no-store
   1. stdio 로 MCP 서버를 연다(IF-067).
   2. `CLAUDE_SLACK` 이 없으면 브로커에 접속하지 않는다(표준 오류에 `[claude-slack channel] CLAUDE_SLACK is not set; running inert (start Claude via bin/claude-slack to bridge this session)`).
   3. MCP 초기화가 끝난 뒤 브로커 접속을 반복한다: 접속되면 `hello`(pid = 부모 pid(없으면 `CLAUDE_PID`), `sessionId` = `CLAUDE_CODE_SESSION_ID`(없으면 `""`), `cwd` = 작업 폴더, `threadTs`·`tmuxPane` 은 값이 있을 때만)를 보낸다. 연결이 닫히거나 접속에 실패하면 다시 한다: 끊긴(또는 첫 실패) 순간부터 30,000 ms 동안은 500 ms 간격, 그 뒤는 5,000 ms 간격(브로커가 재시작한 직후 몇 초 안에 다시 붙기 위함, REQ-F-050).
-  4. 브로커 → Claude Code: `inbound` 는 채널 알림으로, `permission` 은 권한 알림으로 넘긴다(IF-067).
+  4. 브로커 → Claude Code: `inbound` 는 채널 알림으로, `permission` 은 권한 알림으로 넘긴다(IF-067). `bye`(IF-084)가 오면 재접속 간격을 60,000 ms 로 늘린다; 이후 `hello_ack` 를 받으면(다른 프로세스가 내려가 넘겨받은 것) 평소 간격으로 되돌린다.
   5. Claude Code → 브로커: 권한 요청 알림은 `permission_request` 로, `reply` 도구는 `reply` 로 넘긴다.
   6. `reply` 도구 검사: 브로커에 붙어 있지 않으면 ERR-085. `files` 가운데 절대 경로가 아니거나 있는 일반 파일이 아닌 것이 있으면 ERR-086(보내지 않는다).
 - 출력: IF-061, IF-062, IF-063, MCP 알림
@@ -5182,6 +5183,7 @@ Slack 오류 표:
 | AC-116 | REQ-M-006 | §2.6 의 환경 | `npm test`, `node scripts/qa-web.ts` | 둘 다 실패 0건 |
 | AC-117 | REQ-F-026 | 전부 허용 꺼짐, 열린 권한 요청 `abcde`, `fghij` | 답글 `:auto on` | 스레드에 `⚡ *전부 허용* 켬 · …`. 채널 심이 `allow` 를 2개 받는다. 열린 권한 요청 0개 |
 | AC-118 | REQ-F-001 | 브로커가 1개 떠서 소켓에 응답하고 있다 | 같은 소켓 경로로 두 번째 브로커를 띄운다 | 두 번째는 종료 코드 1, ERR-081. 소켓 파일은 그대로고 첫 브로커가 계속 응답한다(Slack 에 두 번째가 접속하지 않는다) |
+| AC-119 | REQ-F-002 | pid `P1` 로 붙은 세션이 살아 있다 | 같은 실행 키·다른 pid `P2`(살아 있음)로 두 번째 `hello` | 두 번째는 `bye` 를 받는다. 첫 세션은 그대로다. `P1` 쪽으로 보낸 메시지는 여전히 전달된다. 스레드에 경고 1줄(한 번만) |
 
 ### 5.2 추적성 매트릭스
 

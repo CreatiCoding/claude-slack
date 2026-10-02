@@ -20,7 +20,7 @@ import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction,
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
-import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
+import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
@@ -1324,13 +1324,33 @@ export class Broker {
     })
   }
 
+  /** Already warned about this run having two live processes, so the message is not repeated on every reconnect. */
+  private pidCollisionWarned = new Set<string>()
+
   private async attachSession(conn: Conn, hello: Extract<ToBroker, { type: 'hello' }>, release: () => ToBroker[]): Promise<void> {
     const key = hello.key ?? String(hello.pid)
     const existing = this.registry.byLaunchKey(key)
     let session: Session
     if (existing && !existing.ended) {
+      // Two Claude Code processes under one launch key: a `claude` run from inside a session's own terminal
+      // inherits CLAUDE_SLACK_SESSION from its parent, so both hellos carry the same key. Handing the
+      // connection to whichever asks last (the old behavior) made the two fight over it every reconnect.
+      // The one whose process is actually still running keeps it; the new hello is turned away.
+      if (hello.pid !== existing.pid && processAlive(existing.pid)) {
+        conn.send({ type: 'bye', reason: `another Claude Code process (pid ${existing.pid}) already owns this run` })
+        conn.close()
+        const warnKey = `${key}:${hello.pid}`
+        if (!this.pidCollisionWarned.has(warnKey)) {
+          this.pidCollisionWarned.add(warnKey)
+          this.logAt('WARN', 'session', `second process for this run refused: pid ${hello.pid} vs running ${existing.pid}`, this.tag(existing))
+          const note = `⚠️ 같은 대화가 다른 Claude 프로세스로도 떠 있어요. 하나를 끄세요: \`tmux kill-pane -t ${existing.pane ?? '<pane>'}\``
+          this.slack.post({ threadTs: existing.threadTs, text: note }).catch(() => {})
+        }
+        return
+      }
       session = existing
       session.conn?.close()
+      session.pid = hello.pid
     } else {
       session = {
         key,

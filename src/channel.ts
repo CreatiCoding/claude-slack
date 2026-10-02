@@ -94,10 +94,15 @@ function send(msg: ToBroker): void {
   broker?.send(msg)
 }
 
+// Another process already owns this run: reconnecting at the normal pace would just be refused again
+// every few seconds. Slowed way down instead of stopped outright, in case the other one later exits.
+let byeAt: number | undefined
+
 async function onBrokerMessage(msg: ToChannel): Promise<void> {
   switch (msg.type) {
     case 'hello_ack':
       boundThread = msg.threadTs
+      byeAt = undefined
       log(`bound to Slack thread ${boundThread}`)
       break
     case 'inbound':
@@ -112,6 +117,10 @@ async function onBrokerMessage(msg: ToChannel): Promise<void> {
         params: { request_id: msg.requestId, behavior: msg.behavior },
       })
       break
+    case 'bye':
+      byeAt = Date.now()
+      log(`broker turned this connection away: ${msg.reason}; backing off`)
+      break
   }
 }
 
@@ -120,6 +129,7 @@ async function onBrokerMessage(msg: ToChannel): Promise<void> {
 const FAST_RECONNECT_MS = 500
 const FAST_RECONNECT_WINDOW_MS = 30_000
 const SLOW_RECONNECT_MS = 5_000
+const BYE_BACKOFF_MS = 60_000
 
 async function connectLoop(): Promise<void> {
   let warned = false
@@ -144,8 +154,8 @@ async function connectLoop(): Promise<void> {
         warned = true
       }
     }
-    const fast = Date.now() - lostAt! < FAST_RECONNECT_WINDOW_MS
-    await new Promise((r) => setTimeout(r, fast ? FAST_RECONNECT_MS : SLOW_RECONNECT_MS))
+    const delay = byeAt !== undefined ? BYE_BACKOFF_MS : Date.now() - lostAt! < FAST_RECONNECT_WINDOW_MS ? FAST_RECONNECT_MS : SLOW_RECONNECT_MS
+    await new Promise((r) => setTimeout(r, delay))
   }
 }
 

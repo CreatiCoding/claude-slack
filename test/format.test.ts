@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activityDetails, activityLine, activitySources, chunk, describeError, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
+import { activityDetails, activityLine, activitySources, chunk, describeError, processAlive, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
 import { decodeAnswer, decodeResume, encodeResume, OPTION_VALUE_MAX } from '../src/actions.ts'
 import { alertBlock, todoPlanBlock } from '../src/format.ts'
 
@@ -320,4 +320,9 @@ test('toMrkdwn 은 표를 줄 목록으로 바꾼다 (폰에서 | 가 그대로 
   assert.match(toMrkdwn('| 이름 | 전 | 후 |\n|--|--|--|\n| a | 1 | 2 |'), /• \*a\*: 전 1 · 후 2/)
   // Tables inside code fences are left alone.
   assert.match(toMrkdwn('```\n| a | b |\n|--|--|\n| 1 | 2 |\n```'), /\| a \| b \|/)
+})
+
+test('processAlive: 지금 살아 있는 프로세스는 참, 없는 pid 는 거짓', () => {
+  assert.equal(processAlive(process.pid), true)
+  assert.equal(processAlive(999999), false)
 })

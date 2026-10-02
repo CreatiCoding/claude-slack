@@ -450,6 +450,16 @@ function errorCode(err: unknown): string | undefined {
   return typeof data?.error === 'string' ? data.error : undefined
 }
 
+/** Whether a pid still names a running process (POSIX: signal 0 is a no-op existence check, no permission needed on the same user's own process). */
+export function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function describeError(err: unknown): string {
   const code = errorCode(err)
   if (code) {

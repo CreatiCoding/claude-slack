@@ -1954,3 +1954,36 @@ test('기다려도 끝내 다시 붙지 않으면, 유예 시간이 끝난 뒤 �
   await t2.broker.handleSlackMessage({ user: 'U1', text: '아무도 안 옴', ts: '9.9', threadTs: s.ack, channel: 'C1' })
   assert.ok(t2.slack.posts.some((p) => /연결된 세션이 없습니다/.test(p.text)), '유예 시간이 끝나면 결국 알린다')
 })
+
+test('같은 실행 키로 두 번째 Claude 프로세스가 붙으려 하면: 기존 pid 가 살아 있으면 거절(bye)하고 기존 연결을 그대로 둔다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%3', pid: process.pid }) // 지금 테스트 프로세스 자신의 pid: 틀림없이 살아 있다.
+  await hook(t.socketPath, process.pid, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+
+  const intruder = await connect(t.socketPath)
+  const intruderInbox: unknown[] = []
+  intruder.on('message', (m) => intruderInbox.push(m))
+  intruder.send({ type: 'hello', role: 'channel', key: String(process.pid), pid: 999999, sessionId: 's1', cwd: '/home/u/proj', threadTs: s.ack })
+  await until(() => intruderInbox.length > 0, 'bye 를 받는다')
+  assert.deepEqual(intruderInbox, [{ type: 'bye', reason: `another Claude Code process (pid ${process.pid}) already owns this run` }])
+  assert.ok(t.slack.posts.some((p) => p.threadTs === s.ack && /같은 대화가 다른 Claude 프로세스로도 떠 있어요/.test(p.text)), '스레드에 경고')
+
+  // 기존 연결은 멀쩡해서, 거기로 보낸 메시지는 그대로 전달된다.
+  await t.broker.handleSlackMessage({ user: 'U1', text: '여전히 살아있니', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await until(() => s.inbox.some((m) => (m as { text?: string }).text === '여전히 살아있니'), '기존 연결로 전달된다')
+  s.conn.close()
+  intruder.close()
+  t.close()
+})
+
+test('같은 실행 키인데 기존 pid 가 이미 죽었으면, 새 프로세스가 넘겨받고 session.pid 를 바꾼다', async () => {
+  const t = await setup()
+  const deadPid = 999998 // 거의 확실히 존재하지 않는 pid.
+  const s = await shim(t.socketPath, { tmuxPane: '%3', pid: deadPid })
+  const s2 = await shim(t.socketPath, { tmuxPane: '%3', pid: 999997, key: String(deadPid), threadTs: s.ack })
+  assert.equal(s2.ack, s.ack, '같은 스레드를 넘겨받는다')
+  await t.broker.handleSlackMessage({ user: 'U1', text: '새 프로세스로 전달돼?', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await until(() => s2.inbox.some((m) => (m as { text?: string }).text === '새 프로세스로 전달돼?'), '새 연결로 전달된다')
+  s2.conn.close()
+  t.close()
+})
