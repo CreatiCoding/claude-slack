@@ -1801,7 +1801,7 @@ cache-control: no-store
   1. IF 세션 상태가 `waiting` 이거나 열린 권한 요청이 있음 THEN 대기 시작 시각이 있으면 루트 메시지를 갱신한다(경과 시간 표시). 5단계로.
   2. 화면을 읽는다. 다이얼로그를 찾는다(REQ-F-029). 찾았으면 5단계로.
   3. 턴이 열려 있고 화면이 "중단됨" 상태(§4.3.9)면: 서명 `stuck|interrupted` 가 직전과 다를 때 INFO 로그, 턴을 닫고, 조용함 안내를 지우고, 정지 카드(§4.3.15: `[<@수신자> ]⏸️ 작업이 중단된 채 다음 지시를 기다리고 있습니다. 이어서 하려면 *계속해* 를 누르거나 새 지시를 쓰세요.` + 버튼 `▶️ 계속해`(값 `continue`, primary), `🖥 화면`(값 `screen`))를 올리고, 대기 사유 `instruction`, Slack 상태 `suspended`. 5단계로.
-  4. 턴이 열려 있고 화면이 유휴 프롬프트(§4.3.9)이고 마지막 활동 뒤 15,000 ms 이상 지났으면: WARN 로그 `idle prompt with an open turn; closing it (Stop hook missed?)`, 턴을 끝낸다(REQ-F-018, 최종 글 `""`), 붙잡은 메시지 풀기를 시도한다. 5단계로. 그 외에 턴이 열려 있고 조용한 시간 ≥ 90,000 ms 이면 조용함 안내를 올리거나 고친다:
+  4. 턴이 열려 있고 화면이 유휴 프롬프트(§4.3.9)이고 마지막 활동 뒤 15,000 ms 이상 지났고 트랜스크립트로 턴이 열려 있지 않으면(§4.3.9 `transcriptTurnLooksOpen`): WARN 로그 `idle prompt with an open turn; closing it (Stop hook missed?)`, 턴을 끝낸다(REQ-F-018, 최종 글 `""`), 붙잡은 메시지 풀기를 시도한다. 5단계로. 그 외에 턴이 열려 있고 조용한 시간 ≥ 90,000 ms 이면 조용함 안내를 올리거나 고친다:
      - 실행 중 도구가 있으면 본문 ``실행 중: `<truncate(제목, 80)>`, …``. 없으면 처음 1회 화면 그림을 `⏳ <duration>째 새 출력이 없습니다. 터미널 화면` 설명글로 올리고(REQ-F-038) 본문 `터미널 화면은 위 이미지를 보세요.`. 그림을 못 올렸으면 화면 요약(§4.3.9, 12줄)이 있을 때 `터미널 화면:\n` + 코드 블록(`truncate(…, 2500)`), 없을 때 `터미널에 새로 표시된 내용이 없습니다.`.
      - 글 = ``⏳ <duration>째 <작업 중입니다｜새 출력이 없습니다>. <본문>\n`:screen` 전체 화면 · `:esc` 중단``. 블록 = alert(`<duration>째 <작업 중: <제목, …>｜새 출력이 없습니다>`, level `info`) + markdown(``<본문>\n\n`:screen` 전체 화면 · `:esc` 중단``).
      - 같은 턴에서는 메시지 1개를 고쳐 쓴다.
@@ -1876,9 +1876,9 @@ cache-control: no-store
 - 처리 규칙:
   1. "작업 중이었나" = 턴이 열려 있음. Escape 를 보낸다. 작업 중이었으면 `escAt = 지금`. INFO 로그 `sent`.
   2. 1,000 ms(설정 `escSettleMs`) 기다린 뒤 화면을 읽는다(실패하면 빈 화면).
-  3. 멈춤 판정 = 화면이 "중단됨" 상태이거나, (유휴 프롬프트이고 작업 중이었음). INFO 로그 `result`.
+  3. 멈춤 판정 = 화면이 "중단됨" 상태이거나, (유휴 프롬프트이고 작업 중이었고 트랜스크립트로 턴이 열려 있지 않음(§4.3.9 `transcriptTurnLooksOpen`) — 화면이 유휴로 보여도 트랜스크립트가 아직 열려 있으면 "아직 일하는 중"으로 본다). INFO 로그 `result`.
   4. 멈췄으면: 턴을 닫고, 서명 `stuck|interrupted` 를 기억하고, `⏹️ 멈췄습니다. 다음 지시를 기다립니다.` 로 답하고, 대기 사유 `instruction`, Slack 상태 `suspended`. 예약 새로고침이 있으면 그 실행을 시도하고(REQ-F-037), 없으면 붙잡은 메시지를 전달한다(REQ-F-012 의 3~7단계, 사유 `esc`).
-  5. 멈추지 않았고, 작업 중이 아니었고, 화면에 `esc to interrupt`(대소문자 무시)가 없으면: `⏹️ 이미 유휴 상태였습니다. 중단할 작업이 없습니다.` + (화면에 `❯` 뒤에 글이 있는 줄이 있으면 ``  입력칸에 보내지 않은 글이 남아 있습니다 (`:screen` 으로 확인). ``).
+  5. 멈추지 않았고, 작업 중이 아니었고, 일하는 중이 아니면(§4.3.9 `WORKING_RE`): `⏹️ 이미 유휴 상태였습니다. 중단할 작업이 없습니다.` + (화면에 `❯` 뒤에 글이 있는 줄이 있으면 ``  입력칸에 보내지 않은 글이 남아 있습니다 (`:screen` 으로 확인). ``).
   6. 그 외: ``⏹️ Esc를 보냈지만 터미널에 아직 작업 표시가 남아 있습니다. 잠시 뒤 `:screen` 으로 확인하세요.``
   7. Slack 의 기본 중단 버튼(IF-080 `agent_session_stopped`)은 중단하지 않는다: 스레드에 ``중단하려면 `:esc` 를 입력하세요. 이 버튼으로는 중단되지 않습니다 (실수로 눌리기 쉬워서요).`` 를 올리고 Slack 상태를 턴이 열려 있으면 `processing`, 아니면 `active` 로 되돌린다.
 - 출력: 응답 1줄(버튼이면 누른 사람에게만)
@@ -4405,8 +4405,10 @@ Markdown → Slack mrkdwn `toMrkdwn(md)`:
 | 이름 | 규칙 |
 |---|---|
 | 화면 요약 `screenDigest(화면, N = 12)` | 줄 끝 공백을 떼고, 빈 줄과 "소음 줄"을 뺀 뒤 마지막 N 줄을 `\n` 으로 잇는다. 소음 줄: ① `^[\s─▔━═_╌╍│\|└┘┌┐├┤┬┴┼.-]*$` ② `\bTip:`(대소문자 무시) ③ `shift\+tab to cycle\|esc to interrupt\|for agents\|to manage\|\? for shortcuts`(대소문자 무시) ④ `^\s*[❯>]\s*$` ⑤ `tmux detected\|scroll with PgUp`(대소문자 무시) |
-| 중단됨 상태 | `Interrupted\s*[·•]\s*What should Claude do instead\?`(대소문자 무시)에 맞는 마지막 줄이 있고, 그 아래 줄이 모두 (빈 줄, `❯` 로 시작, 테두리만(`^[\s─▔━═_╌╍│\|]+$`), `for shortcuts\|to cycle\|for agents\|\/effort\|mode on\|bypass` 포함) 중 하나이고, 화면에 `esc to interrupt`(대소문자 무시)가 없을 때 |
-| 유휴 프롬프트 | 중단됨 상태가 아니고, `^\s*❯\s*$` 인 줄이 있고, 화면에 `esc to interrupt` 가 없을 때 |
+| 일하는 중 `WORKING_RE` | `esc to interrupt`(대소문자 무시) 또는 `^\s*[✻✢✶✳✽✦*·]\s+\S+…\s*\(\d`(여러 줄 모드, 대소문자 무시) — 오래 도는 도구 중에는 힌트 문구 없이 스피너 줄(`✽ Flibbertigibbeting… (13m 20s · ↓ 14.5k tokens)`)만 뜨는 화면도 있다 |
+| 중단됨 상태 | `Interrupted\s*[·•]\s*What should Claude do instead\?`(대소문자 무시)에 맞는 마지막 줄이 있고, 그 아래 줄이 모두 (빈 줄, `❯` 로 시작, 테두리만(`^[\s─▔━═_╌╍│\|]+$`), `for shortcuts\|to cycle\|for agents\|\/effort\|mode on\|bypass` 포함) 중 하나이고, 일하는 중이 아닐 때 |
+| 유휴 프롬프트 | 중단됨 상태가 아니고, `^\s*❯\s*$` 인 줄이 있고, 일하는 중이 아닐 때 |
+| 트랜스크립트로 턴이 열려 있는지 `transcriptTurnLooksOpen(경로, N = 262,144)` | 트랜스크립트 끝 N byte 에서, 맨 끝 항목이 결과 없는 tool_use 이거나 아직 Claude 가 답하지 않은 user 줄(tool_result 포함)이면 참(= 화면이 유휴로 보여도 턴은 열려 있다). 맨 끝이 글로 끝난 assistant 항목이면 거짓. 파일을 못 읽으면 거짓(화면만 보는 판정에 맡긴다) |
 | 입력칸에 글 있음 `inputBoxHas(화면, 머리)` | 머리가 빈 문자열이면 거짓. 가로선 줄(`^[\s─━]*[─━]{20,}[\s─━]*$`)이 2개 미만이면 거짓. 마지막 두 가로선 사이의 줄 가운데 `^\s*❯\s*\S` 에 맞고 머리를 포함하는 줄이 있으면 참 |
 | effort | `\bwith (low\|medium\|high\|xhigh\|max) effort\b`, 없으면 `\b(low\|medium\|high\|xhigh\|max)\s*·\s*\/effort`(대소문자 무시). 첫 묶음의 소문자 |
 | 권한 모드(위에서 아래로 첫 번째) | `auto mode on` → `auto`. `accept edits on` → `acceptEdits`. `plan mode on` → `plan`. `bypass(ing)? permissions` → `bypassPermissions`. `manual mode on` → `default`. 모두 대소문자 무시. 없으면 값 없음 |

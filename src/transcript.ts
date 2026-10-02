@@ -259,3 +259,50 @@ export function lastModelInTranscript(path: string, tailBytes = 256 * 1024): str
   }
   return undefined
 }
+
+/**
+ * Whether a turn is still open, read from the transcript alone, for the moment a screen-only judgement
+ * (the input box looks idle) would otherwise close it. The screen can read as idle while Claude Code is
+ * still between steps — a tool call just finished and the next one has not printed yet, or the model's
+ * next message has not started — so the last thing actually written settles it: a tool call with no
+ * result yet, or a result/message Claude has not answered, means the turn is open; a final piece of text
+ * means it answered and the turn really is done.
+ */
+export function transcriptTurnLooksOpen(path: string, tailBytes = 262_144): boolean {
+  let fd: number | undefined
+  try {
+    fd = openSync(path, 'r')
+    const size = statSync(path).size
+    const start = Math.max(0, size - tailBytes)
+    const buf = Buffer.alloc(size - start)
+    readSync(fd, buf, 0, buf.length, start)
+    const lines = buf.toString('utf8').split('\n').filter((l) => l.trim())
+    // A tail that does not start at byte 0 may begin mid-record; that partial line is dropped.
+    if (start > 0 && lines.length) lines.shift()
+    let last: 'text' | 'tool_use' | 'pending' | undefined
+    for (const line of lines) {
+      let entry: { type?: string; isSidechain?: boolean; message?: { content?: unknown } }
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (entry.isSidechain) continue
+      const content = entry.message?.content
+      if (entry.type === 'assistant' && Array.isArray(content)) {
+        for (const block of content as Array<Record<string, unknown>>) {
+          if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) last = 'text'
+          else if (block.type === 'tool_use') last = 'tool_use'
+        }
+      } else if (entry.type === 'user') {
+        last = 'pending'
+      }
+    }
+    return last === 'tool_use' || last === 'pending'
+  } catch {
+    // Unreadable: fall back to the screen-only judgement that called this.
+    return false
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+}

@@ -21,7 +21,9 @@ export interface StuckState {
 const INTERRUPTED_RE = /Interrupted\s*[·•]\s*What should Claude do instead\?/i
 /** The prompt box with nothing typed and no work indicator: Claude is simply waiting. */
 const EMPTY_PROMPT_RE = /^\s*❯\s*$/m
-const WORKING_RE = /esc to interrupt/i
+// `esc to interrupt` is the familiar hint; newer Claude Code also shows only a spinner line
+// (`✽ Flibbertigibbeting… (13m 20s · ↓ 14.5k tokens)`) while a long tool call runs, with no hint text at all.
+const WORKING_RE = /esc to interrupt|^\s*[✻✢✶✳✽✦*·]\s+\S+…\s*\(\d/im
 
 /**
  * Read a stuck state off a screen. Only states that are unambiguous on the

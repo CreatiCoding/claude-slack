@@ -927,3 +927,39 @@ test('inputBoxHas: 입력창(마지막 두 줄 사이)의 미전송 텍스트만
   assert.equal(inputBoxHas('❯ 지금 보낸 메시지입니다', '지금 보낸 메시지'), false, '상자가 없는 화면')
   assert.equal(inputBoxHas(idle('❯ 다른 글'), '지금 보낸 메시지'), false, '다른 텍스트')
 })
+
+// ---------------------------------------------------------------- claude-web 이관: 지금 화면에서도 "일하는 중"을 알아본다 (REQ-F-048/REQ-F-050, §4.3.9)
+
+test('detectStuckState: 힌트 문구 없이 스피너 줄만 있어도 일하는 중으로 본다', () => {
+  const spinner = '✽ Flibbertigibbeting… (13m 20s · ↓ 14.5k tokens)\n\n❯ \n'
+  assert.equal(detectStuckState(spinner), null, '스피너만 있어도 유휴로 오판하지 않는다')
+  assert.equal(detectStuckState('✻ Pondering… (2s · ↑ 100 tokens)\n❯ \n'), null)
+  assert.equal(detectStuckState('그냥 글\n❯ \n')?.kind, 'idle-prompt', '정말 유휴일 때는 그대로 잡는다')
+})
+
+test('transcriptTurnLooksOpen: 결과 없는 tool_use 나 아직 답하지 않은 메시지면 열린 턴으로 본다', async () => {
+  const { transcriptTurnLooksOpen } = await import('../src/transcript.ts')
+  const path = join(mkdtempSync(join(tmpdir(), 'turn-open-')), 't.jsonl')
+  writeFileSync(path, assistant({ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'sleep 10' } }))
+  assert.equal(transcriptTurnLooksOpen(path), true, '결과 없는 tool_use')
+  appendFileSync(path, toolResult('tu1', '길게 걸림'))
+  assert.equal(transcriptTurnLooksOpen(path), true, '결과는 왔지만 아직 Claude 가 답하지 않음')
+  appendFileSync(path, assistant({ type: 'text', text: '다 됐습니다.' }))
+  assert.equal(transcriptTurnLooksOpen(path), false, '글로 끝난 답이면 닫힌 턴')
+  assert.equal(transcriptTurnLooksOpen(path + '.none'), false, '읽을 수 없으면 기존(화면만 보는) 판정에 맡긴다')
+})
+
+test('onStall: 화면은 유휴처럼 보여도 트랜스크립트가 아직 안 끝났으면(tool_use 대기) 턴을 닫지 않는다', async () => {
+  const t = await setup({ stallMs: 30, quietMs: 100_000 })
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await startTool(t)
+  appendFileSync(t.transcript, toolResult('tu1', '결과는 왔지만 다음 도구를 또 부를 참'))
+  appendFileSync(t.transcript, assistant({ type: 'tool_use', id: 'tu2', name: 'Bash', input: { command: 'sleep 10' } }))
+  t.tmux.screen = '❯ \n' // 화면만 보면 완전한 유휴 프롬프트
+  await tick(150)
+  assert.ok(t.broker.sessions[0]?.turn, '턴이 아직 열려 있다 (화면만 보고 닫지 않았다)')
+  s.conn.close()
+  t.close()
+})

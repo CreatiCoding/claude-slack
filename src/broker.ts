@@ -18,7 +18,7 @@ import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
 import { DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
-import { lastModelInTranscript, transcriptPathFor, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
+import { lastModelInTranscript, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
@@ -2047,7 +2047,12 @@ export class Broker {
       if (session.turn && (await this.surfaceStuck(session, screen))) return this.armStall(session)
       // A turn whose screen shows a bare idle prompt: the Stop hook never reached us. Close the turn
       // ourselves rather than calling the session busy forever (and posting the screen every 90s).
-      if (session.turn && detectStuckState(screen)?.kind === 'idle-prompt' && Date.now() - (session.stallSince ?? 0) >= (this.cfg.stallMs ?? STALL_MS)) {
+      if (
+        session.turn &&
+        detectStuckState(screen)?.kind === 'idle-prompt' &&
+        Date.now() - (session.stallSince ?? 0) >= (this.cfg.stallMs ?? STALL_MS) &&
+        !(session.transcriptPath && transcriptTurnLooksOpen(session.transcriptPath))
+      ) {
         this.logAt('WARN', 'stall', 'idle prompt with an open turn; closing it (Stop hook missed?)', this.tag(session))
         await this.finishTurn(session, '', (text) => this.slack.post({ threadTs: session.threadTs, text }))
         await this.releaseHeldIfIdle(session, 'idle prompt')
@@ -3789,7 +3794,10 @@ export class Broker {
     await sleep(this.cfg.escSettleMs ?? ESC_SETTLE_MS)
     const screen = await this.tmux.capture(c.pane).catch(() => '')
     const stuck = detectStuckState(screen)
-    const stopped = stuck?.kind === 'interrupted' || (stuck?.kind === 'idle-prompt' && wasBusy)
+    // An idle-looking screen right after Esc can still be mid-step (a tool just finished, the next
+    // line has not printed): trust the transcript's own account of whether Claude has answered.
+    const reallyOpen = wasBusy && stuck?.kind === 'idle-prompt' && !!session.transcriptPath && transcriptTurnLooksOpen(session.transcriptPath)
+    const stopped = (stuck?.kind === 'interrupted' || (stuck?.kind === 'idle-prompt' && wasBusy)) && !reallyOpen
     this.logAt('INFO', 'esc', 'result', this.tag(session, { result: stopped ? 'stopped' : stuck?.kind ?? 'still-working' }))
     if (stopped) {
       if (session.turn) {
