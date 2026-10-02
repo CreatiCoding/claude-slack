@@ -154,8 +154,7 @@ broker = new Broker(
   (pane, done) => autoConfirmDialogs(realTmux, pane, done),
 )
 broker.log = () => {}
-const server = listen(SOCKET_PATH, (c) => broker.onConn(c))
-await new Promise((r) => server.once('listening', r))
+const server = await listen(SOCKET_PATH, (c) => broker.onConn(c))
 
 const failures: string[] = []
 let sawStuck: { since: number; screen: string } | null = null

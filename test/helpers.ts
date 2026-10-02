@@ -222,8 +222,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
     tmux,
   )
   broker.log = () => {}
-  const server = listen(socketPath, (c) => broker.onConn(c))
-  await new Promise((r) => server.once('listening', r))
+  const server = await listen(socketPath, (c) => broker.onConn(c))
   // A restart test needs the second broker to tail the same file as the first.
   const transcript = extra.transcript ?? join(tmpdir(), `cs-${id}.jsonl`)
   if (!extra.transcript) writeFileSync(transcript, '')

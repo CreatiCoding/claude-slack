@@ -42,11 +42,15 @@ slack.events.onCommand((c) => broker.handleCommand(c).catch((e) => log.error('sl
 slack.events.onView((v) => broker.handleView(v).catch((e) => log.error('slack', `view handler failed: ${describeError(e)}`)))
 slack.events.onHomeOpened((u) => broker.handleHomeOpened(u).catch((e) => log.error('slack', `home tab failed: ${describeError(e)}`)))
 
-const server = listen(SOCKET_PATH, (conn) => broker.onConn(conn))
-server.on('error', (err) => {
-  log.error('broker', `cannot listen on ${SOCKET_PATH}: ${describeError(err)} (is another broker running?)`)
+// Checked and bound before slack.start(): a second broker must never join Socket Mode or touch the
+// state files a live one already owns.
+let server
+try {
+  server = await listen(SOCKET_PATH, (conn) => broker.onConn(conn))
+} catch (err) {
+  log.error('broker', describeError(err))
   process.exit(1)
-})
+}
 
 const { botUserId, teamId } = await slack.start()
 log.info('broker', 'up', { pid: process.pid, node: process.version, bot: botUserId, team: teamId, channel: cfg.channelId, socket: SOCKET_PATH, tmux: TMUX_SESSION, log: log.file })

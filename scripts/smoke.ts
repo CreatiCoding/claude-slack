@@ -95,8 +95,7 @@ const broker = new Broker(
   realTmux,
   (pane, done) => autoConfirmDialogs(realTmux, pane, done),
 )
-const server = listen(SOCKET_PATH, (c) => broker.onConn(c))
-await new Promise((r) => server.once('listening', r))
+const server = await listen(SOCKET_PATH, (c) => broker.onConn(c))
 console.log(`${stamp()} broker listening on ${SOCKET_PATH}`)
 
 // Simulate a top-level Slack message: "<cwd> <prompt>"

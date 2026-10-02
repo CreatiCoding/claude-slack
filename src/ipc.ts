@@ -44,17 +44,39 @@ export class Conn extends EventEmitter {
   }
 }
 
-export function listen(path: string, onConn: (conn: Conn) => void): net.Server {
+/** Thrown by `listen` when a socket file is already answering: `cannot listen on <path>: another broker is answering`. */
+export class AnotherBrokerError extends Error {
+  constructor(path: string) {
+    super(`cannot listen on ${path}: another broker is answering`)
+    this.name = 'AnotherBrokerError'
+  }
+}
+
+/**
+ * Bind the socket, but only after checking a leftover file is not a live broker: unlinking and binding
+ * over one, the old behavior, let a second `npm start` steal the socket from a launchd-run broker and
+ * the two then fought over the state files underneath it.
+ */
+export async function listen(path: string, onConn: (conn: Conn) => void): Promise<net.Server> {
   if (existsSync(path)) {
-    // Stale socket from a previous run. If a broker is still alive we
-    // will fail to bind below, which is the right outcome.
+    const answering = await connect(path, 1000).then(
+      (conn) => (conn.close(), true),
+      () => false,
+    )
+    if (answering) throw new AnotherBrokerError(path)
+    // Dead socket file: no server is listening behind it.
     try {
       unlinkSync(path)
     } catch {}
   }
-  const server = net.createServer((socket) => onConn(new Conn(socket)))
-  server.listen(path)
-  return server
+  return new Promise((resolve, reject) => {
+    const server = net.createServer((socket) => onConn(new Conn(socket)))
+    server.once('error', reject)
+    server.listen(path, () => {
+      server.removeListener('error', reject)
+      resolve(server)
+    })
+  })
 }
 
 export function connect(path: string, timeoutMs = 2000): Promise<Conn> {

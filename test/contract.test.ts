@@ -214,8 +214,7 @@ async function harness() {
     tmux,
   )
   broker.log = () => {}
-  const server = listen(socketPath, (c: Conn) => broker.onConn(c))
-  await new Promise((r) => server.once('listening', r))
+  const server = await listen(socketPath, (c: Conn) => broker.onConn(c))
   return { broker, slack, tmux, socketPath, close: () => server.close() }
 }
 

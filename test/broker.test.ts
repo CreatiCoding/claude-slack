@@ -757,8 +757,7 @@ test('a session reconnecting after a broker restart reuses the panel already in 
   const t2 = { ...t, broker: new Broker({ channelId: 'C1', allowedUsers: new Set(['U1']), defaultCwd: '/default', launcher: '/bin/claude-slack', flushMs: 20, transcriptPathFor: () => t.transcript, archiveDir: t.archiveDir, offsetsPath: t.offsetsPath, revivePath: t.revivePath }, t.slack, t.tmux) }
   t2.broker.log = () => {}
   const socketPath = t.socketPath + '.2'
-  const server = listen(socketPath, (c) => t2.broker.onConn(c))
-  await new Promise((r) => server.once('listening', r))
+  const server = await listen(socketPath, (c) => t2.broker.onConn(c))
   const s2 = await shim(socketPath, { tmuxPane: '%13', threadTs: s.ack })
   assert.equal(s2.ack, s.ack)
   assert.equal(panels().length, 1, 'no second panel posted')

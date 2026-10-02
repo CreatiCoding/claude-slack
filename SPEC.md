@@ -976,7 +976,7 @@ cache-control: no-store
   2. 로거를 만든다(REQ-F-087).
   3. 설정을 읽는다. 필수 변수가 하나라도 없으면 ERR-080 으로 끝난다.
   4. Slack 클라이언트와 브로커를 만들고 수신 이벤트 6종(IF-080)의 처리기를 건다. 처리기의 예외는 ERROR 로그 1줄로 남기고 삼킨다.
-  5. IPC 소켓을 연다. 같은 경로의 파일이 있으면 먼저 지운다. 열기에 실패하면 ERR-081 로 끝난다.
+  5. IPC 소켓을 연다: 같은 경로에 파일이 있으면 먼저 1,000 ms 안에 접속해 본다. 응답하면(살아 있는 브로커) 파일을 그대로 두고 ERR-081 로 끝난다. 응답이 없으면(죽은 흔적) 그때 지우고 바인드한다. 이 단계가 끝나야 6단계로 간다.
   6. Slack 에 접속하고 `auth.test` 로 봇 사용자 id 와 팀 id 를 얻는다.
   7. INFO 로그 `up` 을 남긴다(필드 `pid`, `node`, `bot`, `team`, `channel`, `socket`, `tmux`, `log`).
   8. 채널 진입 메시지를 확인한다(REQ-F-045).
@@ -996,9 +996,9 @@ cache-control: no-store
   | 소켓 열기 실패 | ERR-081 | 종료 코드 1 |
   | HTTP 서버 실패 | ERR-082·ERR-083 | 브로커는 계속 돈다 |
 - 경계값: `SLACK_ALLOWED_USERS` 는 `,` 로 나눠 각 항목을 `trim` 하고 빈 항목을 버린다. 항목이 0개가 되는 값(`,` 만 있는 값)은 통과하고 기본 수신자는 `""` 가 된다. `CLAUDE_SLACK_WEB_PORT` 가 숫자가 아니면 `NaN` 이 되어 HTTP 서버 열기가 실패한다(ERR-082)
-- 동시성: 두 번째 브로커는 5단계에서 첫 브로커의 소켓 파일을 지우고 바인드한다. 첫 브로커는 새 접속을 받지 못하게 된다(CON-002: 운영자가 1개만 띄운다)
-- 수용 기준: AC-001
-- 근거: `src/index.ts`, `src/config.ts`(ASM-002)
+- 동시성: 첫 브로커가 살아서 응답하는 동안 두 번째는 5단계에서 ERR-081 로 끝나고 6단계(Slack 접속) 로 가지 않는다(CON-002: 운영자가 1개만 띄운다). 첫 브로커의 소켓 파일은 건드리지 않는다
+- 수용 기준: AC-001, AC-118
+- 근거: `src/index.ts`, `src/config.ts`, `src/ipc.ts` `listen`(ASM-002)
 - 추적: IF-060, IF-080, DM-010, ERR-080~ERR-083
 
 ### REQ-F-002 채널 심의 hello 를 받아 세션을 붙인다
@@ -4867,7 +4867,7 @@ REQ-F-052 의 4·5단계가 전부다. 결정 표:
 | ERR-078 | `MODAL_FOLDER_MISSING` | 개인 | 새 세션 모달의 폴더가 없음 | `` 폴더가 없습니다: `<~경로>` `` | 없음 | 아니오 | 경로를 고친다 |
 | ERR-079 | `TARGET_UNRESOLVED` | 개인 | 채널 지정 명령의 세션을 정하지 못함 | REQ-F-039 1·4·6단계의 원문 | 없음 | 예 | 세션 id 로 지정한다 |
 | ERR-080 | `ENV_MISSING` | 종료 코드 1 | 필수 환경변수 누락 | 표준 오류: `Missing env: <이름, …>. Copy .env.example to .env and fill it in. SLACK_ALLOWED_USERS gates who may talk to your sessions and approve tool calls, so it is required.` | 없음(로거 밖의 예외 출력) | 예(`.env` 를 고쳐) | `.env` 를 채운다 |
-| ERR-081 | `SOCKET_LISTEN_FAILED` | 종료 코드 1 | IPC 소켓을 열지 못함 | 없음 | ERROR(`broker`, `cannot listen on <경로>: <오류 설명> (is another broker running?)`) | 예 | 다른 브로커를 끝낸다 |
+| ERR-081 | `SOCKET_LISTEN_FAILED` | 종료 코드 1 | IPC 소켓을 열지 못함(또는 같은 경로에 이미 응답하는 브로커가 있음) | 없음 | ERROR(`broker`, `cannot listen on <경로>: another broker is answering` 또는 그 밖의 바인드 오류 설명) | 예 | 다른 브로커를 끝낸다 |
 | ERR-082 | `WEB_SERVER_FAILED` | 로그 | HTTP 서버를 만들지 못함(REQ-S-001 의 거부 포함) | 없음 | WARN(`admin`, 오류 문장) | 예(설정을 고쳐) | 토큰을 정하거나 주소를 바꾼다 |
 | ERR-083 | `WEB_ADDR_UNAVAILABLE` | 로그 | 바인드 주소가 아직 없음(`EADDRNOTAVAIL`) | 없음 | WARN(`admin`, `<host> is not available yet (Tailscale still coming up?); retrying`: 1번째와 12번째마다. 180회 뒤 `unavailable: <오류>`) | 예(자동, 5,000 ms 간격 180회) | 자동으로 다시 시도한다 |
 | ERR-084 | `ENTRY_MESSAGE_FAILED` | 로그 | 진입 메시지 확인·올리기 실패 | 없음 | ERROR(`slack`, `채널에 안내 메시지를 올리지 못했습니다. <오류 설명>`) | 예(다음 기동) | 봇을 채널에 초대한다 |
@@ -5181,6 +5181,7 @@ Slack 오류 표:
 | AC-115 | REQ-M-005 | 뷰포트 1440×820, 390×844 | DOM 을 검사한다 | 글 없는 `button` 가운데 `aria-label` 이 없는 것 0개. `#toast`·`#conn` 의 `role` = `status`. `html[lang]` = `ko` |
 | AC-116 | REQ-M-006 | §2.6 의 환경 | `npm test`, `node scripts/qa-web.ts` | 둘 다 실패 0건 |
 | AC-117 | REQ-F-026 | 전부 허용 꺼짐, 열린 권한 요청 `abcde`, `fghij` | 답글 `:auto on` | 스레드에 `⚡ *전부 허용* 켬 · …`. 채널 심이 `allow` 를 2개 받는다. 열린 권한 요청 0개 |
+| AC-118 | REQ-F-001 | 브로커가 1개 떠서 소켓에 응답하고 있다 | 같은 소켓 경로로 두 번째 브로커를 띄운다 | 두 번째는 종료 코드 1, ERR-081. 소켓 파일은 그대로고 첫 브로커가 계속 응답한다(Slack 에 두 번째가 접속하지 않는다) |
 
 ### 5.2 추적성 매트릭스
 
@@ -5188,7 +5189,7 @@ Slack 오류 표:
 
 | REQ ID | 출처 | AC ID | 영향 모듈 |
 |---|---|---|---|
-| REQ-F-001 | 원문 `src/index.ts`, `src/config.ts` | AC-001 | `index.ts`, `config.ts`, `log.ts` |
+| REQ-F-001 | 원문 `src/index.ts`, `src/config.ts`, `src/ipc.ts` | AC-001 | `index.ts`, `config.ts`, `log.ts`, `ipc.ts` |
 | REQ-F-002 | 원문 `attachSession` | AC-002 | `broker.ts`, `registry.ts`, `ipc.ts` |
 | REQ-F-003 | 원문 `handleHook` | AC-003 | `broker.ts` |
 | REQ-F-004 | 원문 `isDuplicateHook` | AC-004 | `broker.ts`, `dedupe.ts` |
