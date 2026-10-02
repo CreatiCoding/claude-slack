@@ -1912,3 +1912,46 @@ test('주입 확인: Enter 로 다시 거는 재시도는 횟수가 이어져 3�
   s.conn.close()
   t.close()
 })
+
+test('브로커 재시작 직후 몇 초 동안은, 다시 붙기 전에 온 답글을 버리지 않고 기다렸다가 전달한다 (claude-web 이관: REQ-F-050)', async () => {
+  const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
+  const t = await setup({ revivePath })
+  const s = await shim(t.socketPath, { tmuxPane: '%3', sessionId: 'sess-wait', cwd: '/home/u/proj' })
+  t.broker.saveState()
+  s.conn.close() // 프로세스는 살아 있지만(실제로는 재시작 중), 아직 붙지 않았다.
+  t.close()
+
+  const t2 = await setup({ revivePath, startupGraceMs: 2000, reattachPollMs: 20 })
+  // 답글이 재시작 직후, 아직 아무도 다시 붙기 전에 도착한다.
+  const replied = t2.broker.handleSlackMessage({ user: 'U1', text: '아직 거기 있어?', ts: '9.9', threadTs: s.ack, channel: 'C1' })
+  await tick(10)
+  assert.ok(t2.slack.reactions.includes('+eyes@9.9'), '기다리는 동안 👀 를 단다')
+  assert.ok(!t2.slack.posts.some((p) => /연결된 세션이 없습니다/.test(p.text)), '아직 포기하지 않는다')
+
+  // 그 사이 셰임(같은 실행 키 아님, 재시작된 프로세스)이 같은 스레드로 다시 붙는다.
+  const s2 = await shim(t2.socketPath, { tmuxPane: '%3', sessionId: 'sess-wait', cwd: '/home/u/proj', threadTs: s.ack })
+  await replied
+  await until(() => s2.inbox.some((m) => (m as { text?: string }).text === '아직 거기 있어?'), '다시 붙은 세션으로 전달된다')
+  s2.conn.close()
+  t2.close()
+})
+
+test('브로커 재시작 직후라도, 재시작 기록에 없는(원래 없었던) 스레드는 바로 "연결된 세션 없음"이라고 말한다', async () => {
+  const t = await setup({ startupGraceMs: 2000, reattachPollMs: 20 })
+  await t.broker.handleSlackMessage({ user: 'U1', text: '아무 스레드', ts: '9.9', threadTs: '1.234', channel: 'C1' })
+  assert.ok(t.slack.posts.some((p) => /연결된 세션이 없습니다/.test(p.text)))
+  assert.ok(!t.slack.reactions.includes('+eyes@9.9'), '기록에 없으니 기다리지 않는다')
+})
+
+test('기다려도 끝내 다시 붙지 않으면, 유예 시간이 끝난 뒤 포기하고 알린다', async () => {
+  const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
+  const t = await setup({ revivePath })
+  const s = await shim(t.socketPath, { tmuxPane: '%3', sessionId: 'sess-gone', cwd: '/home/u/proj' })
+  t.broker.saveState()
+  s.conn.close()
+  t.close()
+
+  const t2 = await setup({ revivePath, startupGraceMs: 60, reattachPollMs: 10 })
+  await t2.broker.handleSlackMessage({ user: 'U1', text: '아무도 안 옴', ts: '9.9', threadTs: s.ack, channel: 'C1' })
+  assert.ok(t2.slack.posts.some((p) => /연결된 세션이 없습니다/.test(p.text)), '유예 시간이 끝나면 결국 알린다')
+})

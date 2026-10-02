@@ -1267,7 +1267,7 @@ cache-control: no-store
 - 경계값: 글이 `yes abcde` 형식(정규식 `^\s*(y|yes|n|no)\s+([a-km-z]{5})\s*$`, 대소문자 무시)이면 권한 응답이다. `ok abcde`, 4글자·6글자 id, `l` 이 든 id 는 일반 메시지다. 공백만 있는 글은 일반 메시지로 주입된다
 - 동시성: 메시지는 도착한 순서대로 처리를 시작한다. 붙잡기·전달의 순서는 REQ-F-011 이 정한다
 - 수용 기준: AC-010
-- 근거: `src/broker.ts` `handleSlackMessage`(ASM-002)
+- 근거: `src/broker.ts` `handleSlackMessage`·`awaitReattach`(ASM-002)
 - 추적: §4.3.3, REQ-F-011, REQ-F-024, REQ-F-034, §5.3 GT-06
 
 ### REQ-F-011 메시지를 세션에 주입하거나 붙잡는다
@@ -2260,7 +2260,7 @@ cache-control: no-store
 - 입력: 살아 있는 세션 가운데 대화 id 를 아는 것
 - 처리 규칙:
   1. 스레드 링크 파일(DM-012)을 쓴다(바뀐 것이 있을 때).
-  2. 세션마다 재시작 기록(DM-008)을 실행 키로 적는다: `sessionId`, `cwd`, `threadTs`, `rootTs`, `recipient`(없으면 기본 수신자), 그리고 값이 있을 때만 `held`, `holdNoticeTs`, `pendingPermissions`(`msgTs`, `pid`, `requestId`, `toolName`, `at`), `notify`, `view`, `title`, `manualTitle`, `autoAllow: true`, `model`, `launchModel`(= `launchModel ?? model`), `refreshAfter`, `effort`.
+  2. 세션마다 재시작 기록(DM-008)을 실행 키로 적는다: `sessionId`, `cwd`, `threadTs`, `rootTs`, `pid`, `recipient`(없으면 기본 수신자), 그리고 값이 있을 때만 `held`, `holdNoticeTs`, `pendingPermissions`(`msgTs`, `pid`, `requestId`, `toolName`, `at`), `notify`, `view`, `title`, `manualTitle`, `autoAllow: true`, `model`, `launchModel`(= `launchModel ?? model`), `refreshAfter`, `effort`.
   3. 기록의 내용(`lastSeen` 제외)이 직전과 같고 직전 `lastSeen` 뒤 60,000 ms 가 지나지 않았으면 그 기록은 건드리지 않는다. 아니면 `lastSeen = 지금` 으로 바꾼다.
   4. 읽은 위치 파일(DM-009)과 재시작 기록 파일을 바뀐 것이 있을 때만 쓴다.
 - 출력: `live.json`, `offsets.json`, `thread-links.json`
@@ -3038,7 +3038,7 @@ cache-control: no-store
 - 처리 규칙:
   1. stdio 로 MCP 서버를 연다(IF-067).
   2. `CLAUDE_SLACK` 이 없으면 브로커에 접속하지 않는다(표준 오류에 `[claude-slack channel] CLAUDE_SLACK is not set; running inert (start Claude via bin/claude-slack to bridge this session)`).
-  3. MCP 초기화가 끝난 뒤 브로커 접속을 반복한다: 접속되면 `hello`(pid = 부모 pid(없으면 `CLAUDE_PID`), `sessionId` = `CLAUDE_CODE_SESSION_ID`(없으면 `""`), `cwd` = 작업 폴더, `threadTs`·`tmuxPane` 은 값이 있을 때만)를 보낸다. 연결이 닫히거나 접속에 실패하면 5,000 ms 뒤 다시 한다.
+  3. MCP 초기화가 끝난 뒤 브로커 접속을 반복한다: 접속되면 `hello`(pid = 부모 pid(없으면 `CLAUDE_PID`), `sessionId` = `CLAUDE_CODE_SESSION_ID`(없으면 `""`), `cwd` = 작업 폴더, `threadTs`·`tmuxPane` 은 값이 있을 때만)를 보낸다. 연결이 닫히거나 접속에 실패하면 다시 한다: 끊긴(또는 첫 실패) 순간부터 30,000 ms 동안은 500 ms 간격, 그 뒤는 5,000 ms 간격(브로커가 재시작한 직후 몇 초 안에 다시 붙기 위함, REQ-F-050).
   4. 브로커 → Claude Code: `inbound` 는 채널 알림으로, `permission` 은 권한 알림으로 넘긴다(IF-067).
   5. Claude Code → 브로커: 권한 요청 알림은 `permission_request` 로, `reply` 도구는 `reply` 로 넘긴다.
   6. `reply` 도구 검사: 브로커에 붙어 있지 않으면 ERR-085. `files` 가운데 절대 경로가 아니거나 있는 일반 파일이 아닌 것이 있으면 ERR-086(보내지 않는다).
@@ -3347,6 +3347,7 @@ erDiagram
   | `cwd` | string | 절대 경로 | 불가 | 없음 | 아니오 | 해당 없음 | 해당 없음 | 작업 폴더 |
   | `threadTs` | string | `ts` | 불가 | 없음 | 아니오 | 해당 없음 | 해당 없음 | 스레드 |
   | `rootTs` | string | `ts` | 가능 | 없음 | 아니오 | 해당 없음 | 해당 없음 | 루트 메시지 |
+  | `pid` | integer | 프로세스 id | 가능 | 없음 | 아니오 | 해당 없음 | 해당 없음 | Slack 은 `threadTs` 로 세션을 찾지만, `pid` 로 찾는 쪽(예: 어드민 페이지)을 위해 함께 적어 둔다 |
   | `recipient` | string | 사용자 id | 불가 | 기본 수신자 | 아니오 | 해당 없음 | 해당 없음 | 수신자 |
   | `lastSeen` | integer | epoch ms | 불가 | 기록 시각 | 아니오 | 해당 없음 | 해당 없음 | 마지막으로 살아 있던 시각(60,000 ms 정밀도) |
   | `held` | 붙잡은 메시지[] | 해당 없음 | 가능 | 없음 | 아니오 | 해당 없음 | 해당 없음 | DM-003 의 사본 |
@@ -4287,13 +4288,14 @@ Markdown → Slack mrkdwn `toMrkdwn(md)`:
 | 2 | 위의 세션 조건 AND 스레드가 "다시 여는 중" | 쌓아 두고 `eyes` 반응 |
 | 3 | 위의 세션 조건 AND 세션이 끝남 | ERR-056 문장 |
 | 4 | 위의 세션 조건 AND 휴면 스레드 AND 글이 `!`·`:` 로 시작하지 않음 | REQ-F-053 |
-| 5 | 위의 세션 조건 AND 글이 `!` 로 시작하지 않음 | ERR-057 문장 |
-| 6 | 위의 세션 조건(그 외) | 아무것도 하지 않는다 |
-| 7 | 세션이 살아 있음 | 메시지 `ts` → 스레드 대응을 기억하고 이벤트 `user`(via `slack`)를 기록한 뒤 8~11 중 하나 |
-| 8 | 글이 `^\s*(y\|yes\|n\|no)\s+([a-km-z]{5})\s*$`(대소문자 무시)에 맞음 | 권한 응답(REQ-F-024). id = 둘째 묶음의 소문자. 첫 묶음이 `y` 로 시작하면 `allow`, 아니면 `deny` |
-| 9 | 글이 `:` 로 시작 | 스레드 명령(REQ-F-034). 명령 = `:` 뒤를 `trim` 한 것 |
-| 10 | 글이 `/` 또는 `!` 로 시작 | 명령 실행(REQ-F-034 2단계부터). 명령 = 글을 `trim` 한 것 |
-| 11 | 그 외 | 주입(REQ-F-011) |
+| 5 | 위의 세션 조건 AND 재시작 기록에 그 스레드가 있음(REQ-F-050) AND 브로커 시작 뒤 `startupGraceMs`(기본 20,000 ms) 가 지나지 않음 | `eyes` 반응. `REATTACH_POLL_MS`(기본 200 ms)마다 그 스레드에 세션이 있는지 본다(§4.3.9 류의 폴링). 유예 안에 생기면 그 세션으로 8단계부터 계속한다. 안 생기면 글이 `!` 로 시작하지 않을 때 ERR-057 문장 |
+| 6 | 위의 세션 조건 AND 글이 `!` 로 시작하지 않음 | ERR-057 문장 |
+| 7 | 위의 세션 조건(그 외) | 아무것도 하지 않는다 |
+| 8 | 세션이 살아 있음(5단계로 다시 생긴 경우 포함) | 메시지 `ts` → 스레드 대응을 기억하고 이벤트 `user`(via `slack`)를 기록한 뒤 9~12 중 하나 |
+| 9 | 글이 `^\s*(y\|yes\|n\|no)\s+([a-km-z]{5})\s*$`(대소문자 무시)에 맞음 | 권한 응답(REQ-F-024). id = 둘째 묶음의 소문자. 첫 묶음이 `y` 로 시작하면 `allow`, 아니면 `deny` |
+| 10 | 글이 `:` 로 시작 | 스레드 명령(REQ-F-034). 명령 = `:` 뒤를 `trim` 한 것 |
+| 11 | 글이 `/` 또는 `!` 로 시작 | 명령 실행(REQ-F-034 2단계부터). 명령 = 글을 `trim` 한 것 |
+| 12 | 그 외 | 주입(REQ-F-011) |
 
 버튼 처리(위에서 아래로, 첫 번째로 맞는 행에서 끝):
 
@@ -5314,7 +5316,7 @@ Slack 오류 표:
 | GT-03 | §4.3.1 `duration` | 0, 499, 500, 59499, 59500, 60000, 132000, 3599000, 3600000, 3840000, 90061000(ms) | `0초`, `0초`, `1초`, `59초`, `1분`, `1분`, `2분 12초`, `59분 59초`, `1시간 0분`, `1시간 4분`, `25시간 1분` |
 | GT-04 | §4.3.8 `classifyOption` | `Yes` / `Yes, allow all edits during this session (shift+tab)` / `Yes, and don't ask again for git push commands` / `Yes, allow reading from src/ from this project` / `Yes, allow all actions on example.com for this session` / `No, and tell Claude what to do differently (esc)` / `Always allow` / `Type something` / `항상 허용` / `Proceed` / `Cancel` | `allow-once` / `other` / `allow-always` / `allow-always` / `allow-session` / `deny` / `allow-always` / `other` / `allow-always` / `allow-once` / `deny` |
 | GT-05 | REQ-F-005 3단계 | 기본 작업 폴더 `/d`. ① `  /tmp  `(`/tmp` 는 디렉터리) ② `/nope 안녕`(`/nope` 없음) ③ `그냥 글` ④ `""` | ① `{cwd:"/tmp", prompt:""}` ② `{cwd:"/d", prompt:"/nope 안녕"}` ③ `{cwd:"/d", prompt:"그냥 글"}` ④ `{cwd:"/d", prompt:""}` |
-| GT-06 | §4.3.3 8행 | `yes abcde`, `Y abcde`, `no abcle`, `n ABCDE `, `yes abcd`, `yes abcdef`, `ok abcde` | 맞음(`yes`, `abcde`), 맞음(`Y`, `abcde`), 안 맞음(`l` 포함), 맞음(`n`, `ABCDE`), 안 맞음, 안 맞음, 안 맞음 |
+| GT-06 | §4.3.3 9행 | `yes abcde`, `Y abcde`, `no abcle`, `n ABCDE `, `yes abcd`, `yes abcdef`, `ok abcde` | 맞음(`yes`, `abcde`), 맞음(`Y`, `abcde`), 안 맞음(`l` 포함), 맞음(`n`, `ABCDE`), 안 맞음, 안 맞음, 안 맞음 |
 | GT-07 | §4.3.1, REQ-S-001 | `truncate("abcdef", 5)`, `truncate("abcde", 5)`, 짧은 모델 이름 `claude-haiku-4-5-20251001`, `claude-fable-5-1[1m]`, 값 없음. `normalizeMessage('<pasted_content id="1">a\n  b</pasted_content> c')`. Tailscale 판정 `100.64.0.1`, `100.63.255.255`, `100.127.1.1`, `100.128.0.1` | `abcd…`, `abcde`, `haiku-4-5`, `fable-5-1[1m]`, `?`. `a b c`. 참, 거짓, 참, 거짓 |
 | GT-08 | §4.3.4 최근 키 규칙(W = 1,500) | 키 `k` 를 시각 1000, 2499, 3999, 5499 에, 키 `j` 를 5499 에 판정 | 거짓, 참, 거짓, 거짓, 거짓 |
 | GT-09 | REQ-F-064 | 빈 상태에서 차례로: `{op:"move", thread:"1790000000.000001", group:null}`, `{op:"move", thread:"1790000000.000002", group:null, before:"1790000000.000001"}`, `{op:"move", thread:"bad", group:null}`, `{op:"loose", order:["1790000000.000003","1790000000.000002","x","1790000000.000002"]}`, `{op:"create", name:"   "}`, `{op:"delete", id:"nope"}` | 응답: `{ok:true, note:""}`, `{ok:true, note:""}`, `{ok:false, note:"세션을 찾지 못했어요."}`, `{ok:true, note:""}`, `{ok:false, note:"그룹 이름이 비어 있어요."}`, `{ok:false, note:"그룹을 찾지 못했어요."}`. 최종 상태 `{"groups":[],"loose":["1790000000.000003","1790000000.000002"]}` |

@@ -216,6 +216,10 @@ export interface BrokerConfig {
   stallMs?: number
   /** How long the quiet must last before we say anything about it. Tests lower it. */
   quietMs?: number
+  /** How long after start a thread that was alive before shutdown is given to reattach. Tests lower it. */
+  startupGraceMs?: number
+  /** How often to poll for that reattachment. Tests lower it. */
+  reattachPollMs?: number
   /** Override for tests. */
   transcriptPathFor?: (cwd: string, sessionId: string) => string | undefined
   /** How long after injecting a message we expect to see it start a turn. Tests lower it. */
@@ -234,6 +238,10 @@ export interface BrokerConfig {
 
 /** Long enough for a live session's shim to reconnect, so a plain restart revives nothing. */
 const REVIVE_AFTER_MS = 15_000
+/** For this long after a broker start, a thread whose session has not reattached yet is given the benefit of the doubt. */
+const STARTUP_GRACE_MS = 20_000
+/** How often to check whether a session everyone is waiting for has reattached. */
+const REATTACH_POLL_MS = 200
 /** Older than this and the machine has been off long enough that reopening is noise, not recovery. */
 const REVIVE_MAX_AGE_MS = 12 * 60 * 60 * 1000
 /** A dozen sessions waking at once would be a surprise; the newest are the ones in use. */
@@ -417,6 +425,7 @@ export class Broker {
    * and empties it at the very start, before any shim has come back, so a reattaching session found nothing to restore.
    */
   private recordedAtStart: Array<ReviveEntry & { key: string }>
+  private readonly startedAt = Date.now()
   /** Threads whose session was not reopened after a restart; a message in one wakes it. */
   private dormant = new Map<string, ReviveEntry & { key: string }>()
   /** Messages that arrived while a thread's session was being reopened (woken from dormant, or refreshed). */
@@ -1267,6 +1276,7 @@ export class Broker {
         cwd: s.cwd,
         threadTs: s.threadTs,
         rootTs: s.rootTs,
+        pid: s.pid,
         recipient: s.recipient || this.defaultRecipient,
         ...(s.held?.length ? { held: s.held } : {}),
         ...(s.holdNoticeTs ? { holdNoticeTs: s.holdNoticeTs } : {}),
@@ -2574,6 +2584,26 @@ export class Broker {
     return m.text ? `${m.text}\n${attachments.join('\n')}` : attachments.join('\n')
   }
 
+  /**
+   * A thread the previous broker recorded as alive within the window the shutdown cared about
+   * (REQ-F-050): wait for its session to reattach instead of saying there is none, but only
+   * for STARTUP_GRACE_MS after this broker's own start — past that, it really is gone.
+   */
+  private async awaitReattach(threadTs: string): Promise<Session | undefined> {
+    const graceMs = this.cfg.startupGraceMs ?? STARTUP_GRACE_MS
+    const elapsed = Date.now() - this.startedAt
+    if (elapsed >= graceMs) return undefined
+    const record = this.recordedAtStart.find((e) => e.threadTs === threadTs)
+    if (!record) return undefined
+    const deadline = this.startedAt + graceMs
+    while (Date.now() < deadline) {
+      const found = this.registry.byThreadTs(threadTs)
+      if (found && !found.ended) return found
+      await sleep(this.cfg.reattachPollMs ?? REATTACH_POLL_MS)
+    }
+    return this.registry.byThreadTs(threadTs)
+  }
+
   async handleSlackMessage(m: InMsg): Promise<void> {
     if (m.threadTs) this.threadLinks.note(m.threadTs, m.ts)
     if (m.channel !== this.cfg.channelId) return
@@ -2590,7 +2620,7 @@ export class Broker {
     if (!isThreadReply) return this.launchFromSlack(m, text)
 
     const threadTs = m.threadTs!
-    const session = this.registry.byThreadTs(threadTs)
+    let session = this.registry.byThreadTs(threadTs)
     // An ended session stays in the thread lookup, but during a refresh its
     // replacement is already on the way, so what is coming speaks before it.
     // `refreshing` covers the moment between killing the process and its end
@@ -2609,8 +2639,16 @@ export class Broker {
       } else if (session?.ended) {
         await this.slack.post({ threadTs, text: '⚫ 이 세션은 종료되었습니다. 새 세션은 채널에 새 메시지로 시작하세요.' })
       } else if (this.dormant.has(threadTs) && !text.startsWith('!') && !text.startsWith(':')) await this.wakeDormant(this.dormant.get(threadTs)!, { text, user: m.user, ts: m.ts })
-      else if (!text.startsWith('!')) await this.slack.post({ threadTs, text: '이 스레드에 연결된 세션이 없습니다. 새 세션은 채널에 새 메시지로 시작하세요.' })
-      return
+      else if (this.recordedAtStart.some((e) => e.threadTs === threadTs) && Date.now() - this.startedAt < (this.cfg.startupGraceMs ?? STARTUP_GRACE_MS)) {
+        // A broker restart under a live session: the revive record says it was alive, but its shim has
+        // not reconnected yet (it retries every 500 ms for the first 30s). Wait rather than say "no
+        // session" for a thread that is about to have one again.
+        await this.slack.react(m.ts, 'eyes')
+        const reattached = await this.awaitReattach(threadTs)
+        if (reattached) session = reattached
+        else if (!text.startsWith('!')) await this.slack.post({ threadTs, text: '이 스레드에 연결된 세션이 없습니다. 새 세션은 채널에 새 메시지로 시작하세요.' })
+      } else if (!text.startsWith('!')) await this.slack.post({ threadTs, text: '이 스레드에 연결된 세션이 없습니다. 새 세션은 채널에 새 메시지로 시작하세요.' })
+      if (!session || session.ended || session.refreshing) return
     }
     this.noteMsg(m.ts, threadTs)
     this.emitEvent(threadTs, this.userEvent(threadTs, m.ts, text, 'slack'))

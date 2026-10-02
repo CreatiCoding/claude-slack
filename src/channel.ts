@@ -115,25 +115,37 @@ async function onBrokerMessage(msg: ToChannel): Promise<void> {
   }
 }
 
+/** A broker that was just restarted comes back in seconds; retrying fast for a while catches that window
+ *  without hammering a socket that is genuinely down for longer. */
+const FAST_RECONNECT_MS = 500
+const FAST_RECONNECT_WINDOW_MS = 30_000
+const SLOW_RECONNECT_MS = 5_000
+
 async function connectLoop(): Promise<void> {
   let warned = false
+  // Set the moment a connection that was up goes down, or the first failed attempt; cleared on success.
+  let lostAt: number | undefined
   for (;;) {
     try {
       const conn = await connect(SOCKET_PATH)
       broker = conn
       warned = false
+      lostAt = undefined
       conn.send({ type: 'hello', role: 'channel', key: sessionKey(pid), pid, sessionId, cwd: process.cwd(), threadTs, tmuxPane } satisfies ToBroker)
       conn.on('message', (m: ToChannel) => onBrokerMessage(m).catch((e) => log(`handler failed: ${e}`)))
       await new Promise<void>((resolve) => conn.once('close', resolve))
       broker = undefined
+      lostAt ??= Date.now()
       log('broker connection closed; will retry')
     } catch (err) {
+      lostAt ??= Date.now()
       if (!warned) {
-        log(`broker not reachable at ${SOCKET_PATH} (${(err as Error).message}); retrying every 5s`)
+        log(`broker not reachable at ${SOCKET_PATH} (${(err as Error).message}); retrying`)
         warned = true
       }
     }
-    await new Promise((r) => setTimeout(r, 5000))
+    const fast = Date.now() - lostAt! < FAST_RECONNECT_WINDOW_MS
+    await new Promise((r) => setTimeout(r, fast ? FAST_RECONNECT_MS : SLOW_RECONNECT_MS))
   }
 }
 
