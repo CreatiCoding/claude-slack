@@ -2922,7 +2922,7 @@ cache-control: no-store
 - 사후조건: "본 seq" 갱신(탭이 보일 때만)
 - 예외·오류: ERR-096
 - 경계값: 이벤트 0개 → 빈 대화. `seq` 가 이미 가진 것 이하인 이벤트는 버린다. `seq` 가 (가진 마지막 + 1)이 아닌 `ev` → 따라잡기를 실행한다
-- 동시성: 따라잡는 중에 온 `ev` 는 버린다(따라잡기가 포함한다)
+- 동시성: 따라잡는 중에 온 `ev` 는 버리지 않고 모아 둔다(`buf`). 따라잡기가 끝나면 그 가운데 `seq` 가 따라잡기로 받은 것보다 더 새것만 `seq` 순으로 적용한다 — 두 요청의 도착 순서가 뒤바뀌어도(특히 턴의 마지막 `text`·`turn_end`) 잃지 않는다
 - 수용 기준: AC-077
 - 근거: `src/web/app.js` `drawConvo`·`apply`·`flush`·`showOlder`·`userEl`·`toolEl`·`htmlPreview`, `src/web/idb.js`, `src/web/markdown.js`(ASM-002)
 - 추적: UI-03, §4.3.25, REQ-S-008, ERR-096

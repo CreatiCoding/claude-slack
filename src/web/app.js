@@ -57,7 +57,11 @@ const folded = store.get('folded', { recent: true, archives: true })
 
 function thread(ts) {
   let t = threads.get(ts)
-  if (!t) threads.set(ts, (t = { events: [], last: 0, loading: null }))
+  // `buf`: events that arrived over SSE while a catch-up (GET) for this thread was in flight. The two
+  // requests race, so an event from after the GET's snapshot can land before the GET's response does;
+  // dropping it (the old behavior) could leave a turn's last `text`/`turn_end` missing until the next
+  // event happened to arrive. Buffered here instead, and applied once the catch-up finishes.
+  if (!t) threads.set(ts, (t = { events: [], last: 0, loading: null, buf: [] }))
   return t
 }
 const sessionOf = (ts) => sessions.find((s) => s.thread === ts)
@@ -295,7 +299,7 @@ function connect() {
     const { thread: ts, ev } = JSON.parse(e.data)
     if (ts !== current) return // switched away a moment ago; its catch-up covers it next time
     const t = thread(ts)
-    if (t.loading) return
+    if (t.loading) return void t.buf.push(ev) // applied once the catch-up it raced finishes (14)
     if (ev.seq <= t.last) return
     if (ev.seq !== t.last + 1) return void catchUp(ts)
     addEvents(ts, [ev], { live: true })
@@ -409,7 +413,13 @@ async function catchUp(ts) {
     } catch (err) {
       toast('대화를 불러오지 못했어요: ' + err.message, 'err')
     } finally {
+      const buffered = t.buf
+      t.buf = []
       t.loading = null
+      // Only what is still newer than the catch-up's own events (addEvents already applied those and
+      // moved t.last); sorted, since they may have queued out of order while this was in flight.
+      const extra = buffered.filter((e) => e.seq > t.last).sort((a, b) => a.seq - b.seq)
+      if (extra.length) addEvents(ts, extra, { live: true })
     }
   })()
   return t.loading
