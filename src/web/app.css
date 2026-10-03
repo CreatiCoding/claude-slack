@@ -248,7 +248,12 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .activity .ahead > .ic { color: #c96442; }
 .activity .ahead .secs { flex: none; color: var(--muted); }
 @keyframes flow { to { background-position: -200% 0; } }
-.activity .tail { margin-top: 4px; font-size: var(--fs-s); color: var(--muted); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* 15: the whole growing block as markdown, not a clamped two-line tail — it is the answer being written. */
+.activity .tail { margin-top: 4px; font-size: var(--fs-m); color: var(--text); }
+.activity .tail > :first-child { margin-top: 0; }
+.activity .tail > :last-child { margin-bottom: 0; }
+.activity .think-sub { margin-top: 6px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--muted); }
+.activity .think-sub > .ic { color: #c96442; }
 .activity .now { margin-top: 6px; }
 .activity .now pre { max-height: 200px; }
 

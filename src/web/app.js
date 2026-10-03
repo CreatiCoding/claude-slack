@@ -284,13 +284,23 @@ function connect() {
     for (const s of changed) by.set(s.thread, s)
     applySessions(order.map((k) => by.get(k)).filter(Boolean))
   }
-  // What is being written right now (not stored): the activity box shows its last two lines.
+  // What is being written right now (not stored): the activity box shows it as markdown, growing as it comes
+  // in (15). `text` with `from`: grew — append. `text` alone, no `from`: either the first chunk, or the
+  // block changed shape (a thinking pause broke it up) — replace. `thinking`: busy, no block on screen right
+  // now; keep showing what's there and let the "생각 중 · n초" line (renderActivity) carry the wait.
   on('live', (e) => {
-    const { thread: ts, text } = JSON.parse(e.data)
+    const { thread: ts, text, from, thinking } = JSON.parse(e.data)
     if (ts !== current || !view) return
-    view.live = text
-    view.liveAt ??= Date.now()
-    if (!text) view.liveAt = null
+    if (thinking) {
+      view.thinkingAt ??= Date.now()
+      renderActivity()
+      return
+    }
+    view.thinkingAt = null
+    if (from !== undefined && view.live && from === view.live.length) view.live += text
+    else view.live = text
+    if (!view.live) view.liveAt = null
+    else view.liveAt ??= Date.now()
     renderActivity()
   })
   on('ev', (e) => {
@@ -1035,6 +1045,9 @@ function apply(ev, live) {
   switch (ev.type) {
     case 'user': {
       view.turnAt = ev.at
+      view.live = ''
+      view.liveAt = null
+      view.thinkingAt = null
       view.users.set(ev.ts, addRow('user', ev))
       return
     }
@@ -1043,6 +1056,7 @@ function apply(ev, live) {
       view.lastText = ev.text
       view.live = ''
       view.liveAt = null
+      view.thinkingAt = null
       return
     case 'tool':
       view.tools.set(ev.id, addRow('tool', ev, { end: null, closed: false }))
@@ -1710,7 +1724,10 @@ document.addEventListener('click', async (e) => {
 })
 
 // ------------------------------------------------------------------ activity box
-// One box at the bottom while the session works; only its header changes.
+// One box at the bottom while the session works; only its header changes. The "쓰는 중" body (15) is
+// Claude's own markdown (restored from the terminal's SGR colours in src/preview.ts), not a plain-text
+// tail: it grows as the block is written, and a thinking pause between blocks shows as a small line
+// under the text already there rather than clearing it.
 function renderActivity() {
   const box = $('activity')
   const s = current && sessionOf(current)
@@ -1724,7 +1741,8 @@ function renderActivity() {
   for (const t of view.tools.values()) if (!t.end && !t.closed && t.ev.at >= (view.turnAt || 0)) running = t
   // Text already in the timeline that the terminal still shows is not "being written".
   const live = view.live && !(view.lastText && view.lastText.replace(/\s+/g, ' ').includes(view.live.replace(/\s+/g, ' ').slice(0, 60))) ? view.live : ''
-  const since = running ? running.ev.at : live && view.liveAt ? view.liveAt : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
+  const thinking = !running && !!view.thinkingAt
+  const since = running ? running.ev.at : live && view.liveAt ? view.liveAt : thinking ? view.thinkingAt : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
   const secs = Math.max(0, Math.round((Date.now() - since) / 1000))
   const key = running ? 'tool:' + running.ev.id : live ? 'write' : 'think'
   if (box.dataset.key !== key) {
@@ -1733,7 +1751,7 @@ function renderActivity() {
     box.innerHTML = running
       ? `<div class="ahead" role="button">${icon('chevron')}<span class="txt"></span><span class="secs"></span></div>`
       : live
-        ? `<div class="ahead">${icon('edit')}<span class="txt">쓰는 중…</span><span class="secs"></span></div><div class="tail"></div>`
+        ? `<div class="ahead">${icon('edit')}<span class="txt">쓰는 중…</span><span class="secs"></span></div><div class="tail md"></div><div class="think-sub" hidden>${icon('spark')}<span>생각 중</span> <span class="think-secs"></span></div>`
         : `<div class="ahead">${icon('spark')}<span class="txt">생각 중…</span><span class="secs"></span></div>`
     if (running) {
       box.querySelector('.txt').textContent = `도구 실행 중 · ${takeEmoji(running.ev.title).rest}`
@@ -1749,11 +1767,31 @@ function renderActivity() {
   }
   box.hidden = false
   box.querySelector('.secs').textContent = `· ${secs}초`
-  if (live) typeInto(box.querySelector('.tail'), live)
+  if (live) {
+    typeInto(box.querySelector('.tail'), live)
+    const sub = box.querySelector('.think-sub')
+    if (sub) {
+      sub.hidden = !thinking
+      if (thinking) sub.querySelector('.think-secs').textContent = `· ${Math.max(0, Math.round((Date.now() - view.thinkingAt) / 1000))}초`
+    }
+  }
 }
 
-// The preview types on: only the characters that are new since the last one, not the whole text again.
-// When the window slid (the start of the tail moved), find where the old tail's end sits in the new one.
+/** Close a mark a still-mid-write block left open, for display only — never changes the stored text. */
+function closeOpenMarkup(s) {
+  let out = s
+  if ((out.match(/```/g) || []).length % 2 === 1) out += '\n```'
+  if ((out.match(/\*\*/g) || []).length % 2 === 1) out += '**'
+  if ((out.match(/(?<!`)`(?!`)/g) || []).length % 2 === 1) out += '`'
+  return out
+}
+
+// The preview grows on: only what is new since the last draw is kept track of (`typed`), not the whole
+// text redrawn from scratch each frame. When the window slid (the start of the block moved, e.g. a
+// thinking pause reshaped it), find where the old tail's end sits in the new one.
+// Note: the exact reveal speed here (how many characters per animation frame) is a simplified stand-in
+// for matching the speed characters actually arrive at — reproducing that pacing precisely needs the
+// reference implementation's own constants, which this codebase does not have access to.
 let typed = ''
 let typing = null
 function typeInto(el, target) {
@@ -1764,17 +1802,25 @@ function typeInto(el, target) {
     const at = probe ? target.lastIndexOf(probe) : -1
     keep = at >= 0 ? target.slice(0, at + probe.length) : ''
   }
+  const firstReveal = keep === ''
   typed = keep
-  el.textContent = typed
+  const draw = () => (el.innerHTML = md(closeOpenMarkup(typed)))
+  draw()
   cancelAnimationFrame(typing)
+  // A long first chunk (opening a turn already mid-write, or the window having slid right past an anchor)
+  // shows whole rather than typing from nothing up to 400+ characters.
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || (firstReveal && target.length > 400)) {
+    typed = target
+    draw()
+    return
+  }
   const step = () => {
     if (typed.length >= target.length) return
     typed = target.slice(0, typed.length + Math.max(1, Math.ceil((target.length - typed.length) / 20)))
-    el.textContent = typed
+    draw()
     typing = requestAnimationFrame(step)
   }
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) (typed = target), (el.textContent = typed)
-  else typing = requestAnimationFrame(step)
+  typing = requestAnimationFrame(step)
 }
 
 // Stuck to the bottom, stay there when something below grows late (a picture, the activity box).

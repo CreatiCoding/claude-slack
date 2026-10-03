@@ -653,14 +653,20 @@ export class Broker {
     return value
   }
 
-  /** What the session is writing right now (tail of the text on screen), or '' when it is not writing. */
-  async webLive(thread: string): Promise<string> {
+  /**
+   * What the session is writing right now, as markdown — the whole block, not a tail (15). `''` means
+   * genuinely nothing to show (idle, ended, or no pane): the caller clears whatever it was showing.
+   * `undefined` means busy but no text block is on screen right now (a thinking pause between blocks,
+   * or a running tool) — the caller leaves what it was already showing alone rather than blanking it.
+   */
+  async webLive(thread: string): Promise<string | undefined> {
     const s = this.registry.byThreadTs(thread)
     if (!s || s.ended || s.state !== 'busy' || !s.pane) return ''
     try {
-      return writingPreview(await this.tmux.capture(s.pane))
+      const block = writingPreview(await this.tmux.captureAnsi(s.pane))
+      return block === '' ? undefined : block
     } catch {
-      return ''
+      return undefined
     }
   }
 

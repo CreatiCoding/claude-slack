@@ -191,6 +191,51 @@ test('구독: 페이지가 보고 있는 스레드의 이벤트만 그 페이지
   }
 })
 
+test('쓰는 중 미리보기: 늘어난 부분만 from 으로, 생각 중이면 한 번만 알리고 지우지 않는다 (15)', async () => {
+  let queue: (string | undefined)[] = []
+  const api = { ...fakeApi(), webLive: async () => queue.shift() }
+  const server = createAdminServer(api, { port: 0 })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  const base = `http://127.0.0.1:${port}`
+  const frames: string[] = []
+  const req = request(`${base}/api/stream`, (res) => res.on('data', (c) => frames.push(String(c))))
+  req.end()
+  const until = async (f: () => boolean, timeoutMs = 3000) => {
+    for (let i = 0; i < timeoutMs / 10 && !f(); i++) await new Promise((r) => setTimeout(r, 10))
+  }
+  try {
+    await until(() => frames.join('').includes('event: hello'))
+    const conn = JSON.parse(/event: hello\ndata: (.*)\n/.exec(frames.join(''))![1]!).conn as string
+    await fetch(`${base}/api/subscribe`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ conn, thread: '1.1' }) })
+
+    queue = ['안녕']
+    await until(() => frames.join('').includes('"text":"안녕"'))
+    frames.length = 0
+
+    queue = ['안녕하세요'] // 앞부분이 같다: 늘어난 부분만
+    await until(() => frames.join('').includes('event: live'))
+    const live1 = JSON.parse(/event: live\ndata: (.*)\n/.exec(frames.join(''))![1]!)
+    assert.deepEqual(live1, { thread: '1.1', text: '하세요', from: 2 })
+    frames.length = 0
+
+    queue = [undefined, undefined] // 생각 중: 한 번만 알린다(두 번째 tick 은 조용히)
+    await until(() => frames.join('').includes('"thinking":true'))
+    assert.equal(frames.join('').split('event: live').filter((s) => s.includes('thinking')).length, 1)
+    frames.length = 0
+    await new Promise((r) => setTimeout(r, 50))
+    assert.equal(frames.join(''), '', '같은 생각 중 상태를 또 보내지 않는다')
+
+    queue = ['다른 글'] // 접두어가 안 맞으면 통째로
+    await until(() => frames.join('').includes('event: live'))
+    const live2 = JSON.parse(/event: live\ndata: (.*)\n/.exec(frames.join(''))![1]!)
+    assert.deepEqual(live2, { thread: '1.1', text: '다른 글' })
+  } finally {
+    req.destroy()
+    server.close()
+  }
+})
+
 test('화면 오류: 한 줄 요약과 그 아래 들여쓴 스택으로 남긴다', async () => {
   const entries: string[] = []
   const server = createAdminServer(fakeApi(), { port: 0, clientLog: (e) => entries.push(e) })

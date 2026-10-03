@@ -2680,6 +2680,25 @@ test(':lightfork — SESSION.md 가 쓰이면 그 내용으로 새 세션을 띄
   t.close()
 })
 
+test('webLive: 바쁠 때 글 블록이면 markdown, 블록이 없으면(생각 중) undefined, 안 바쁘면 "" (15)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const session = (t.broker as unknown as { registry: { live: Array<{ state: string; pane?: string }> } }).registry.live[0]!
+  session.state = 'busy'
+  session.pane = '%1'
+  const box = ['', '────────────────────────────────', '❯ ', '────────────────────────────────', '  ⏵⏵ auto mode on']
+  t.tmux.screen = ['⏺ 쓰는 중인 \x1b[1m굵은\x1b[0m 글', '', '✢ Writing…', ...box].join('\n')
+  assert.equal(await t.broker.webLive('1.000'), '쓰는 중인 **굵은** 글')
+
+  t.tmux.screen = ['✢ Thinking…', ...box].join('\n') // 블록 없이 스피너만: 생각 중
+  assert.equal(await t.broker.webLive('1.000'), undefined)
+
+  session.state = 'idle'
+  assert.equal(await t.broker.webLive('1.000'), '')
+  s.conn.close()
+  t.close()
+})
+
 test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근접 여부를 보여준다 (claude-web 이관: P4-31)', async () => {
   const statusDir = join(tmpdir(), `cs-status-ctx-${Math.random().toString(36).slice(2)}`)
   mkdirSync(statusDir, { recursive: true })

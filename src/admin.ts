@@ -58,7 +58,8 @@ export interface AdminApi {
   webAction?(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }>
   readonly events?: { since(thread: string, after: number): SessionEvent[]; last(thread: string): number; subscribe(l: (thread: string, ev: SessionEvent) => void): () => void }
   onChange?(l: () => void): () => void
-  webLive?(thread: string): Promise<string>
+  /** `''` = clear, `undefined` = thinking pause (busy, nothing new to show), string = the block's markdown. */
+  webLive?(thread: string): Promise<string | undefined>
   webSkills?(pid: number): Promise<{ direct: SkillRow[]; auto: SkillRow[]; other: SkillRow[] }>
   webRefreshInfo?(pid: number): Promise<{ busy: boolean; tasks: Array<{ kind: string; label: string }> }>
   webGroups?(): unknown
@@ -104,9 +105,9 @@ const SSE_PING_MS = 25_000
  * events go down the stream; the rest the page learns from the list (lastSeq) and fetches when it
  * switches (after=seq). With several sessions running, every page used to receive everything.
  */
-const streams = new Map<string, { thread: string | null; live?: string; write?: (event: string, data: unknown, kind?: string) => void }>()
-/** How often the text being written is read off the screen for the pages watching that session. */
-const LIVE_MS = 1500
+const streams = new Map<string, { thread: string | null; live?: string; thinking?: boolean; write?: (event: string, data: unknown, kind?: string) => void }>()
+/** How often the text being written is read off the screen for the pages watching that session (15: was 1,500). */
+const LIVE_MS = 700
 /**
  * One-time codes for the phone QR, so the token itself is never drawn on a screen (a screen share or a photo
  * would leak it). Each code works once, for five minutes, and the phone is then sent on with the token.
@@ -236,11 +237,24 @@ function startLive(api: AdminApi): void {
   const timer = setInterval(async () => {
     const watched = new Set([...streams.values()].map((s) => s.thread).filter((t): t is string => !!t))
     for (const thread of watched) {
-      const text = await api.webLive!(thread).catch(() => '')
+      const result = await api.webLive!(thread).catch(() => undefined)
       for (const s of streams.values()) {
-        if (s.thread !== thread || s.live === text) continue
-        s.live = text
-        s.write?.('live', { thread, text })
+        if (s.thread !== thread) continue
+        if (result === undefined) {
+          // Busy, no text block right now: a thinking pause between blocks, or a running tool. Say so once
+          // per transition so the page can show "생각 중 · n초" without blanking whatever it was showing.
+          if (!s.thinking) {
+            s.thinking = true
+            s.write?.('live', { thread, thinking: true })
+          }
+          continue
+        }
+        s.thinking = false
+        if (s.live === result) continue
+        // Grown from what this page already has: send only the new tail, not the whole block again.
+        const from = result && s.live && result.startsWith(s.live) ? s.live.length : undefined
+        s.live = result
+        s.write?.('live', from !== undefined ? { thread, text: result.slice(from), from } : { thread, text: result })
       }
     }
   }, LIVE_MS)
@@ -368,7 +382,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       }
     })
     const conn = randomBytes(8).toString('hex')
-    const me: { thread: string | null; live?: string; write?: typeof write } = { thread: null, write }
+    const me: { thread: string | null; live?: string; thinking?: boolean; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
     write('hello', { conn })
     const offEvent = api.events.subscribe((thread, ev) => {
@@ -426,6 +440,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     if (!stream) return send(res, 404, { error: '모르는 연결입니다. 다시 연결하세요.' })
     stream.thread = typeof body.thread === 'string' && /^\d+\.\d+$/.test(body.thread) ? body.thread : null
     stream.live = undefined
+    stream.thinking = false
     res.writeHead(204)
     res.end()
     return
