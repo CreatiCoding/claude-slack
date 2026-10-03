@@ -1283,7 +1283,8 @@ cache-control: no-store
   2. 트랜스크립트의 밀린 줄을 모두 읽고 처리가 끝나기를 기다린다.
   3. IF 세션에 예약 새로고침이 있음 THEN 붙잡는다.
   4. ELSE IF 턴이 열려 있음 AND 세션 상태 ≠ `waiting` THEN 붙잡는다.
-  5. ELSE 전달한다(deliver).
+  5. ELSE IF 대기 사유가 `question`｜`plan`(질문·플랜 카드가 열려 있음) AND 페인이 있음 THEN 다이얼로그를 닫는다(§4.3.9 류 `closeOpenDialog`: 화면에 번호 있는 다이얼로그(`parseDialog`)가 사라질 때까지 Esc 를 최대 5번, 150 ms 간격으로 보낸다. 카드가 있으면 `💬 메시지로 답함` 으로 접는다). 그 뒤 전달한다. 권한 요청(예/아니오) 대기는 여기 해당하지 않는다 — 거기서 Esc 는 거부가 된다.
+  6. ELSE 전달한다(deliver).
   - 붙잡기: 붙잡은 메시지 목록 끝에 넣고, 그 메시지에 `hourglass_flowing_sand` 반응을 달고, INFO 로그(`held while a tool runs`: 실행 중 도구 ≥ 1, 아니면 `held while the turn runs`), 붙잡음 안내(§4.3.15)를 새로 올리거나 같은 메시지를 개수만 바꿔 고친다.
   - deliver(전달 경로 `channel`｜`keys`, 기본 `channel`): ① `lastInjected = text`, `triggerTs = ts`. ② 새 턴을 연다(열린 턴은 먼저 닫는다. 수신자 = `user`. 대기 사유를 지운다. Slack 상태 `processing`). ③ 경로가 `keys` 이고 페인이 있으면 글을 붙여넣고 Enter(IF-070). 실패하면 WARN 로그 뒤 `inbound`(IF-065)로 보낸다. 경로가 `channel` 이면 `inbound` 로 보낸다. ④ INFO 로그 `delivered`｜`delivered by keys`. ⑤ `ts` ≠ 스레드 `ts` 이면 `hourglass_flowing_sand` 반응을 떼고 `eyes` 를 단다. 같으면 `triggerTs` 를 지운다. ⑥ 주입 확인 타이머를 건다(REQ-F-013).
 - 출력: IF-065 `inbound` 또는 터미널 입력
@@ -1295,8 +1296,8 @@ cache-control: no-store
   | 연결 없음 | ERR-052 | 메시지는 버려진다(재시도 없음) |
 - 경계값: 세션 상태가 `waiting`(권한·질문 대기)이면 턴이 열려 있어도 바로 전달한다. 빈 글도 전달한다
 - 동시성: 2단계의 기다림 중에 온 두 번째 메시지는 첫 메시지의 판정 뒤에 판정된다(각 호출이 자기 차례에 3~5단계를 실행한다). 붙잡은 메시지는 도착 순서를 유지한다
-- 수용 기준: AC-011
-- 근거: `src/broker.ts` `inject`·`deliver`·`hold`·`beginTurn`(ASM-002)
+- 수용 기준: AC-011, AC-128
+- 근거: `src/broker.ts` `inject`·`deliver`·`hold`·`beginTurn`·`closeOpenDialog`(ASM-002)
 - 추적: §4.3.4, DM-003, ST-003, IF-065, ERR-052
 
 ### REQ-F-012 붙잡은 메시지를 조건이 되면 한 번에 전달한다
@@ -1682,7 +1683,7 @@ cache-control: no-store
 - 전제조건: 세션이 살아 있다. 답하기는 페인이 필요하다
 - 입력: `tool_input.questions: [{question, header?, options?: [{label, description?}], multiSelect?}]`. 답: `answer <질문 번호> <선택지 번호> [라벨]` 또는 `answer <선택지 번호>`
 - 처리 규칙:
-  1. 카드 올리기: 질문 카드(§4.3.15)를 올리고 대기 사유 `question`, Slack 상태 `suspended`.
+  1. 카드 올리기: 질문 카드(§4.3.15)를 올리고 그 `ts` 를 세션에 적어 두고(REQ-F-011 5단계가 쓴다), 대기 사유 `question`, Slack 상태 `suspended`.
   2. 버튼으로 답하면 먼저 카드에서 그 질문의 버튼 블록(`block_id = dlg_q<질문 번호>_<pid>`)만 `☑️ 선택: *<라벨>* · <@사람>` context 블록으로 바꾼다. 블록을 못 찾으면 카드 전체를 그 한 줄로 바꾼다.
   3. 답하기: 선택지 번호 n 을 얻는다. 화면에 번호 다이얼로그가 나타나기를 900 ms 까지(300 ms 간격) 기다린다. 다이얼로그가 없거나 n 번 선택지가 없으면 결과 `gone`.
   4. 누르기: 화면에서 프롬프트가 키보드를 쥐고 있으면(§4.3.7) 누르지 않고 결과 `unfocused`. 아니면 숫자 n 을 보내고 300 ms 뒤 화면을 다시 읽어, `❯ n` 만 있는 줄이 있으면(숫자가 입력칸에 들어갔다) BackSpace 를 보내고 `unfocused`, 아니면 Enter 를 보내고 `answered`.
@@ -1710,7 +1711,7 @@ cache-control: no-store
 - 전제조건: 세션이 살아 있다
 - 입력: 해당 없음
 - 처리 규칙:
-  1. 플랜 승인 카드(§4.3.15: 버튼 `✅ 승인 · 편집 자동 승인`(값 `answer 0 1 승인 (편집 자동 승인)`), `✅ 승인 · 편집 수동 승인`(`answer 0 2 승인 (편집 수동 승인)`), `✏️ 아니오 · 계속 계획`(`answer 0 3 계속 계획`), `🖥 화면`(`screen`))를 올린다.
+  1. 플랜 승인 카드(§4.3.15: 버튼 `✅ 승인 · 편집 자동 승인`(값 `answer 0 1 승인 (편집 자동 승인)`), `✅ 승인 · 편집 수동 승인`(`answer 0 2 승인 (편집 수동 승인)`), `✏️ 아니오 · 계속 계획`(`answer 0 3 계속 계획`), `🖥 화면`(`screen`))를 올리고 그 `ts` 를 세션에 적어 둔다(REQ-F-011 5단계가 쓴다).
   2. 대기 사유 `plan`, Slack 상태 `suspended`.
   3. 버튼은 REQ-F-027 의 답하기 규칙으로 처리한다.
 - 출력: 플랜 승인 카드
@@ -5195,6 +5196,7 @@ Slack 오류 표:
 | AC-125 | REQ-F-026 | 터미널에 권한 모드 문구가 아예 없음(5번 눌러도 안 바뀜) | `:auto on` | 켜지지 않는다. "전부 허용을 켜지 않았습니다" 안내. `autoAllow` 는 그대로 거짓 |
 | AC-126 | REQ-F-026 | 전부 허용 켜짐(manual). 감시 주기가 되자 터미널이 auto 모드로 바뀌어 있다 | 감시 타이머가 돈다 | manual 로 되돌리고 "되돌렸습니다" 안내. `autoAllow` 는 그대로 참 |
 | AC-127 | REQ-F-026 | 전부 허용 켜짐. 감시 때 터미널에 권한 모드 문구가 없어 되돌리지 못한다 | 감시 타이머가 돈다 | 전부 허용을 끄고 "전부 허용을 껐습니다" 안내 |
+| AC-128 | REQ-F-011 | 질문 카드가 열려 있다(대기 사유 `question`). 터미널에 그 번호 다이얼로그가 떠 있다 | 버튼 대신 글로 답한다 | Esc 를 다이얼로그가 사라질 때까지(최대 5번) 보낸다. 카드가 "💬 메시지로 답함" 으로 접힌다. 메시지는 그 뒤 전달된다 |
 
 ### 5.2 추적성 매트릭스
 

@@ -2127,3 +2127,42 @@ test('전부 허용: 켜진 동안 터미널이 manual 을 벗어나면 되돌�
   s.conn.close()
   t.close()
 })
+
+test('질문 카드가 열린 채 글로 답하면, Esc 로 터미널 다이얼로그를 닫고 카드를 접은 뒤 메시지를 전달한다 (claude-web 이관: P1-9)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%7' })
+  await hook(t.socketPath, 100, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [{ question: '어느 쪽?', header: '방식', options: [{ label: 'A' }, { label: 'B' }] }] },
+  })
+  const card = t.slack.posts.at(-1)!
+  assert.equal(t.slack.statuses.at(-1), `suspended@${s.ack}`)
+
+  // 터미널에는 아직 다이얼로그가 떠 있다가, Esc 두 번 뒤 사라진다.
+  const dialogScreen = '어느 쪽?\n❯ 1. A\n  2. B\n'
+  const closedScreen = '❯ \n'
+  let captures = 0
+  t.tmux.capture = async () => (++captures <= 2 ? dialogScreen : closedScreen)
+
+  await t.broker.handleSlackMessage({ user: 'U1', text: '그냥 B 로 해줘', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  assert.ok(t.tmux.keys.filter((k) => k === '%7:Escape').length >= 2, `Esc 를 다이얼로그가 사라질 때까지 누른다: ${t.tmux.keys}`)
+  assert.ok(t.tmux.keys.filter((k) => k === '%7:Escape').length <= 5, '최대 5번까지만 누른다')
+  const folded = t.slack.updates.find((u) => u.ts === card.ts)
+  assert.ok(folded && /메시지로 답함/.test(folded.text), '카드를 접는다')
+  await until(() => s.inbox.some((m) => (m as { text?: string }).text === '그냥 B 로 해줘'), '메시지가 전달된다')
+  s.conn.close()
+  t.close()
+})
+
+test('권한 요청(예/아니오) 카드가 열려 있을 때는 글로 답해도 Esc 를 누르지 않는다 (거기서 Esc 는 거부가 된다)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%8' })
+  s.conn.send({ type: 'permission_request', requestId: 'abcde', toolName: 'Bash', description: 'rm x', inputPreview: '{}' })
+  await tick()
+  assert.equal(t.slack.statuses.at(-1), `suspended@${s.ack}`)
+  await t.broker.handleSlackMessage({ user: 'U1', text: '아무 글', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  assert.ok(!t.tmux.keys.includes('%8:Escape'), 'Esc 는 누르지 않는다')
+  s.conn.close()
+  t.close()
+})

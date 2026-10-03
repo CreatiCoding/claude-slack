@@ -312,6 +312,8 @@ const PROMPT_MIRROR_MAX = 600
 const MODE_SETTLE_POLL_MS = 100
 const MODE_SETTLE_MAX_MS = 1200
 const AUTO_ALLOW_CHECK_MS = 30_000
+const DIALOG_CLOSE_TRIES = 5
+const DIALOG_CLOSE_SETTLE_MS = 150
 
 interface PendingLaunch {
   threadTs: string
@@ -1617,6 +1619,7 @@ export class Broker {
   private clearWaiting(session: Session): void {
     if (session.waitingTimer) clearTimeout(session.waitingTimer)
     session.waitingTimer = undefined
+    session.openDialogTs = undefined
     if (!session.waitingReason) return
     session.waitingReason = undefined
     session.waitingSince = undefined
@@ -1724,12 +1727,12 @@ export class Broker {
         if (event.tool_name === 'AskUserQuestion') {
           const questions = ((event.tool_input as { questions?: Question[] })?.questions ?? []) as Question[]
           const { text, blocks } = questionBlocks(session.pid, questions, undefined, this.mentionFor(session, 'decision'))
-          await post(text, blocks)
+          session.openDialogTs = await post(text, blocks)
           this.markWaiting(session, 'question')
           await this.setStatus(session, 'suspended')
         } else if (event.tool_name === 'ExitPlanMode') {
           const { text, blocks } = planApprovalBlocks(session.pid, this.mentionFor(session, 'decision'))
-          await post(text, blocks)
+          session.openDialogTs = await post(text, blocks)
           this.markWaiting(session, 'plan')
           await this.setStatus(session, 'suspended')
         }
@@ -3211,7 +3214,28 @@ export class Broker {
     // A refresh is waiting for the work to end: hold it for the relaunched session, even between tools.
     if (session.refreshAfter) return this.hold(session, { text, user, ts }, running)
     if (session.turn && session.state !== 'waiting') return this.hold(session, { text, user, ts }, running)
+    // A question/plan card is open and keeps the keyboard until Esc: typed straight in, the message lands
+    // behind it and does nothing. Close the card first (Esc, not a button answer) and fold it so it does
+    // not sit there looking unanswered, then deliver as usual. A permission card (yes/no) is left alone —
+    // there Esc means "deny", so clearing it is exactly the wrong thing to do.
+    if ((session.waitingReason === 'question' || session.waitingReason === 'plan') && session.pane) {
+      await this.closeOpenDialog(session)
+    }
     await this.deliver(session, text, user, ts)
+  }
+
+  /** Esc until a question/plan card's terminal dialog is gone (up to 5 tries), then fold the card as "메시지로 답함". */
+  private async closeOpenDialog(session: Session): Promise<void> {
+    if (!session.pane) return
+    for (let i = 0; i < DIALOG_CLOSE_TRIES; i++) {
+      if (!parseDialog(await this.tmux.capture(session.pane))) break
+      await this.tmux.sendKeys(session.pane, ['Escape'])
+      await sleep(DIALOG_CLOSE_SETTLE_MS)
+    }
+    if (session.openDialogTs) {
+      await this.slack.update(session.openDialogTs, '💬 메시지로 답함', [{ type: 'section', text: { type: 'mrkdwn', text: '💬 메시지로 답함' } }]).catch(() => {})
+      session.openDialogTs = undefined
+    }
   }
 
   /** Push a message into the session now, and watch that it actually starts a turn. */
