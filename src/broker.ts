@@ -155,6 +155,8 @@ export interface BrokerConfig {
   statusDir?: string
   /** The generated `--settings` file registering that statusLine command (default ~/.claude-slack/statusline-settings.json). Set to '' in tests to skip writing one. */
   statusLineSettingsPath?: string
+  /** How often transcripts are sized for the 50MB/100MB notices (P4-32). Default 30,000 ms. */
+  sizeCheckMs?: number
   /** Where the web app's session events are kept (one file per thread). */
   eventsDir?: string
   /** Where pictures shown in the web app are kept. */
@@ -283,6 +285,9 @@ const MODE_CYCLE_TRIES = 5
 const SCREEN_SETTLE_MS = 400
 const BTW_TIMEOUT_MS = 60_000
 const BTW_POLL_MS = 400
+const LIGHTFORK_TIMEOUT_MS = 180_000
+const LIGHTFORK_POLL_MS = 1_000
+const LIGHTFORK_MAX_CHARS = 20_000
 const SCREEN_SETTLE_TIMEOUT_MS = 4000
 /** Lines kept from a screen: enough for a glance, few enough to read on a phone. */
 const SCREEN_DIGEST_LINES = 20
@@ -329,6 +334,9 @@ const AUTO_ALLOW_PRESS_TRIES = 3
 const AUTO_ALLOW_PRESS_RETRY_MS = 1_000
 const READ_SESSION_MAX_CHARS = 40_000
 const RESTART_CHECK_MS = 3_000
+const SIZE_CHECK_MS = 30_000
+const SIZE_WARN_BYTES = 50 * 1024 * 1024
+const SIZE_BLOCK_BYTES = 100 * 1024 * 1024
 const READ_SESSION_MAX_CHARS_CAP = 200_000
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
@@ -385,7 +393,7 @@ const HELP = [
   '• `/compact` `/model opus` `/review` 처럼 `/`로 시작하면 Claude Code 명령으로 터미널에 그대로 들어갑니다. `!npm test` 처럼 `!`는 bash 모드. Slack이 `/`를 가로채면 `:/명령`.',
   '• 세션 제어: `:esc` 중단 · `:screen` 화면(`:screen raw` 전체) · `:status` 상태 · `:answer 2` 번호 응답 · `:key Down Enter` 키 입력 · `:type 텍스트` 타이핑 · `:canvas` 기록을 캔버스로 · `:refresh` 세션 다시 열기(스킬·플러그인 반영) · `:kill` Slack에서 띄운 세션 종료',
   '• 도구가 도는 중에 보낸 메시지는 붙잡았다가 도구가 끝나면 전달합니다. 바로 보내려면 안내의 *지금 보내기* 또는 `:now`.',
-  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달 · `:retract` 방금 보낸 메시지 철회 · `:context` 비용·모델·200k 근접 여부',
+  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달 · `:retract` 방금 보낸 메시지 철회 · `:context` 비용·모델·200k 근접 여부 · `:lightfork` SESSION.md 로 가벼운 새 세션에 이어가기',
   '• 권한 요청은 버튼으로, 또는 `yes abcde` / `no abcde` 로 답합니다. `:auto on` 이면 브로커가 모든 권한 요청을 바로 허용하고 무엇을 허용했는지 스레드에 남깁니다(`:auto off` 로 끔).',
 ].join('\n')
 
@@ -505,6 +513,7 @@ export class Broker {
     this.revive = new ReviveStore(cfg.revivePath)
     this.wasAlive = this.revive.taken()
     this.recordedAtStart = [...this.wasAlive]
+    this.armSizeCheck(cfg.sizeCheckMs)
   }
 
   // ------------------------------------------------------------ web mirror
@@ -835,6 +844,8 @@ export class Broker {
     }
     const typed = raw.trim()
     if (!typed && !saved.length) return { ok: false, note: '보낼 내용이 없습니다.' }
+    if (session.handedOffTo && !typed.startsWith(':')) return { ok: false, note: '🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌습니다. 거기서 이어가세요.' }
+    if (session.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 트랜스크립트가 100MB 를 넘어 입력을 막았습니다. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
     const text = [typed, ...saved.map((p) => `[Image attached: ${p}]`)].filter(Boolean).join('\n')
     const ts = await this.quietSlack.post({ threadTs: session.threadTs, text: `🌐 웹: ${typed || '(그림)'}${saved.length ? ` · 그림 ${saved.length}장` : ''}` })
     if (saved.length) await this.quietSlack.uploadFiles({ threadTs: session.threadTs, paths: saved }).catch(() => false)
@@ -2484,6 +2495,27 @@ export class Broker {
    * spinner just long enough to look settled), and only accepted once the same non-spinner content reads
    * back twice in a row — a panel still filling in is "not yet", not a short, truncated answer.
    */
+  /**
+   * Waits for a file to exist and hold the same non-empty content across two polls in a row — Claude
+   * writing SESSION.md for `:lightfork` is still mid-write the first time the file appears.
+   */
+  private async awaitStableFile(path: string, timeoutMs: number, pollMs: number): Promise<string | undefined> {
+    const deadline = Date.now() + timeoutMs
+    let last: string | undefined
+    while (Date.now() < deadline) {
+      await sleep(pollMs)
+      let content: string | undefined
+      try {
+        content = readFileSync(path, 'utf8')
+      } catch {
+        continue
+      }
+      if (content && content === last) return content
+      last = content
+    }
+    return undefined
+  }
+
   private async readBtwAnswer(pane: string, before: string, timeoutMs = BTW_TIMEOUT_MS): Promise<string | undefined> {
     const deadline = Date.now() + timeoutMs
     let lastFresh: string | undefined
@@ -2757,6 +2789,44 @@ export class Broker {
     return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
   }
 
+  private sizeCheckTimer?: ReturnType<typeof setInterval>
+
+  /**
+   * Transcripts grow without bound; a 50MB conversation is already slow to read back and a 100MB one
+   * risks the broker itself (it reads the whole file for `read_session`, title-guessing, etc). Checked
+   * every 30s (P4-32): 50MB gets one warning per session suggesting `:lightfork`, 100MB blocks further
+   * Slack/web input (`sizeBlocked`, checked in `handleSlackMessage`/`webSend`) — the terminal itself can't
+   * be blocked (Claude Code reads its own keyboard directly), so it only gets a one-time notice there too.
+   */
+  private armSizeCheck(ms?: number): void {
+    this.sizeCheckTimer = setInterval(() => this.checkTranscriptSizes(), ms ?? SIZE_CHECK_MS)
+    this.sizeCheckTimer.unref?.()
+  }
+
+  private checkTranscriptSizes(): void {
+    for (const s of this.registry.live) {
+      if (s.ended || !s.transcriptPath) continue
+      let size: number
+      try {
+        size = statSync(s.transcriptPath).size
+      } catch {
+        continue
+      }
+      if (size >= SIZE_BLOCK_BYTES && !s.sizeBlocked) {
+        s.sizeBlocked = true
+        this.logAt('WARN', 'broker', 'transcript over 100MB; blocking further Slack/web input', this.tag(s, { bytes: size }))
+        void this.slack.post({
+          threadTs: s.threadTs,
+          text: `🚫 대화 기록이 100MB 를 넘어 Slack·웹에서는 더 보낼 수 없습니다. \`:lightfork\` 로 가벼운 새 세션을 띄우세요. 터미널에서는 계속 쓸 수 있습니다(막을 수 없어요).`,
+        })
+      } else if (size >= SIZE_WARN_BYTES && !s.sizeWarned) {
+        s.sizeWarned = true
+        this.logAt('WARN', 'broker', 'transcript over 50MB', this.tag(s, { bytes: size }))
+        void this.slack.post({ threadTs: s.threadTs, text: `⚠️ 대화 기록이 50MB 를 넘었습니다. 느려지기 전에 \`:lightfork\` 로 가벼운 새 세션에 이어가는 걸 권합니다.` })
+      }
+    }
+  }
+
   /**
    * Writes a small `--settings` file registering `scripts/statusline.ts` as the statusLine command, so a
    * broker-launched session reports its cost/model back to `StatusStore` (P4-31) without touching the
@@ -2936,6 +3006,14 @@ export class Broker {
     }
     // `:` is ours (session control). `/` and `!` are Claude Code's (slash command, bash mode): straight to the terminal.
     if (text.startsWith(':')) return this.runThreadCommand(session, text.slice(1).trim())
+    if (session.handedOffTo) {
+      await this.slack.post({ threadTs, text: `🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌습니다. 거기서 이어가세요.` })
+      return
+    }
+    if (session.sizeBlocked) {
+      await this.slack.post({ threadTs, text: '🚫 트랜스크립트가 100MB 를 넘어 Slack·웹 입력을 막았습니다. `:lightfork` 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' })
+      return
+    }
     if (text.startsWith('/') || text.startsWith('!')) return this.runCommand(session, text.trim())
     await this.inject(session, text, m.user, m.ts)
   }
@@ -4014,6 +4092,43 @@ export class Broker {
         const cost = typeof s.costUsd === 'number' ? `$${s.costUsd.toFixed(2)}` : '알 수 없음'
         const lines = [`모델: ${s.model ?? '알 수 없음'}`, `누적 비용: ${cost}`, `200k 토큰 이상: ${s.exceeds200k ? '예' : '아니오'}`, `${age}초 전 상태`]
         await c.post(lines.join('\n'))
+      },
+    },
+
+    /**
+     * A conversation grown too big (50MB+ transcript, P4-32): ask it to write SESSION.md, then hand off
+     * to a fresh thread seeded with that file plus a `read_session` pointer back to this one. The old
+     * session keeps running (someone might still be reading its thread) but is marked handed-off so
+     * `:lightfork` and `:tell` don't pile onto it, and new Slack/web input there is redirected.
+     */
+    lightfork: {
+      user: true,
+      run: async (c) => {
+        const s = c.session
+        const user = c.user ?? this.defaultRecipient
+        if (s.lightforking) return void (await c.post('이미 SESSION.md 를 쓰는 중입니다. 잠시 기다리세요.'))
+        if (s.handedOffTo) return void (await c.post(`이미 다른 스레드로 넘겼습니다. 그 스레드에서 이어가세요.`))
+        s.lightforking = true
+        await c.post('📝 지금까지 대화를 `SESSION.md` 에 정리해 달라고 요청했습니다…')
+        const path = join(s.cwd, 'SESSION.md')
+        try {
+          await this.inject(s, '지금까지의 대화를 이어받을 다음 세션이 읽을 SESSION.md 파일을 이 폴더에 써 주세요. 무엇을 하고 있었는지, 왜, 지금 어디까지 됐는지, 다음에 할 일을 정리해 주세요.', user, s.threadTs)
+          const content = await this.awaitStableFile(path, LIGHTFORK_TIMEOUT_MS, LIGHTFORK_POLL_MS)
+          if (!content) {
+            await c.post('SESSION.md 를 제때 쓰지 못했습니다(3분 넘게 기다렸습니다). 직접 작성을 요청하거나 다시 시도하세요.')
+            return
+          }
+          const pointer = `[이전 대화에서 이어감 — 원래 스레드: ${s.threadTs}, 필요하면 read_session 도구로 전체 맥락을 더 읽을 수 있습니다]\n\n${truncate(content, LIGHTFORK_MAX_CHARS)}`
+          const newThreadTs = await this.launchSession({ cwd: s.cwd, prompt: pointer, user, extraArgs: this.settingsArgs(s) })
+          if (!newThreadTs) {
+            await c.post('새 세션을 띄우지 못했습니다.')
+            return
+          }
+          s.handedOffTo = newThreadTs
+          await c.post(`🧵 새 스레드로 넘겼습니다: 거기서 이어가세요. 이 세션은 계속 떠 있지만(터미널에서는 그대로 쓸 수 있습니다) Slack·웹 입력은 새 스레드로 보내세요.`)
+        } finally {
+          s.lightforking = false
+        }
       },
     },
 

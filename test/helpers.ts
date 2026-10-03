@@ -237,6 +237,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       titlesPath: join(tmpdir(), `cs-titles-${id}.json`),
       statusDir: join(tmpdir(), `cs-status-${id}`),
       statusLineSettingsPath: '', // never write a real --settings file from a test run
+      sizeCheckMs: 3_600_000, // tests that want the size check use their own short interval
       ...brokerExtra,
     },
     slack,

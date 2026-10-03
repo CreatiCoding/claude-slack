@@ -117,6 +117,14 @@ export interface Session {
   waitingTimer?: ReturnType<typeof setTimeout>
   /** When we last sent Esc ourselves, so the interrupted turn's late Stop is not taken for the new turn's. */
   escAt?: number
+  /** Transcript-size warnings already given (P4-32), so the 50MB notice and the 100MB block each fire once. */
+  sizeWarned?: boolean
+  sizeBlocked?: boolean
+  /** Set while `:lightfork` is writing SESSION.md, so a second `:lightfork` or a message does not race it. */
+  lightforking?: boolean
+  /** Left behind on the old session once a lightweight fork hands off to a new thread — distinct from "ended": this
+   *  one is still running, just not meant to be talked to anymore. */
+  handedOffTo?: string
 }
 
 export interface HeldMessage {

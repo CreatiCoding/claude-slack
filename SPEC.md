@@ -3232,6 +3232,28 @@ cache-control: no-store
 - 근거: 요청 "statusLine 기반 context/rate-limit 읽기, 세션별 --settings 전달"(P4-31). `src/status.ts`, `scripts/statusline.ts`, `src/broker.ts` `ensureStatusLineSettings`
 - 추적: REQ-F-001(기동 단계), §4.3.8(허용 문자열 — statusLine 은 그 계열이 아니라 해당 없음)
 
+### REQ-F-092 큰 대화를 경고하고, SESSION.md 로 가벼운 새 세션에 이어간다(`:lightfork`)
+- 의무: SHOULD
+- 액터: 브로커(30,000 ms 마다 크기 확인), 사람(`:lightfork`), Claude Code(SESSION.md 작성, 새 세션)
+- 트리거: 주기 확인(기본 30,000 ms), `:lightfork` 명령
+- 전제조건: 세션이 살아 있고 `transcriptPath` 가 있다(`:lightfork` 는 그 세션의 `cwd` 에 쓸 수 있어야 한다)
+- 입력: 해당 없음
+- 처리 규칙:
+  1. 주기마다 각 살아 있는 세션의 트랜스크립트 파일 크기를 `statSync` 로 본다. 50MB(`sizeWarned` 없음) 를 넘으면 그 스레드에 경고(한 번만), 100MB(`sizeBlocked` 없음) 를 넘으면 차단 알림(한 번만) 뒤 `sizeBlocked = true`.
+  2. `sizeBlocked` 인 세션은 Slack(`handleSlackMessage`)·웹(`webSend`) 의 평문·`/`·`!` 입력을 막고(`🚫` 안내), `:` 명령(`:lightfork` 포함)은 그대로 통과시킨다. 터미널 입력은 막을 수 없다(사람이 직접 키를 치는 자리라 끼어들 수 없다) — 경고 글에 그렇게 적는다.
+  3. `:lightfork`: 이미 진행 중(`lightforking`)이거나 이미 넘겼으면(`handedOffTo`) 안내만 하고 끝낸다. 아니면 `lightforking = true` 로 두고 세션에 "SESSION.md 를 써 달라" 는 요청을 평소 메시지처럼 주입한다(`inject`).
+  4. `<cwd>/SESSION.md` 를 1,000 ms 마다 읽어, 같은(빈 것이 아닌) 내용이 두 번 연속이면 다 쓴 것으로 본다(최대 180,000 ms; 넘으면 실패 안내로 끝낸다).
+  5. 그 내용(20,000자까지)과 원래 스레드 ts 를 가리키는 안내(`read_session` 으로 더 읽을 수 있다는 문구)를 프롬프트로 새 세션을 띄운다(`launchSession`, 모델·effort 는 원래 세션 것 그대로).
+  6. 새 스레드가 생기면 원래 세션에 `handedOffTo = <새 스레드 ts>` 를 남기고 완료 안내(`🧵`). 원래 세션은 끝내지 않는다(터미널은 그대로 쓸 수 있어야 한다) — `handedOffTo` 가 있으면 그 뒤 Slack·웹 입력은(`:` 명령 제외) 새 스레드로 가라는 안내로만 응답한다
+- 출력: 50MB 경고(`⚠️`), 100MB 차단 알림(`🚫`), `:lightfork` 의 진행(`📝`)·완료(`🧵`) 안내, 차단·넘김 상태에서의 안내 응답
+- 사후조건: `SESSION.md` 는 그 폴더에 남는다(지우지 않는다). `handedOffTo`·`sizeWarned`·`sizeBlocked` 는 세션이 끝나면 함께 사라진다(메모리 전용, 재시작 기록에 남기지 않는다 — 넘겨진 뒤에도 원래 세션이 계속 켜져 있다는 전제라 다시 살려 봐야 할 상태가 아니다)
+- 예외·오류: `SESSION.md` 를 제때(180,000 ms) 못 쓰면 안내 뒤 `lightforking = false` 로 되돌려 다시 시도할 수 있게 한다. 새 세션을 못 띄워도 마찬가지
+- 경계값: 경고·차단 모두 한 번만(다시 커져도 다시 울리지 않는다 — 어차피 `:lightfork` 뒤에는 새 세션으로 옮긴다는 전제). `SESSION.md` 내용은 20,000자로 자른다
+- 동시성: `lightforking` 가드로 같은 세션에 두 번째 `:lightfork` 가 겹치지 않는다
+- 수용 기준: AC-146
+- 근거: 요청 "대화 크기 제한과 가벼운 포크"(P4-32)
+- 추적: REQ-F-090(`read_session`, 새 세션에 남기는 포인터가 가리키는 도구), REQ-F-061(기존 `:복제`/`--fork-session` 과는 다르다 — 이쪽은 트랜스크립트를 그대로 들고 새 프로세스로 넘기고, `:lightfork` 는 사람이 읽을 요약 파일 하나만 들고 아예 새로 시작한다)
+
 ### 3.3 데이터 요구사항 (DM-nnn)
 
 저장 매체는 로컬 파일과 브로커 프로세스의 메모리다(CON-010). 관계형 저장소가 없으므로 아래 템플릿의 "자료형"은 JSON 자료형이고, "관계"의 FK 는 값으로 가리키는 참조이며 참조 무결성 강제는 없다. "인덱스"는 메모리 안의 조회 표를 뜻한다. 기본 경로의 `~/.claude-slack` 은 `<상태 폴더>`로 줄여 쓴다.
@@ -5431,6 +5453,8 @@ Slack 오류 표:
 | REQ-R-008 | 요청 "쉬면 안전하게 재시작" | AC-144 | `broker.ts`, `admin.ts`, `scripts/broker-daemon.sh`, `index.ts` |
 | AC-145 | REQ-F-091 | `statusLineSettingsPath` 가 임시 파일 경로 | 세션을 띄운 뒤 그 경로로 상태 파일을 채우고 `:context` 를 보낸다 | 기동 때 그 경로에 `{"statusLine":{"type":"command",…}}` 를 쓴다. 띄울 때 명령에 `--settings <그 경로>` 가 들어간다. `:context` 답에 모델·비용(`$1.23`)·"200k 이상: 예"가 담긴다. `statusLineSettingsPath` 가 `''` 면 아무것도 쓰지 않고 `--settings` 도 안 붙인다 |
 | REQ-F-091 | 요청 "statusLine 기반 context/rate-limit 읽기, 세션별 --settings 전달"(P4-31) | AC-145 | `status.ts`, `scripts/statusline.ts`, `broker.ts` |
+| AC-146 | REQ-F-092 | 트랜스크립트가 51MB, 이어서 101MB | 20 ms 간격으로 확인하는 가짜 시계를 돌린다. 그 뒤 `:lightfork` | 51MB 에서 "50MB" 경고 1회(다시 커져도 재발 없음). 101MB 에서 "100MB" 차단 알림과 평문 입력 거부(`🚫`), `:` 명령은 통과. `SESSION.md` 를 쓰면 그 내용으로 새 세션이 뜨고 원래 세션에 `handedOffTo` 가 남아, 그 뒤 입력에 "새 스레드로 넘겨졌습니다" 로 답한다 |
+| REQ-F-092 | 요청 "대화 크기 제한과 가벼운 포크"(P4-32) | AC-146 | `broker.ts`, `session.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |

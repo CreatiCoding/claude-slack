@@ -2605,6 +2605,51 @@ test('세션별 --settings 전달: 글로벌 설정이 아니므로 settingsPath
   t.close()
 })
 
+test('트랜스크립트 크기: 50MB 는 경고 한 번, 100MB 는 Slack·웹 입력을 막는다 (claude-web 이관: P4-32)', async () => {
+  const t = await setup({ sizeCheckMs: 20 })
+  const transcript = t.transcript
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, transcript)
+
+  writeFileSync(transcript, Buffer.alloc(51 * 1024 * 1024))
+  await until(() => t.slack.posts.some((p) => /50MB/.test(p.text)), '50MB 경고')
+  const warnCount1 = t.slack.posts.filter((p) => /50MB/.test(p.text)).length
+  await tick(80)
+  assert.equal(t.slack.posts.filter((p) => /50MB/.test(p.text)).length, warnCount1, '경고는 한 번만')
+
+  writeFileSync(transcript, Buffer.alloc(101 * 1024 * 1024))
+  await until(() => t.slack.posts.some((p) => /100MB/.test(p.text)), '100MB 차단 알림')
+  await t.broker.handleSlackMessage({ user: 'U1', text: '막힌 입력', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick(40)
+  assert.ok(t.slack.posts.some((p) => p.threadTs === s.ack && /🚫/.test(p.text) && /lightfork/.test(p.text)))
+  // `:` 명령은 여전히 통과한다 (lightfork 로 빠져나갈 길이 막히면 안 된다).
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':status', ts: '9.2', threadTs: s.ack, channel: 'C1' })
+  await tick(40)
+  assert.ok(t.slack.posts.some((p) => p.threadTs === s.ack && /모델/.test(p.text)))
+  s.conn.close()
+  t.close()
+})
+
+test(':lightfork — SESSION.md 가 쓰이면 그 내용으로 새 세션을 띄우고, 원래 세션은 넘겨졌다고 표시한다 (claude-web 이관: P4-32)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cs-lightfork-'))
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1', cwd: dir })
+  void t.broker.handleSlackMessage({ user: 'U1', text: ':lightfork', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await until(() => t.slack.posts.some((p) => /SESSION\.md/.test(p.text)), '작성 요청 안내')
+  await tick(1100)
+  writeFileSync(join(dir, 'SESSION.md'), '# 이어받을 내용\n여기까지 했음')
+  await until(() => t.tmux.launches.length >= 1, '새 세션을 띄움', 8000)
+  await until(() => t.slack.posts.some((p) => /🧵.*새 스레드로 넘겼습니다/.test(p.text)), '넘김 안내')
+  const session = (t.broker as unknown as { registry: { live: Array<{ handedOffTo?: string }> } }).registry.live[0]!
+  assert.ok(session.handedOffTo)
+
+  await t.broker.handleSlackMessage({ user: 'U1', text: '이제 와도 되나요', ts: '9.9', threadTs: s.ack, channel: 'C1' })
+  await tick(40)
+  assert.ok(t.slack.posts.some((p) => p.threadTs === s.ack && /🧵.*넘겨졌습니다/.test(p.text)))
+  s.conn.close()
+  t.close()
+})
+
 test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근접 여부를 보여준다 (claude-web 이관: P4-31)', async () => {
   const statusDir = join(tmpdir(), `cs-status-ctx-${Math.random().toString(36).slice(2)}`)
   mkdirSync(statusDir, { recursive: true })
