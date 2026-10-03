@@ -3739,9 +3739,19 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 - 수용 기준: AC-110
 - 근거·추적: `src/slack.ts` `retrying`(ASM-002). IF-081
 
+### REQ-R-008 모든 세션이 쉴 때만 브로커를 재시작한다
+- 의무: MUST
+- 지표: 예약된 재시작이 실제로 멈춘(`turn`·대기 중인 다이얼로그가 있는) 세션이 있는 동안 종료를 일으킨 횟수
+- 목표값: = 0 회. 연속 2회의 확인(기본 3,000 ms 간격)에서 모두 쉬고 있어야 종료한다(한 번만 쉰 것처럼 보이는 찰나의 틈을 걸러낸다)
+- 측정 방법: 바쁜 세션 1개가 있을 때 예약하면 거절되거나 대기만 하는지, Stop 훅으로 모두 쉬게 된 뒤 두 번째 확인까지 종료하지 않는지를 가짜 시계로 본다
+- 측정 조건: `CLAUDE_SLACK_DAEMON=1`(launchd 가 재시작을 보장할 때만 받는다). 아니면 "데몬이 관리하는 실행이 아니라서 예약할 수 없습니다" 로 즉시 거절
+- 미달 시 조치: 해당 없음
+- 수용 기준: AC-144
+- 근거·추적: 요청 "쉬면 안전하게 재시작". `src/broker.ts` `adminScheduleRestart`·`adminCancelRestart`·`adminRestartStatus`·`checkRestartWhenIdle`, `src/admin.ts`(`GET/POST /api/restart`, `POST /api/restart/cancel`), `scripts/broker-daemon.sh`(`CLAUDE_SLACK_DAEMON=1`). 종료 전에 `saveState()` 로 REQ-R-006 의 RPO 를 지킨다. macOS 에서 `src/index.ts` 가 `caffeinate -i -w <pid>` 를 띄워 재시작을 기다리는 동안 절전으로 끊기지 않게 한다(ASM-023)
+
 #### 3.6.2 가용성 (REQ-R)
 
-가용성 요구사항은 REQ-R-005(가용성 %, 계획 정지 창)와 REQ-R-006(장애 감지·복구 시간)이 정한다. 이중화: 해당 없음 — 사유: 호스트 1대·브로커 1개(CON-002).
+가용성 요구사항은 REQ-R-005(가용성 %, 계획 정지 창)와 REQ-R-006(장애 감지·복구 시간)이 정한다. REQ-R-008 이 정한 안전 재시작은 이 가용성 수치를 깨지 않도록 "쉴 때만" 종료하는 조건을 추가한다. 이중화: 해당 없음 — 사유: 호스트 1대·브로커 1개(CON-002).
 
 #### 3.6.3 보안 (REQ-S)
 
@@ -3872,6 +3882,7 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 | 세션 수명 | `session` | `attached (…)`, `ended: …`, `refreshing on request`, `folder moved to the Trash` | `t`, `s`, `p`, `pid` |
 | 웹 변경 요청 | `admin` | `web action <id>: <note>`, `admin kill <pid>: …`, `web trash <pid>: …`, `admin new <cwd>: …` 와 같은 줄(변경 엔드포인트마다 1줄) | 메시지 안 |
 | 비허용 입력 | `slack` | `ignored message from non-allowlisted user <id> …` | 메시지 안 |
+| 쉬면 재시작 예약·취소·실행 | `broker` | `restart-when-idle scheduled`, `restart-when-idle cancelled`, `all sessions idle; restarting now (restart-when-idle)` | 메시지 안 |
 
 비밀번호 정책: 해당 없음 — 사유: 비밀번호를 쓰지 않는다. 인증 수단은 Slack 사용자 id 허용 목록과 웹 토큰이다.
 
@@ -5396,6 +5407,8 @@ Slack 오류 표:
 | REQ-F-089 | 요청 "잘못 보냄을 Slack 에서도" | AC-142 | `broker.ts` |
 | AC-143 | REQ-F-090 | 다른 스레드의 대화가 살아 있다 | `read_session` 을 그 스레드 링크로 호출한다 | 사람 메시지·답·도구 호출이 글로 돌아온다(도구 출력 본문은 없다). 없는 대화를 주면 "no session found" 오류 |
 | REQ-F-090 | 요청 "다른 세션을 읽는 도구 read_session" | AC-143 | `channel.ts`, `broker.ts`, `transcript.ts` |
+| AC-144 | REQ-R-008 | 데몬 실행(`CLAUDE_SLACK_DAEMON=1`), 바쁜 세션 1개(`turn` 있음) | 재시작을 예약한 뒤 20 ms 간격으로 확인하는 가짜 시계를 돌린다 | 바쁜 동안 종료 0회(`waitingOn` 에 그 세션의 폴더 이름). Stop 훅으로 쉬게 된 뒤 두 번째 확인에서 `saveState()` 와 `process.exit(0)` 이 호출된다. 데몬이 아니면 예약 자체가 "데몬이 관리하는 실행이 아니라서 예약할 수 없습니다" 로 거절된다 |
+| REQ-R-008 | 요청 "쉬면 안전하게 재시작" | AC-144 | `broker.ts`, `admin.ts`, `scripts/broker-daemon.sh`, `index.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |

@@ -17,7 +17,7 @@ mkdir -p "$LOG_DIR"
 # at 5MB while running). The pane keeps stderr so `tmux attach` still shows it.
 # Anything printed before the logger is up (a crash on start) lands in start.log.
 if ! tmux has-session -t "=$SESSION" 2>/dev/null; then
-  tmux new-session -d -s "$SESSION" -c "$DIR" "npm start 2>>'$LOG_DIR/start.log'"
+  tmux new-session -d -s "$SESSION" -c "$DIR" "CLAUDE_SLACK_DAEMON=1 npm start 2>>'$LOG_DIR/start.log'"
 fi
 
 while tmux has-session -t "=$SESSION" 2>/dev/null; do

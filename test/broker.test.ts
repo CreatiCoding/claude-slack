@@ -2527,3 +2527,52 @@ test('read_session: 스레드 ts·세션 id 접두어로 다른 대화를 찾아
   other.conn.close()
   t.close()
 })
+
+test('안전한 재시작: 데몬이 아니면 예약을 거절한다 (claude-web 이관: P4-30)', async () => {
+  const t = await setup()
+  delete process.env.CLAUDE_SLACK_DAEMON
+  const r = (t.broker as unknown as { adminScheduleRestart: () => { ok: boolean; note: string } }).adminScheduleRestart()
+  assert.equal(r.ok, false)
+  assert.match(r.note, /데몬/)
+  t.close()
+})
+
+test('안전한 재시작: 데몬이면 예약하고, 모든 세션이 두 번 연속 쉬면 상태를 저장하고 종료한다', async () => {
+  process.env.CLAUDE_SLACK_DAEMON = '1'
+  try {
+    const t = await setup({ restartCheckMs: 20 })
+    const s = await shim(t.socketPath, { tmuxPane: '%1' })
+    await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+    const broker = t.broker as unknown as {
+      adminScheduleRestart: () => { ok: boolean; note: string }
+      adminRestartStatus: () => { scheduled: boolean; waitingOn: string[] }
+      saveState: () => void
+    }
+    const r = broker.adminScheduleRestart()
+    assert.equal(r.ok, true)
+    assert.equal(broker.adminRestartStatus().scheduled, true)
+
+    await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+    await tick()
+    assert.deepEqual(broker.adminRestartStatus().waitingOn, ['proj'], '작업 중인 세션 이름이 보인다')
+
+    const origExit = process.exit
+    let exited = false
+    process.exit = (() => { exited = true }) as never
+    let saved = false
+    const origSave = broker.saveState.bind(broker)
+    ;(broker as unknown as { saveState: () => void }).saveState = () => { saved = true; origSave() }
+    try {
+      await hook(t.socketPath, 100, { hook_event_name: 'Stop' })
+      await new Promise((r2) => setTimeout(r2, 150))
+      assert.ok(exited, '두 번째 유휴 확인에서 종료한다')
+      assert.ok(saved, '종료 전에 상태를 저장한다')
+    } finally {
+      process.exit = origExit
+    }
+    s.conn.close()
+    t.close()
+  } finally {
+    delete process.env.CLAUDE_SLACK_DAEMON
+  }
+})

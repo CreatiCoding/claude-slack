@@ -107,6 +107,8 @@ Slack 앱은 `slack-manifest.json`을 https://api.slack.com/apps 에서 "From a 
 
 `npm start`를 손으로 띄우면 재부팅과 함께 사라진다. launchd에 맡기면 로그인 시 자동으로 뜨고 죽어도 다시 뜬다. `scripts/broker-daemon.sh`가 브로커를 tmux 세션 안에서 돌리므로 `tmux attach -t claude-slack-broker`로 화면을 보는 건 그대로 된다. 상태가 이상하면(응답이 없다, 세션이 중복된다) `node scripts/doctor.ts` 로 먼저 진단한다 — 브로커 pid·소켓 응답·tmux 창 수·같은 실행 키의 중복 Claude 프로세스·최근 WARN/ERROR 를 한 번에 보여주고, 다음에 칠 명령을 알려준다. `node scripts/doctor.ts restart` 가 launchd 경로로 재시작하고(`npm start`를 손으로 치는 대신), `dedupe`가 중복 프로세스를 정리한다.
 
+launchd가 띄운 실행(`CLAUDE_SLACK_DAEMON=1`)에서는 관리자 페이지의 "⏳ 쉬면 재시작" 버튼으로 당장 끊지 않고 안전하게 재시작을 예약할 수 있다 — 모든 세션이 연속 두 번 쉬고 있는 것으로 확인되면 상태를 저장하고 꺼지며, launchd의 `KeepAlive`가 바로 다시 띄운다. 바쁜 세션이 있으면 어느 세션(폴더 이름)을 기다리는지 보여준다. `CLAUDE_SLACK_DAEMON` 없이 손으로 띈 실행에서는 "데몬이 관리하는 실행이 아니라서 예약할 수 없습니다"로 거절한다(꺼진 채로 남기 때문).
+
 `~/Library/LaunchAgents/com.claude-slack.plist`에 `Label`·`ProgramArguments`(이 저장소의 `scripts/broker-daemon.sh` 절대 경로)·`WorkingDirectory`·`RunAtLoad`·`KeepAlive`를 넣고, `PATH`에 `tmux`와 `node`가 있는 디렉터리(homebrew면 `/opt/homebrew/bin`)를 준다. 그다음:
 
 ```sh

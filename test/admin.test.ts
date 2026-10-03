@@ -555,3 +555,19 @@ test('기록 보기는 별도 창이 아니라 페이지 안의 패널(iframe)�
   assert.doesNotMatch(page, /window\.open\('\/view/)
   s.close()
 })
+
+test('안전한 재시작: /api/restart 로 예약·조회·취소한다 (claude-web 이관: P4-30)', async () => {
+  let scheduled = false
+  const s = await listening(fakeApi({
+    adminScheduleRestart: () => { scheduled = true; return { ok: true, note: '예약했습니다.' } },
+    adminCancelRestart: () => { scheduled = false; return { ok: true, note: '취소했습니다.' } },
+    adminRestartStatus: () => ({ scheduled, waitingOn: scheduled ? ['proj'] : [] }),
+  }))
+  assert.deepEqual(await (await fetch(s.base + '/api/restart')).json(), { scheduled: false, waitingOn: [] })
+  const posted = await fetch(s.base + '/api/restart', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  assert.equal((await posted.json()).ok, true)
+  assert.deepEqual(await (await fetch(s.base + '/api/restart')).json(), { scheduled: true, waitingOn: ['proj'] })
+  await fetch(s.base + '/api/restart/cancel', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+  assert.equal((await (await fetch(s.base + '/api/restart')).json()).scheduled, false)
+  s.close()
+})

@@ -41,6 +41,10 @@ export interface AdminApi {
   adminNew?(o: { cwd: string; prompt?: string; model?: string; effort?: string; create?: boolean }): Promise<{ ok: boolean; note: string; thread?: string; missing?: boolean }>
   webFolders?(path?: string): { ok: boolean; note?: string; path?: string; parent?: string; dirs?: Array<{ name: string; git: boolean }> }
   adminScreen?(pid: number): Promise<{ ok: boolean; screen: string }>
+  /** Schedule a restart for the moment every session is idle (only when the broker is daemon-managed). */
+  adminScheduleRestart?(): { ok: boolean; note: string }
+  adminCancelRestart?(): { ok: boolean; note: string }
+  adminRestartStatus?(): { scheduled: boolean; waitingOn: string[] }
   // The web app (/app). Absent in older fakes: the routes then answer 404.
   webSessions?(): WebSession[]
   webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
@@ -583,6 +587,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     log(`admin delete archive: ${result.note}`)
     return send(res, result.ok ? 200 : 404, result)
   }
+  if (req.method === 'GET' && url.pathname === '/api/restart' && api.adminRestartStatus) {
+    return send(res, 200, api.adminRestartStatus())
+  }
+  if (req.method === 'POST' && url.pathname === '/api/restart' && api.adminScheduleRestart) {
+    const result = api.adminScheduleRestart()
+    log(`admin restart scheduled: ${result.note}`)
+    return send(res, result.ok ? 200 : 400, result)
+  }
+  if (req.method === 'POST' && url.pathname === '/api/restart/cancel' && api.adminCancelRestart) {
+    const result = api.adminCancelRestart()
+    log(`admin restart cancelled: ${result.note}`)
+    return send(res, result.ok ? 200 : 400, result)
+  }
   if (req.method === 'POST' && url.pathname === '/api/session/resume' && api.adminResume) {
     const body = await readJson(req)
     const result = await api.adminResume(String(body.id ?? ''))
@@ -769,12 +786,13 @@ const PAGE = `<!doctype html>
 </style>
 <h1>claude-slack</h1>
 <div class="sub" id="sub">불러오는 중…</div>
+<div id="restart-bar"></div>
 <div id="note"></div>
 <div id="form"></div>
 <div class="bar"><div class="tabs" id="tabs"></div><input id="q" type="search" placeholder="이름 · 폴더 · 첫 메시지 검색" oninput="setQuery(this.value)"></div>
 <div id="bulk"></div>
 <div id="list"></div>
-<div id="foot"></div>
+<div id="foot"><button onclick="scheduleRestart()" title="모든 세션이 쉬면 브로커를 재시작합니다">⏳ 쉬면 재시작</button></div>
 <div id="panel" hidden>
   <div class="panel-back" onclick="closePanel()"></div>
   <aside class="panel-body" role="dialog" aria-label="대화 기록">
@@ -1176,9 +1194,37 @@ async function refresh() {
     $('sub').textContent = secs < 120 ? '브로커가 다시 시작되는 중입니다… 자동으로 다시 연결합니다 (' + secs + '초)' : '브로커에 연결하지 못했습니다: ' + e
   }
 }
+async function drawRestartBar() {
+  try {
+    const r = await fetch('/api/restart', { headers: auth })
+    if (!r.ok) { $('restart-bar').innerHTML = ''; return }
+    const st = await r.json()
+    if (!st.scheduled) { $('restart-bar').innerHTML = ''; return }
+    const waiting = st.waitingOn.length ? '기다리는 세션: ' + st.waitingOn.map(esc).join(', ') : '모든 세션이 쉬는 중 — 곧 재시작합니다'
+    $('restart-bar').innerHTML = '<div class="bulk"><span class="dim">⏳ 모든 세션이 쉬면 재시작하도록 예약되어 있습니다. ' + waiting + '</span>' + btn('예약 취소', 'cancelRestart()', '') + '</div>'
+  } catch {
+    $('restart-bar').innerHTML = ''
+  }
+}
+async function scheduleRestart() {
+  if (!confirm('모든 세션이 쉬면 브로커를 재시작하도록 예약할까요? (launchd 가 다시 띄웁니다)')) return
+  const r = await fetch('/api/restart', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })
+  note(await noteOf(r))
+  drawRestartBar()
+}
+async function cancelRestart() {
+  const r = await fetch('/api/restart/cancel', { method: 'POST', headers: { ...auth, 'content-type': 'application/json' }, body: '{}' })
+  note(await noteOf(r))
+  drawRestartBar()
+}
+window.scheduleRestart = scheduleRestart
+window.cancelRestart = cancelRestart
+
 const initial = /*INITIAL_STATE*/null
 if (initial) render(initial)
 refresh()
+drawRestartBar()
 setInterval(refresh, 4000)
+setInterval(drawRestartBar, 4000)
 </script>
 </html>`

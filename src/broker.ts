@@ -218,6 +218,8 @@ export interface BrokerConfig {
   stallMs?: number
   /** How often, while 전부 허용 is on, to check the terminal is still in manual mode. Tests lower it. */
   autoAllowCheckMs?: number
+  /** How often restart-when-idle checks whether every session has gone idle. Tests lower it. */
+  restartCheckMs?: number
   /** How long the quiet must last before we say anything about it. Tests lower it. */
   quietMs?: number
   /** How long after start a thread that was alive before shutdown is given to reattach. Tests lower it. */
@@ -319,6 +321,7 @@ const AUTO_ALLOW_CHECK_MS = 30_000
 const AUTO_ALLOW_PRESS_TRIES = 3
 const AUTO_ALLOW_PRESS_RETRY_MS = 1_000
 const READ_SESSION_MAX_CHARS = 40_000
+const RESTART_CHECK_MS = 3_000
 const READ_SESSION_MAX_CHARS_CAP = 200_000
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
@@ -1651,6 +1654,62 @@ export class Broker {
     const text = readSessionText(path)
     const clamped = Math.max(1, Math.min(maxChars, READ_SESSION_MAX_CHARS_CAP))
     return { text: text.length > clamped ? text.slice(-clamped) : text }
+  }
+
+  // ------------------------------------------------------------ safe restart
+
+  private restartTimer?: ReturnType<typeof setInterval>
+  private restartIdleStreak = 0
+
+  /** Whether this process was started by the launchd daemon (broker-daemon.sh), the only one a restart-on-idle may exit: a
+   *  broker started by hand (`npm start`/`npm run dev`) would just stay dead. */
+  private get isDaemonManaged(): boolean {
+    return !!process.env.CLAUDE_SLACK_DAEMON
+  }
+
+  private busySessions(): Session[] {
+    return this.registry.live.filter((s) => !s.ended && (s.state === 'busy' || !!s.turn))
+  }
+
+  /**
+   * Schedule a restart for the moment every session goes idle (checked every 3,000 ms; two idle checks in a
+   * row, not one, so a session between turns is not mistaken for genuinely done). Only on a daemon-managed
+   * broker — launchd's KeepAlive is what brings it back; anywhere else this would just turn the broker off.
+   */
+  adminScheduleRestart(): { ok: boolean; note: string } {
+    if (!this.isDaemonManaged) return { ok: false, note: '데몬(launchd)이 띄운 브로커가 아니라서 예약할 수 없습니다. 재시작하면 꺼진 채로 남습니다.' }
+    if (this.restartTimer) return { ok: true, note: '이미 예약되어 있습니다.' }
+    this.restartIdleStreak = 0
+    this.restartTimer = setInterval(() => this.checkRestartWhenIdle(), this.cfg.restartCheckMs ?? RESTART_CHECK_MS)
+    this.restartTimer.unref?.()
+    this.logAt('INFO', 'broker', 'restart-when-idle scheduled')
+    return { ok: true, note: '모든 세션이 쉬면 재시작하도록 예약했습니다.' }
+  }
+
+  adminCancelRestart(): { ok: boolean; note: string } {
+    if (!this.restartTimer) return { ok: false, note: '예약된 재시작이 없습니다.' }
+    clearInterval(this.restartTimer)
+    this.restartTimer = undefined
+    this.logAt('INFO', 'broker', 'restart-when-idle cancelled')
+    return { ok: true, note: '예약을 취소했습니다.' }
+  }
+
+  adminRestartStatus(): { scheduled: boolean; waitingOn: string[] } {
+    return { scheduled: !!this.restartTimer, waitingOn: this.busySessions().map((s) => s.title || basename(s.cwd)) }
+  }
+
+  private checkRestartWhenIdle(): void {
+    const busy = this.busySessions()
+    if (busy.length) {
+      this.restartIdleStreak = 0
+      return
+    }
+    this.restartIdleStreak++
+    if (this.restartIdleStreak < 2) return
+    if (this.restartTimer) clearInterval(this.restartTimer)
+    this.logAt('INFO', 'broker', 'all sessions idle; restarting now (restart-when-idle)')
+    this.saveState()
+    process.exit(0)
   }
 
   // ------------------------------------------------------------ attention

@@ -2,6 +2,7 @@ import { startModelRefresh } from './models.ts'
 import { join } from 'node:path'
 import { appendFileSync, mkdirSync } from 'node:fs'
 import { describeError } from './format.ts'
+import { spawn } from 'node:child_process'
 import { loadConfig } from './config.ts'
 import { Broker } from './broker.ts'
 import { listen } from './ipc.ts'
@@ -54,6 +55,16 @@ try {
 
 const { botUserId, teamId } = await slack.start()
 log.info('broker', 'up', { pid: process.pid, node: process.version, bot: botUserId, team: teamId, channel: cfg.channelId, socket: SOCKET_PATH, tmux: TMUX_SESSION, log: log.file })
+// A Mac mini asleep stops Socket Mode and the tailed transcripts alike; keep the display asleep but the
+// machine awake for as long as this process lives (`-w <pid>`: caffeinate exits with it, nothing lingers).
+if (process.platform === 'darwin') {
+  try {
+    spawn('caffeinate', ['-i', '-w', String(process.pid)], { stdio: 'ignore', detached: true }).unref()
+    log.info('broker', 'caffeinate started (keeps the Mac awake while this process runs)')
+  } catch (err) {
+    log.warn('broker', `caffeinate not started: ${describeError(err)}`)
+  }
+}
 log.info('broker', `allowed users: ${[...cfg.allowedUsers].join(', ')} · user token: ${cfg.userToken ? 'yes (purge deletes your messages too)' : 'no (purge keeps your messages)'}`)
 await broker.ensureEntryMessage()
 startModelRefresh((m) => log.info('broker', m))
