@@ -800,33 +800,50 @@ function viewArchive(a) {
 async function open(ts, { push = true } = {}) {
   closeNewSession()
   if (current && current !== ts) saveDraft()
+  listScrollTop = $('list').scrollTop // leaving the list (or another thread) for this one
   current = ts
-  $('app').classList.add('in-convo')
-  $('empty').hidden = true
-  $('convo').hidden = false
-  if (push) history.pushState({ thread: ts }, '', location.pathname + location.search + '#' + ts)
-  else history.replaceState({ thread: ts }, '', location.pathname + location.search + '#' + ts)
-  resetConvo()
-  renderHeader()
-  renderComposerBits()
-  loadDraft()
-  renderPending()
-  const t = thread(ts)
-  // After a reload: draw what the page kept, then fetch only what came after it.
-  if (!t.events.length) {
-    const kept = await loadTimeline(ts)
-    if (current !== ts) return
-    if (kept.length && !t.events.length) {
-      t.events = kept
-      t.last = kept.at(-1).seq
+  // Guards every 'scroll' this causes (resetting #log, streaming in events, catching up) from being
+  // mistaken for the person scrolling and overwriting the remembered position below before it is applied.
+  positioning = true
+  try {
+    $('app').classList.add('in-convo')
+    $('empty').hidden = true
+    $('convo').hidden = false
+    if (push) history.pushState({ thread: ts }, '', location.pathname + location.search + '#' + ts)
+    else history.replaceState({ thread: ts }, '', location.pathname + location.search + '#' + ts)
+    resetConvo()
+    renderHeader()
+    renderComposerBits()
+    loadDraft()
+    renderPending()
+    const t = thread(ts)
+    // After a reload: draw what the page kept, then fetch only what came after it.
+    if (!t.events.length) {
+      const kept = await loadTimeline(ts)
+      if (current !== ts) return
+      if (kept.length && !t.events.length) {
+        t.events = kept
+        t.last = kept.at(-1).seq
+      }
     }
+    if (t.events.length) renderConvo(t.events)
+    await subscribe(ts)
+    const opened = sessionOf(ts)
+    if (opened) loadLinks(opened)
+    await catchUp(ts)
+    // Back to where this session was left (16), not always the bottom — unless it was at the bottom, or
+    // this is the first time it is opened in this tab (nothing remembered yet).
+    const remembered = scrollMemory.get(ts)
+    if (remembered) {
+      for (let guard = 0; view.start > 0 && scroller.scrollHeight - scroller.clientHeight < remembered && guard < 40; guard++) showOlder()
+      scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight - remembered)
+      $('jump').hidden = atBottom()
+    } else {
+      scrollToBottom()
+    }
+  } finally {
+    positioning = false
   }
-  if (t.events.length) renderConvo(t.events)
-  await subscribe(ts)
-  const opened = sessionOf(ts)
-  if (opened) loadLinks(opened)
-  await catchUp(ts)
-  scrollToBottom()
   markSeen(ts)
   renderList()
   renderActivity()
@@ -841,6 +858,7 @@ function closeConvo() {
   $('convo').hidden = true
   renderHeader()
   renderList()
+  $('list').scrollTop = listScrollTop // the list's own scroll position, from before a thread was opened (16)
 }
 $('btn-back').addEventListener('click', () => (history.state?.thread ? history.back() : closeConvo()))
 addEventListener('popstate', (e) => {
@@ -969,15 +987,28 @@ function resetConvo() {
 const scroller = $('scroller')
 const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60
 function scrollToBottom() {
-  scroller.scrollTop = scroller.scrollHeight
+  scroller.scrollTop = scroller.scrollHeight // no smooth-scroll on this element: this lands at once
   $('jump').hidden = true
 }
 /** Is the view following the bottom? Set by the person's scrolling, not by content growing. */
 let stuck = true
+// Where each session was left scrolled (distance up from the bottom; 0 means "was at the bottom"), so
+// coming back to it goes back to that spot instead of always to the bottom (16). Per tab, not persisted.
+const scrollMemory = new Map()
+// The session list's own scroll position, from just before a thread was opened — restored on going back
+// to it (16; matters most on a phone, where the list is its own full screen).
+let listScrollTop = 0
+// True while `open()` is actively placing the scroll position: the swap to a new session's empty/then-
+// refilled #log fires its own 'scroll' events, which must not be mistaken for the person scrolling and
+// overwrite the very position `open()` is about to apply.
+let positioning = false
 scroller.addEventListener('scroll', () => {
   stuck = atBottom()
+  const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
   if (stuck) $('jump').hidden = true
+  else if (dist > scroller.clientHeight) $('jump').hidden = false
   if (scroller.scrollTop < 200 && view?.start > 0) showOlder()
+  if (!positioning && current) scrollMemory.set(current, stuck ? 0 : dist)
 })
 $('jump').firstElementChild.addEventListener('click', scrollToBottom)
 
@@ -1823,12 +1854,15 @@ function typeInto(el, target) {
   typing = requestAnimationFrame(step)
 }
 
-// Stuck to the bottom, stay there when something below grows late (a picture, the activity box).
+// Stuck to the bottom, stay there when something below grows late (a picture, the activity box) or the
+// scroll pane itself shrinks (the composer growing — todos, chips, the phone keyboard — pushes it up
+// from below; watching only #log/#activity missed that, so the last line went under the composer, 16).
 const stayDown = new ResizeObserver(() => {
   if (view && stuck) scroller.scrollTop = scroller.scrollHeight
 })
 stayDown.observe($('log'))
 stayDown.observe($('activity'))
+stayDown.observe(scroller)
 setInterval(() => current && renderActivity(), 1000)
 
 // ------------------------------------------------------------------ composer: chips, waiting note, held
