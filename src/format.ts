@@ -604,6 +604,11 @@ export function alertBlock(text: string, level: 'info' | 'warning' | 'error' | '
 export function normalizeMessage(text: string): string {
   return text
     .replace(/<\/?pasted_content\b[^>]*>/g, '')
+    // Claude Code's own `[Image #N]` placeholder, and our `[Image attached: <path>]`/`[File attached: <path>]`
+    // marker (REQ-F-014): a message with an attachment reads differently by the time it echoes back, which
+    // without this made the same message look like two different ones (held then re-sent, or mirrored twice).
+    .replace(/\[Image #\d+\]/g, '')
+    .replace(/\[(?:Image|File) attached: [^\]]+\]/g, '')
     .replace(/\s+/g, ' ')
     .trim()
 }

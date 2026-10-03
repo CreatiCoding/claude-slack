@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activityDetails, activityLine, activitySources, chunk, describeError, processAlive, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
+import { activityDetails, activityLine, activitySources, chunk, describeError, processAlive, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, sameMessage, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
 import { decodeAnswer, decodeResume, encodeResume, OPTION_VALUE_MAX } from '../src/actions.ts'
 import { alertBlock, todoPlanBlock } from '../src/format.ts'
 
@@ -325,4 +325,10 @@ test('toMrkdwn 은 표를 줄 목록으로 바꾼다 (폰에서 | 가 그대로 
 test('processAlive: 지금 살아 있는 프로세스는 참, 없는 pid 는 거짓', () => {
   assert.equal(processAlive(process.pid), true)
   assert.equal(processAlive(999999), false)
+})
+
+test('sameMessage: 이미지/파일 첨부 표시가 붙거나 바뀌어도 같은 메시지로 본다 (claude-web 이관: P3-28)', () => {
+  assert.ok(sameMessage('이거 봐줘 [Image attached: /tmp/img-1.png]', '이거 봐줘 [Image #1]'), 'Claude Code 자체 표시와도 같게 본다')
+  assert.ok(sameMessage('[File attached: /tmp/log.txt] 로그 확인해줘', '로그 확인해줘'), '우리 쪽 첨부 표시를 떼고 비교한다')
+  assert.ok(!sameMessage('이거 봐줘 [Image #1]', '저거 봐줘 [Image #1]'), '본문이 다르면 여전히 다른 메시지다')
 })
