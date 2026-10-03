@@ -1607,6 +1607,29 @@ function writeFrame(frame, html, zoom = 1) {
   fit()
   for (const img of doc.images) img.addEventListener('load', fit)
   setTimeout(fit, 300)
+  wireCopyButtons(doc)
+}
+/**
+ * `<button data-copy="x">복사</button>` + `<textarea id="x">…</textarea>` (or any element) inside a preview
+ * (35): the frame's own `onclick`/`<script>` never runs (the sandbox has no `allow-scripts`), so a button
+ * Claude drew in there otherwise does nothing. This is the one thing the outer page does for it.
+ */
+function wireCopyButtons(doc) {
+  doc.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-copy]')
+    if (!btn) return
+    const target = doc.getElementById(btn.getAttribute('data-copy'))
+    if (!target) return
+    const text = 'value' in target ? target.value : target.textContent
+    navigator.clipboard
+      .writeText(text ?? '')
+      .then(() => {
+        const prev = btn.textContent
+        btn.textContent = '복사했어요'
+        setTimeout(() => btn.isConnected && (btn.textContent = prev), 1500)
+      })
+      .catch(() => {})
+  })
 }
 function htmlPreview(html, code, codeBox, name) {
   const wrap = document.createElement('div')

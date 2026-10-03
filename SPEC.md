@@ -2923,14 +2923,14 @@ cache-control: no-store
   6. 사람 글의 상태 줄(그 `ts` 의 반응으로 정한다): `hourglass_flowing_sand` 있음 → `대기 중` + `실행 중인 도구가 끝나면 전달해요` + `수정`. 없고 `x` 있음 → `취소함`. 없고 `eyes` 또는 `white_check_mark` 있음 → `전달됨` + (via 가 `terminal` 이 아니면) `잘못 보냄`.
   7. 도구 행의 상태: 결과 있음 → 성공 `완료`｜실패 `실패`. 결과 없이 턴이 끝남(`status` 가 `busy` 아닌 값으로 오거나 `end`) → `끝남`. 그 외 `실행 중`. 머리를 누르면 `입력`·`출력`(실패면 `오류`, 빈 출력은 `(출력 없음)`)을 편다.
   8. 답변 글은 Markdown 으로, 브로커 카드의 글은 Slack mrkdwn 으로 그린다(§4.3.25). 모든 글은 먼저 HTML 이스케이프한다(REQ-S-008).
-  9. HTML 미리보기: 답변 전체가 `<!doctype html` 또는 `<html` 로 시작하거나, ```` ```html ```` 코드 블록이거나, 이벤트의 `html` 항목이면 `sandbox="allow-same-origin"` 틀에 그린다. 틀 문서 앞에 CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'` 와 `<base target="_blank">` 를 넣고 `http-equiv=refresh` 메타를 지운다. 높이는 내용에 맞추되 60~4,000 px.
+  9. HTML 미리보기: 답변 전체가 `<!doctype html` 또는 `<html` 로 시작하거나, ```` ```html ```` 코드 블록이거나, 이벤트의 `html` 항목이면 `sandbox="allow-same-origin"` 틀에 그린다. 틀 문서 앞에 CSP `default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'none'; form-action 'none'` 와 `<base target="_blank">` 를 넣고 `http-equiv=refresh` 메타를 지운다. 높이는 내용에 맞추되 60~4,000 px. 틀 안의 `onclick`·`<script>` 는 돌지 않는다(`allow-scripts` 없음) — 바깥 페이지가 그 문서에 클릭을 듣고 있다가 `data-copy="<id>"` 를 단 요소를 누르면 그 `id` 요소의 글(`value` 가 있으면 그것, 없으면 `textContent`)을 클립보드에 넣고, 누른 버튼의 글을 1,500 ms 동안 "복사했어요"로 바꾼다(35; MCP 채널 instructions 에 `<button data-copy="x">복사</button>` + `<textarea id="x">…</textarea>` 사용법을 안내한다)
   10. 그리기에 실패하면 `대화를 그리다 문제가 생겼어요. (오류 E-<4자리 16진>)` 덮개와 `다시 열기`·`세션 목록으로` 버튼을 보인다(ERR-096).
 - 출력: 대화 화면(UI-03)
 - 사후조건: "본 seq" 갱신(탭이 보일 때만)
 - 예외·오류: ERR-096
 - 경계값: 이벤트 0개 → 빈 대화. `seq` 가 이미 가진 것 이하인 이벤트는 버린다. `seq` 가 (가진 마지막 + 1)이 아닌 `ev` → 따라잡기를 실행한다
 - 동시성: 따라잡는 중에 온 `ev` 는 버리지 않고 모아 둔다(`buf`). 따라잡기가 끝나면 그 가운데 `seq` 가 따라잡기로 받은 것보다 더 새것만 `seq` 순으로 적용한다 — 두 요청의 도착 순서가 뒤바뀌어도(특히 턴의 마지막 `text`·`turn_end`) 잃지 않는다
-- 수용 기준: AC-077(1~4단계, 창), AC-150(11~12단계, 스크롤 기억, 16), AC-156(8단계 링크, 20)
+- 수용 기준: AC-077(1~4단계, 창), AC-150(11~12단계, 스크롤 기억, 16), AC-156(8단계 링크, 20), AC-160(9단계 복사 버튼, 35)
 - 근거: `src/web/app.js` `drawConvo`·`apply`·`flush`·`showOlder`·`userEl`·`toolEl`·`htmlPreview`, `src/web/idb.js`, `src/web/markdown.js`(ASM-002)
 - 추적: UI-03, §4.3.25, REQ-S-008, ERR-096
 
@@ -5402,6 +5402,8 @@ Slack 오류 표:
 | AC-136 | REQ-F-018 | 턴이 열려 있고 도구 호출 하나가 아직 결과를 못 받았다 | 턴이 끝난다(Stop, 혹은 유휴 판정) | 이벤트 로그에 그 도구의 `tool_end {ok:false, output:"(중단됨)"}` 가 생긴다. 카드도 오류(완료되지 않음)로 닫힌다 |
 | AC-159 | REQ-F-018 | 최종 글이 `무엇을 할까요?\n\n\`\`\`choices\n계속하기\n그만두기\n\`\`\`` | 훅 `Stop` | 스레드에 `무엇을 할까요?` 만(블록 없이) 올라간다. 버튼 메시지가 따로 와 2개의 버튼. 누르면 그 글이 세션에 전달되고 카드가 `☑️ <고른 글>` 로 접힌다. 다른 버튼을 또 누르면 "이미 지난 선택지입니다" |
 | REQ-F-018 | 요청 "답 끝 선택지를 버튼으로"(22) | AC-159 | `broker.ts`, `panel.ts`, `format.ts`, `web/app.js` |
+| AC-160 | REQ-F-077 | `<button data-copy="md" onclick="document.title='x'">복사</button><textarea id="md">원문 pid</textarea><script>document.title='y'</script>` | HTML 미리보기로 열어 버튼을 누른다 | 클립보드 = `원문 pid`. `document.title` 은 그대로(스크립트·onclick 둘 다 안 돈다). 버튼 글이 잠깐 "복사했어요"로 바뀐다 |
+| REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-137 | DM-017 | 대화 id `s1` 에 저장된 이름 "내가 지은 이름" | `/ccresume` 목록, 어드민 이어서 탭·보관 탭 | 목록에 ai-title·마지막 프롬프트 대신 "내가 지은 이름" 이 보인다 |
 | AC-138 | DM-017 | 보관 기록의 대화 id 에 저장된 이름이 없다가, 어드민에서 그 보관 기록 이름을 바꾼다 | 그 대화를 나중에 재개한다 | 재개한 세션이 바로 그 이름으로 뜬다(ai-title 이 나중에 와도 안 덮인다) |
 | AC-139 | §4.3.11 | 턴이 도는 중 | `:btw 질문` | 거절하지 않는다. 바로 `/btw 질문` 을 친다 |
