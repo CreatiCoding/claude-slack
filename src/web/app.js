@@ -979,6 +979,7 @@ $('btn-collapse').addEventListener('click', () => setCollapsed(!$('app').classLi
 const WINDOW = 150
 let view
 function resetConvo() {
+  if (optimistic) clearTimeout(optimistic.timer), (optimistic = null) // its #log is about to be wiped below
   $('log').innerHTML = ''
   $('todos').hidden = true
   view = { rows: [], tools: new Map(), msgs: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0, start: 0, dirty: new Set(), opened: false }
@@ -1079,6 +1080,9 @@ function apply(ev, live) {
       view.live = ''
       view.liveAt = null
       view.thinkingAt = null
+      // The real echo of a message this page itself just sent (17): image-only sends match the first
+      // one after, a text send matches on trimmed text so an earlier identical message is not mistaken.
+      if (optimistic && ev.seq > optimistic.after && (optimistic.text ? ev.text?.trim() === optimistic.text : true)) dropOptimisticBubble()
       view.users.set(ev.ts, addRow('user', ev))
       return
     }
@@ -2102,6 +2106,29 @@ input.addEventListener('keydown', (e) => {
   sendNow()
 })
 $('btn-send').addEventListener('click', sendNow)
+/**
+ * Shown the instant "보내기" is pressed, before the broker has echoed the message back over SSE (17):
+ * otherwise a slow connection left the composer looking like nothing happened for up to a second. Dropped
+ * once a matching real `user` event arrives (apply(), case 'user'), on failure, or after 5,000 ms with no
+ * match (a `/`·`!` command, say, that never comes back as a `user` row).
+ */
+let optimistic = null
+function showOptimisticBubble(text, imageCount) {
+  dropOptimisticBubble()
+  const el = document.createElement('div')
+  el.className = 'item user optimistic'
+  el.innerHTML = `<div class="bubble"></div>`
+  el.firstElementChild.textContent = text || `이미지 ${imageCount}장`
+  $('log').append(el)
+  if (stuck) scrollToBottom()
+  optimistic = { text, after: thread(current).last, el, timer: setTimeout(dropOptimisticBubble, 5000) }
+}
+function dropOptimisticBubble() {
+  if (!optimistic) return
+  clearTimeout(optimistic.timer)
+  optimistic.el.remove()
+  optimistic = null
+}
 async function sendNow() {
   const s = current && sessionOf(current)
   const text = input.value.trim()
@@ -2115,8 +2142,10 @@ async function sendNow() {
   autosize()
   saveDraft()
   if (text) store.set('lastSent:' + current, text)
+  showOptimisticBubble(text, pics.length)
   if (!(await sendText(s, text, pics))) {
-    input.value = keep
+    dropOptimisticBubble()
+    if (!input.value) input.value = keep // not if something new was typed meanwhile
     pending.set(current, pics)
     renderPending()
     autosize()

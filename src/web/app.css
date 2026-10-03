@@ -157,6 +157,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .user .meta { display: flex; gap: 8px; align-items: center; font-size: var(--fs-time); color: var(--muted); margin-top: 4px; }
 .user .meta .held { color: var(--yellow); }
 .user .meta .failed { color: var(--red); }
+.user.optimistic { opacity: .6; } /* 17: shown before the broker's own echo of it comes back */
 .user .meta .ic { width: 11px; height: 11px; }
 .linkish { color: var(--muted); text-decoration: underline; text-underline-offset: 2px; font-size: var(--fs-time); }
 .linkish:hover { color: var(--accent); }
