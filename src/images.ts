@@ -195,4 +195,12 @@ export class ImageStore {
       return undefined
     }
   }
+
+  /** Drop a thread's whole picture folder (P4-33, archive deletion). */
+  forgetThread(thread: string): void {
+    if (!THREAD_RE.test(thread)) return
+    try {
+      rmSync(join(this.dir, thread), { recursive: true, force: true })
+    } catch {}
+  }
 }

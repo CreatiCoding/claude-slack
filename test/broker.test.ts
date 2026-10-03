@@ -1625,6 +1625,36 @@ test('어드민 이어서 하기: 보관된 세션의 id 로도 같은 대화를
   t.close()
 })
 
+test('어드민 보관 기록 삭제: 그 스레드의 이벤트 로그·웹 그림도 함께 지우고, 스레드가 아직 살아 있으면 거부한다 (claude-web 이관: P4-33)', async () => {
+  const { writeArchive } = await import('../src/archive.ts')
+  const eventsDir = mkdtempSync(join(tmpdir(), 'cs-events-'))
+  const webImagesDir = mkdtempSync(join(tmpdir(), 'cs-web-images-'))
+  const t = await setup({ eventsDir, webImagesDir })
+  const path = writeArchive({ key: 'k2', sessionId: 'arch-sess-2', cwd: tmpdir(), title: '보관된 것', threadTs: '2.0', origin: 'slack', archivedAt: '2026-09-24T01:00:00Z', messages: [] }, t.archiveDir)
+  t.broker.events.emit('2.0', { type: 'notice', text: '흔적' })
+  const eventsFile = join(eventsDir, '2.0.jsonl')
+  assert.ok(existsSync(eventsFile), '이벤트 로그가 먼저 있어야 한다')
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+  t.broker.images.put('2.0', png, 'image/png')
+  const imgDir = join(webImagesDir, '2.0')
+  assert.ok(existsSync(imgDir), '그림 폴더가 먼저 있어야 한다')
+
+  // 같은 스레드에 아직 살아 있는 세션이 있으면 거부한다.
+  const s = await shim(t.socketPath, { tmuxPane: '%1', threadTs: '2.0' })
+  const refused = await t.broker.adminDeleteArchive(path)
+  assert.equal(refused.ok, false)
+  assert.ok(existsSync(path), '거부됐으면 파일이 남는다')
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionEnd', reason: 'other' })
+  s.conn.close()
+
+  const r = await t.broker.adminDeleteArchive(path)
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(existsSync(path), false)
+  assert.equal(existsSync(eventsFile), false, '이벤트 로그도 지워진다')
+  assert.equal(existsSync(imgDir), false, '그림 폴더도 지워진다')
+  t.close()
+})
+
 test('어드민 저장된 대화 삭제: 목록에 있는 것만, 실행 중인 세션은 거부한다', async () => {
   const removed: string[] = []
   const t = await setup({

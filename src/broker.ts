@@ -1288,10 +1288,25 @@ export class Broker {
     return { ok: true, note: '대화를 삭제했습니다. 더 이상 이어서 할 수 없습니다.' }
   }
 
-  /** Delete one archived session from disk. Only files the archive listing offers. */
+  /**
+   * Delete one archived session from disk. Only files the archive listing offers. The archive's own
+   * event log and web pictures go with it (P4-33) — unless its thread somehow still has a live session
+   * (a purge usually ends it first, but admin deletion can race one started again on the same thread),
+   * in which case the whole delete is refused rather than pulling state out from under it.
+   */
   async adminDeleteArchive(path: string): Promise<{ ok: boolean; note: string }> {
     const known = listArchives(1000, this.cfg.archiveDir).some((a) => a.path === path)
-    if (!known || !deleteArchive(path, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했습니다.' }
+    if (!known) return { ok: false, note: '보관 기록을 찾지 못했습니다.' }
+    let threadTs: string | undefined
+    try {
+      threadTs = (JSON.parse(readFileSync(path, 'utf8')) as { threadTs?: string }).threadTs
+    } catch {}
+    if (threadTs && this.registry.byThreadTs(threadTs)?.ended === false) return { ok: false, note: '이 보관 기록의 스레드가 아직 살아 있습니다. 먼저 세션을 종료하세요.' }
+    if (!deleteArchive(path, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했습니다.' }
+    if (threadTs) {
+      this.events.forgetThread(threadTs)
+      this.images.forgetThread(threadTs)
+    }
     this.logAt('INFO', 'admin', `deleted archive ${basename(path)}`)
     return { ok: true, note: '보관 기록을 삭제했습니다.' }
   }

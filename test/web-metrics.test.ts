@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { request } from 'node:http'
-import { createAdminServer, type AdminApi } from '../src/admin.ts'
+import { createAdminServer, _resetAuthStateForTests, type AdminApi } from '../src/admin.ts'
 import { TrafficMeter } from '../src/meter.ts'
 import { EventLog } from '../src/events.ts'
 import { mkdtempSync } from 'node:fs'
@@ -241,7 +241,14 @@ test('4-4 QR: 토큰은 QR 에 넣지 않고 5분짜리 일회용 코드로, 폰
     const code = new URL(url).searchParams.get('c')
     const first = await fetch(`${base}/login?c=${code}`, { redirect: 'manual' })
     assert.equal(first.status, 302)
-    assert.equal(first.headers.get('location'), '/?t=SECRET-TOKEN')
+    assert.equal(first.headers.get('location'), '/', '토큰은 더 이상 주소에 실리지 않는다(P4-33)')
+    const cookie = first.headers.get('set-cookie') ?? ''
+    assert.match(cookie, /^cs_admin=[0-9a-f]{32}; HttpOnly; SameSite=Lax; Max-Age=\d+; Path=\//)
+    assert.ok(!cookie.includes('SECRET-TOKEN'), '쿠키 값은 토큰이 아니라 무작위 id 다')
+    // 그 쿠키만으로 토큰 없이도 들어간다.
+    const cookieValue = cookie.split(';')[0]!
+    assert.equal((await fetch(`${base}/api/state`, { headers: { cookie: cookieValue } })).status, 200)
+    assert.equal((await fetch(`${base}/api/state`)).status, 401, '쿠키도 토큰도 없으면 거절')
     assert.equal((await fetch(`${base}/login?c=${code}`, { redirect: 'manual' })).status, 403, '한 번만')
     // Expired after five minutes.
     const r2 = await fetch(`${base}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-admin-token': 'SECRET-TOKEN' }, body: '{}' })
@@ -255,6 +262,25 @@ test('4-4 QR: 토큰은 QR 에 넣지 않고 5분짜리 일회용 코드로, 폰
     assert.equal((await fetch(`${base}/api/qr-code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 401, '코드는 토큰이 있어야 만든다')
   } finally {
     server.close()
+    _resetAuthStateForTests()
+  }
+})
+
+test('4-4 토큰 틀림 10번이면 1분간 모두 거절(P4-33)', async () => {
+  const server = createAdminServer(fakeApi(), { port: 0, token: 'SECRET-TOKEN' })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  const base = `http://127.0.0.1:${port}`
+  try {
+    for (let i = 0; i < 10; i++) assert.equal((await fetch(`${base}/api/state`, { headers: { 'x-admin-token': 'wrong' } })).status, 401)
+    const blocked = await fetch(`${base}/api/state`, { headers: { 'x-admin-token': 'wrong' } })
+    assert.equal(blocked.status, 429)
+    // 맞는 토큰을 줘도 막힌 동안은 통과하지 못한다.
+    assert.equal((await fetch(`${base}/api/state`, { headers: { 'x-admin-token': 'SECRET-TOKEN' } })).status, 429)
+  } finally {
+    server.close()
+    // 이 테스트가 다음 테스트들의 127.0.0.1 요청까지 막아두지 않도록 모듈 전역 상태를 비운다.
+    _resetAuthStateForTests()
   }
 })
 

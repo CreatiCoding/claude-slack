@@ -3844,9 +3844,9 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 
 ### REQ-S-004 QR 에 토큰을 넣지 않는다
 - 의무: MUST
-- 지표: `POST /api/qr-code` 응답의 `url` 에 토큰 문자열이 들어 있는지
-- 목표값: 포함 = 0 회. 코드 = 무작위 16 byte(128 bit), 유효 300,000 ms, 사용 1 회, 동시 보관 ≤ 101 개
-- 측정 방법: 토큰 `s3cret` 으로 열고 응답의 `url` 에 `s3cret` 이 없는지, 같은 코드의 두 번째 `GET /login` 이 403 인지 본다
+- 지표: `POST /api/qr-code` 응답의 `url` 과 `GET /login` 뒤 돌아가는 주소에 토큰 문자열이 들어 있는지
+- 목표값: 포함 = 0 회. 코드 = 무작위 16 byte(128 bit), 유효 300,000 ms, 사용 1 회, 동시 보관 ≤ 101 개. `/login` 은 토큰을 주소에 싣지 않고(P4-33) 대신 무작위 16 byte id 를 값으로 하는 쿠키(`cs_admin`, `HttpOnly; SameSite=Lax; Path=/`, HTTPS 면 `Secure` 도, 수명 30일)를 내려 `/` 로 보낸다. 그 쿠키는 헤더·`?t=` 와 동등하게 인증으로 받아들여진다(스크립트는 여전히 헤더·`?t=` 를 쓴다)
+- 측정 방법: 토큰 `s3cret` 으로 열고 응답의 `url` 에 `s3cret` 이 없는지, `GET /login` 뒤 `location` 이 `/` 인지(토큰이 실려 있지 않은지)와 `set-cookie` 가 그 모양인지, 그 쿠키만으로 `GET /api/state` 가 되는지, 같은 코드의 두 번째 `GET /login` 이 403 인지 본다
 - 측정 조건: 해당 없음
 - 미달 시 조치: 해당 없음
 - 수용 기준: AC-097
@@ -3875,12 +3875,12 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 ### REQ-S-007 요청이 가리키는 파일을 정해진 폴더 안으로 제한한다
 - 의무: MUST
 - 지표: 폴더 밖 경로를 가리키는 요청의 결과
-- 목표값: 읽기·쓰기·삭제 = 0 건. 규칙: ① 그림은 `<threadTs>`(`^\d+\.\d+$`)와 `<id>`(`^[0-9a-f]{20}$`)로만 찾는다. ② 보관 기록은 목록에 나온 경로이고 보관 폴더 바로 아래의 `.json` 일 때만. ③ 이벤트 파일 이름은 `^\d+\.\d+$` 일 때만. ④ 폴더 탐색·만들기는 홈 아래만. ⑤ 대화 삭제의 id 는 `^[\w-]+$`. ⑥ 로그에 쓰는 페이지 입력은 제어 문자를 없앤다
-- 측정 방법: `GET /api/image/../../etc/passwd`, `POST /api/archive/delete {path: "/etc/hosts"}`, `GET /api/events?thread=../x`, `GET /api/folders?path=/etc`, `POST /api/recent/delete {id: "../x"}`, `POST /api/client-error {where: "a\nb"}` 를 보내 결과를 본다
+- 목표값: 읽기·쓰기·삭제 = 0 건. 규칙: ① 그림은 `<threadTs>`(`^\d+\.\d+$`)와 `<id>`(`^[0-9a-f]{20}$`)로만 찾는다. ② 보관 기록은 목록에 나온 경로이고 보관 폴더 바로 아래의 `.json` 일 때만. ③ 이벤트 파일 이름은 `^\d+\.\d+$` 일 때만. ④ 폴더 탐색·만들기는 홈 아래만. ⑤ 대화 삭제의 id 는 `^[\w-]+$`. ⑥ 로그에 쓰는 페이지 입력은 제어 문자를 없앤다. ⑦ 보관 기록을 지우면 그 스레드의 이벤트 로그(`events/<threadTs>.jsonl`)와 그림 폴더(`web-images/<threadTs>/`)도 함께 지운다 — 단 그 스레드에 아직 살아 있는 세션이 있으면 전부 거부한다(P4-33)
+- 측정 방법: `GET /api/image/../../etc/passwd`, `POST /api/archive/delete {path: "/etc/hosts"}`, `GET /api/events?thread=../x`, `GET /api/folders?path=/etc`, `POST /api/recent/delete {id: "../x"}`, `POST /api/client-error {where: "a\nb"}` 를 보내 결과를 보고, ⑦ 은 보관 기록을 지운 뒤 그 스레드의 이벤트 파일·그림 폴더가 남아 있는지, 그 스레드가 살아 있을 때 지우기 자체가 거부되는지를 본다
 - 측정 조건: 임시 폴더
 - 미달 시 조치: 해당 없음
-- 수용 기준: AC-100
-- 근거·추적: `src/images.ts`, `src/archive.ts`, `src/events.ts`, `src/broker.ts` `webFolders`, `src/sessions-list.ts`, `src/admin.ts`(ASM-002). ERR-009, ERR-025, ERR-042
+- 수용 기준: AC-100(①~⑥), AC-148(⑦)
+- 근거·추적: `src/images.ts`, `src/archive.ts`, `src/events.ts`, `src/broker.ts` `webFolders`·`adminDeleteArchive`, `src/sessions-list.ts`, `src/admin.ts`(ASM-002). ERR-009, ERR-025, ERR-042
 
 ### REQ-S-008 페이지가 받은 글을 스크립트로 실행하지 않는다
 - 의무: MUST
@@ -3911,6 +3911,16 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 - 미달 시 조치: 해당 없음
 - 수용 기준: AC-103
 - 근거·추적: `src/index.ts`(주소 로그는 `?t=…` 로 가린다), ASM-002
+
+### REQ-S-011 틀린 토큰은 빠르게 막는다
+- 의무: MUST
+- 지표: 같은 발신 주소에서 60,000 ms 안에 틀린 토큰으로 온 요청 수, 그 뒤 응답 코드
+- 목표값: 10 번째까지는 보통대로(토큰 검사 뒤 401), 11 번째부터는 토큰을 보지도 않고 429(그 60,000 ms 가 지나야 다시 보통대로). 맞는 토큰을 섞어 보내도 막힌 동안은 똑같이 429(토큰을 추측하는 속도를 늦추는 것이 목적이라, "이번엔 맞았으니 통과" 가 되면 의미가 없다)
+- 측정 방법: 틀린 토큰으로 10번 보내 401 을 확인하고, 11번째와 맞는 토큰으로 보낸 12번째 모두 429 인지 본다
+- 측정 조건: 해당 없음
+- 미달 시 조치: 해당 없음
+- 수용 기준: AC-147
+- 근거·추적: 요청 "QR 로그인은 쿠키로, 틀린 토큰은 rate-limit"(P4-33). `src/admin.ts`(발신 주소별 실패 횟수, 모듈 전역이라 프로세스 전체에 적용된다)
 
 감사 로그 항목(§4.6 의 형식으로 `broker.log` 에 남는다):
 
@@ -3991,6 +4001,16 @@ IndexedDB 는 `at` 이 오래된 것부터 버린다. 브라우저 저장소가 
 - 미달 시 조치: 지원 목록에서 빼거나 고친다
 - 수용 기준: AC-116
 - 근거·추적: ASM-003, ASM-010, ASM-018
+
+### REQ-M-007 알려지지 않거나 잘못된 설정값으로는 뜨지 않는다
+- 의무: MUST
+- 지표: 모르는 `CLAUDE_SLACK_*` 키, 숫자가 아닌 포트류 값이 있을 때 기동 결과
+- 목표값: 둘 다 `loadConfig`(`src/config.ts`) 가 던져 기동이 멈춘다(zod `.strict()`). 문제가 여럿이면 한 번에 모두 알려준다. `CLAUDE_SLACK_*` 가 아닌 env(`PATH`, `HOME`, Claude Code 세션이 물려준 `CLAUDE_*` 등)는 보지 않는다. 브로커 자신은 안 읽지만 배포 스크립트(`scripts/dokploy-*.ts`, `scripts/qa-sweep.ts`)가 쓰는 값(`CLAUDE_SLACK_QA_CHANNEL`, `CLAUDE_SLACK_PROXY_TARGET`, `CLAUDE_SLACK_DOKPLOY_*`)은 알려진 키로 둔다 — 실제 운영 `.env` 로 처음 검증했을 때 이것들이 없어 부팅이 막히는 것을 보고 추가했다
+- 측정 방법: `CLAUDE_SLACK_WEB_PROT`(오타) 와 `CLAUDE_SLACK_WEB_PORT=abc` 를 각각·함께 주고 `loadConfig`/`validateEnv` 가 던지는지, 메시지에 그 키 이름이 있는지 본다
+- 측정 조건: 해당 없음
+- 미달 시 조치: 해당 없음
+- 수용 기준: AC-149
+- 근거·추적: 요청 "CLAUDE_SLACK_* env 를 zod 로 한곳에서 검증"(P4-33). `src/config.ts` `validateEnv`
 
 ### 3.7 기타 요구사항
 
@@ -5455,6 +5475,11 @@ Slack 오류 표:
 | REQ-F-091 | 요청 "statusLine 기반 context/rate-limit 읽기, 세션별 --settings 전달"(P4-31) | AC-145 | `status.ts`, `scripts/statusline.ts`, `broker.ts` |
 | AC-146 | REQ-F-092 | 트랜스크립트가 51MB, 이어서 101MB | 20 ms 간격으로 확인하는 가짜 시계를 돌린다. 그 뒤 `:lightfork` | 51MB 에서 "50MB" 경고 1회(다시 커져도 재발 없음). 101MB 에서 "100MB" 차단 알림과 평문 입력 거부(`🚫`), `:` 명령은 통과. `SESSION.md` 를 쓰면 그 내용으로 새 세션이 뜨고 원래 세션에 `handedOffTo` 가 남아, 그 뒤 입력에 "새 스레드로 넘겨졌습니다" 로 답한다 |
 | REQ-F-092 | 요청 "대화 크기 제한과 가벼운 포크"(P4-32) | AC-146 | `broker.ts`, `session.ts` |
+| AC-147 | REQ-S-011 | 틀린 토큰으로 10번, 이어서 11번째(틀린 토큰)와 12번째(맞는 토큰) | 발신 주소를 그대로 두고 반복한다 | 10번째까지 401. 11·12번째 모두 429(맞는 토큰도 막힌 동안은 통과하지 못한다) |
+| REQ-S-011 | 요청 "QR 로그인은 쿠키로, 틀린 토큰은 rate-limit"(P4-33) | AC-147 | `admin.ts` |
+| AC-148 | REQ-S-007 | 이벤트·그림이 있는 보관 기록, ⑦ | 삭제한 뒤, 그 스레드가 살아 있을 때 삭제를 시도한 뒤 | 이벤트 파일과 그림 폴더가 지워진다. 스레드가 살아 있으면 보관 기록·이벤트·그림 모두 그대로 남고 거부 응답을 받는다 |
+| AC-149 | REQ-M-007 | `CLAUDE_SLACK_WEB_PROT`(오타), `CLAUDE_SLACK_WEB_PORT=abc` | 각각·함께 `loadConfig`/`validateEnv` 에 준다 | 둘 다 던진다. 함께 주면 메시지에 두 문제가 모두 들어 있다 |
+| REQ-M-007 | 요청 "CLAUDE_SLACK_* env 를 zod 로 한곳에서 검증"(P4-33) | AC-149 | `config.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |

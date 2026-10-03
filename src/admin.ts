@@ -114,6 +114,53 @@ const LIVE_MS = 1500
 const qrCodes = new Map<string, number>()
 const QR_CODE_MS = 5 * 60_000
 
+/**
+ * `/login`'s cookie, in place of putting the permanent token in the URL (P4-33): a one-time QR code still
+ * exchanges for a device's way in, but that way in is now a random id in an HttpOnly cookie — never
+ * readable from page script, never in a URL a screenshot or a browser history could leak — not the token
+ * itself. The header/`?t=` path stays for scripts (`doctor.ts`, curl); it still carries the real token.
+ */
+const cookieSessions = new Map<string, number>()
+const COOKIE_TTL_MS = 30 * 24 * 60 * 60_000
+const COOKIE_NAME = 'cs_admin'
+
+/** Wrong tokens, by remote address, so guessing is slow rather than free (P4-33). */
+const failedAuth = new Map<string, number[]>()
+const AUTH_WINDOW_MS = 60_000
+const AUTH_MAX_FAILURES = 10
+
+function cookieFrom(req: IncomingMessage): string | undefined {
+  const raw = req.headers.cookie
+  if (!raw) return undefined
+  for (const part of raw.split(';')) {
+    const i = part.indexOf('=')
+    if (i < 0) continue
+    if (part.slice(0, i).trim() === COOKIE_NAME) return part.slice(i + 1).trim()
+  }
+  return undefined
+}
+
+function tooManyFailures(ip: string): boolean {
+  const now = Date.now()
+  const recent = (failedAuth.get(ip) ?? []).filter((t) => now - t < AUTH_WINDOW_MS)
+  failedAuth.set(ip, recent)
+  return recent.length >= AUTH_MAX_FAILURES
+}
+
+function noteFailure(ip: string): void {
+  const recent = failedAuth.get(ip) ?? []
+  recent.push(Date.now())
+  failedAuth.set(ip, recent)
+}
+
+/** Test-only: these maps are module-level (one process, many `createAdminServer` calls in production), which
+ *  would otherwise let one test's failed-login lockout bleed into the next test's unrelated server. */
+export function _resetAuthStateForTests(): void {
+  failedAuth.clear()
+  cookieSessions.clear()
+  qrCodes.clear()
+}
+
 /** When screen errors came in, over the last minute. */
 const clientErrorTimes: number[] = []
 /** The web app's files, served as they are: no build step. */
@@ -245,14 +292,32 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       res.end('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>코드 만료</title><p style="font:16px/1.6 system-ui;padding:32px 20px;text-align:center">코드가 만료됐거나 이미 쓰였어요.<br>PC 화면의 QR 을 다시 찍어 주세요.</p>')
       return
     }
-    res.writeHead(302, { location: `/?t=${encodeURIComponent(token)}`, 'cache-control': 'no-store', 'referrer-policy': 'no-referrer' })
+    const id = randomBytes(16).toString('hex')
+    cookieSessions.set(id, Date.now() + COOKIE_TTL_MS)
+    const secure = (req.socket as { encrypted?: boolean }).encrypted ? '; Secure' : ''
+    res.writeHead(302, {
+      location: '/',
+      'cache-control': 'no-store',
+      'referrer-policy': 'no-referrer',
+      'set-cookie': `${COOKIE_NAME}=${id}; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(COOKIE_TTL_MS / 1000)}; Path=/${secure}`,
+    })
     res.end()
     return
   }
-  // A token, when configured, may travel as a header or as `?t=` so a phone can
-  // just open a bookmarked link.
-  if (token && req.headers['x-admin-token'] !== token && url.searchParams.get('t') !== token) {
-    return send(res, 401, { error: 'unauthorized' })
+  // A token, when configured, may travel as a header or as `?t=` (scripts: doctor.ts, curl) or as the
+  // HttpOnly cookie `/login` hands a phone. Wrong attempts count against the caller's address; past
+  // AUTH_MAX_FAILURES in a minute, every attempt from it is refused without even checking the token —
+  // guessing stays slow no matter how the real one was obtained.
+  if (token) {
+    const ip = req.socket.remoteAddress ?? 'unknown'
+    if (tooManyFailures(ip)) return send(res, 429, { error: 'too many attempts, slow down' })
+    const cookieId = cookieFrom(req)
+    const cookieOk = !!cookieId && (cookieSessions.get(cookieId) ?? 0) > Date.now()
+    const headerOk = req.headers['x-admin-token'] === token || url.searchParams.get('t') === token
+    if (!cookieOk && !headerOk) {
+      noteFailure(ip)
+      return send(res, 401, { error: 'unauthorized' })
+    }
   }
 
   // A browser page on the same machine could otherwise POST here as a "simple request"
