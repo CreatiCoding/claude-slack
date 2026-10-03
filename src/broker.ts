@@ -338,6 +338,10 @@ const SIZE_CHECK_MS = 30_000
 const SIZE_WARN_BYTES = 50 * 1024 * 1024
 const SIZE_BLOCK_BYTES = 100 * 1024 * 1024
 const READ_SESSION_MAX_CHARS_CAP = 200_000
+// 18: a web message's picture limits, checked here (never just in the page that happened to send them).
+const WEB_IMAGES_MAX = 8
+const WEB_IMAGES_BASE64_MAX = 3_145_728
+const WEB_IMAGE_BYTES_MAX = 10 * 1024 * 1024
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
 
@@ -837,10 +841,26 @@ export class Broker {
     const session = this.registry.byPid(pid)
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
     // Pictures from the page go where Slack attachments go, and reach Claude the same way: a path it can read.
+    // Checked here too (18), not just client-side — a page is never the only thing that can reach this call.
+    if (pictures.length > WEB_IMAGES_MAX) return { ok: false, note: `한 메시지에 그림은 ${WEB_IMAGES_MAX}장까지입니다.` }
+    // Each picture's own byte size is checked before it is added to the running total: a single
+    // oversized picture should be refused as "10MiB 를 넘습니다", not as the (much smaller) total-size
+    // message, since its base64 alone would trip that check too.
+    let totalBase64 = 0
+    for (const [i, p] of pictures.entries()) {
+      const mime = String(p.type ?? '')
+      const ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : /gif/.test(mime) ? 'gif' : /jpe?g/.test(mime) ? 'jpg' : undefined
+      if (!ext) return { ok: false, note: `${p.name ?? `그림 ${i + 1}`}: 지원하지 않는 형식입니다.` }
+      const bytes = Math.ceil((String(p.data ?? '').length * 3) / 4)
+      if (bytes > WEB_IMAGE_BYTES_MAX) return { ok: false, note: `${p.name ?? `그림 ${i + 1}`}: 10MiB 를 넘습니다.` }
+      totalBase64 += String(p.data ?? '').length
+      if (totalBase64 > WEB_IMAGES_BASE64_MAX) return { ok: false, note: '그림 용량이 한 메시지에 담을 수 있는 한도를 넘었습니다.' }
+    }
     const saved: string[] = []
-    for (const [i, p] of pictures.slice(0, 10).entries()) {
+    for (const [i, p] of pictures.entries()) {
+      const mime = String(p.type ?? '')
+      const ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : /gif/.test(mime) ? 'gif' : 'jpg'
       const buf = Buffer.from(String(p.data ?? '').replace(/^data:[^,]*,/, ''), 'base64')
-      const ext = /png/.test(p.type ?? '') ? 'png' : /webp/.test(p.type ?? '') ? 'webp' : /gif/.test(p.type ?? '') ? 'gif' : 'jpg'
       if (!buf.length || !this.images.put(session.threadTs, buf, p.type)) continue
       const dir = imagesDir()
       mkdirSync(dir, { recursive: true })

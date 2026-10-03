@@ -54,6 +54,42 @@ test('웹에서 보낸 메시지는 스레드에 🌐 로 남고 스레드 답�
   t.close()
 })
 
+test('웹에서 보낸 그림: 장수·용량·형식·장당 크기 한도를 브로커에서도 거절한다 (claude-web 이관: 18)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYJg=='
+  const pic = { name: 'a.png', type: 'image/png', data: png1x1 }
+
+  // 8장까지는 되고, 9장이면 통째로 거절한다.
+  const r8 = await t.broker.webSend(100, '', Array.from({ length: 8 }, () => pic))
+  assert.equal(r8.ok, true)
+  const r9 = await t.broker.webSend(100, '', Array.from({ length: 9 }, () => pic))
+  assert.equal(r9.ok, false)
+  assert.match(r9.note, /8장/)
+
+  // 모르는 형식.
+  const bad = await t.broker.webSend(100, '', [{ name: 'a.bmp', type: 'image/bmp', data: png1x1 }])
+  assert.equal(bad.ok, false)
+  assert.match(bad.note, /형식/)
+
+  // 장당 10MiB 를 넘는 것.
+  const big = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
+  const tooBig = await t.broker.webSend(100, '', [{ name: 'a.png', type: 'image/png', data: big }])
+  assert.equal(tooBig.ok, false)
+  assert.match(tooBig.note, /10MiB/)
+
+  // 모두 base64 합 3,145,728자를 넘는 것(한 장은 한도 안이어도).
+  const almostMax = Buffer.alloc(2_400_000).toString('base64')
+  const overTotal = await t.broker.webSend(100, '', [
+    { name: 'a.png', type: 'image/png', data: almostMax },
+    { name: 'b.png', type: 'image/png', data: almostMax },
+  ])
+  assert.equal(overTotal.ok, false)
+  assert.match(overTotal.note, /용량/)
+  s.conn.close()
+  t.close()
+})
+
 test('권한 카드는 웹에 버튼째 오고, 웹의 허용은 Slack 버튼과 같은 처리로 카드를 접는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, {})

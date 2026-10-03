@@ -2018,27 +2018,63 @@ $('convo').addEventListener('drop', (e) => {
   e.preventDefault()
   addPictures(files)
 })
+// 18: limits also enforced in src/broker.ts webSend — a page is never the only thing that can reach that call.
+const PIC_MAX = 8
+const PIC_BASE64_MAX = 3_145_728
+const PIC_BYTES_MAX = 10 * 1024 * 1024
+const PIC_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp'])
+/** True while a batch is being read/shrunk: blocks sending (a half-attached message should not go). */
+let addingPictures = false
 async function addPictures(files) {
-  if (!current) return
-  const list = pending.get(current) ?? []
-  for (const f of files.slice(0, 10 - list.length)) {
-    try {
-      list.push(await shrinkPicture(f))
-    } catch {
-      toast(`${f.name} 을(를) 읽지 못했어요`, 'err')
-    }
-  }
-  pending.set(current, list)
+  if (!current || addingPictures) return
+  const thread = current // fixed for this whole batch: switching sessions mid-read must not misfile a picture
+  addingPictures = true
   renderPending()
+  try {
+    const list = pending.get(thread) ?? []
+    for (const f of files) {
+      if (list.length >= PIC_MAX) {
+        toast(`한 메시지에 그림은 ${PIC_MAX}장까지예요`, 'err')
+        break
+      }
+      if (!PIC_TYPES.has(f.type)) {
+        toast(`${f.name}: 지원하지 않는 그림 형식이에요`, 'err')
+        continue
+      }
+      if (f.size > PIC_BYTES_MAX) {
+        toast(`${f.name}: 10MiB 를 넘어요`, 'err')
+        continue
+      }
+      try {
+        const pic = await shrinkPicture(f)
+        const total = list.reduce((n, p) => n + p.data.length, 0) + pic.data.length
+        if (total > PIC_BASE64_MAX) {
+          toast(`${f.name}: 이 메시지에 그림을 더 담을 수 없어요`, 'err')
+          continue
+        }
+        list.push(pic)
+      } catch {
+        toast(`${f.name} 을(를) 읽지 못했어요`, 'err')
+      }
+    }
+    pending.set(thread, list)
+  } finally {
+    addingPictures = false
+    renderPending()
+  }
 }
-/** Width 1600 at most, JPEG 0.85, unless the original is already small (a GIF keeps its frames). */
+/** Long side 1,568px at most, JPEG 0.85 on a white backing (a transparent PNG must not turn black),
+ *  unless the original is already small (a GIF keeps its frames). */
 async function shrinkPicture(f) {
   const dataOf = (blob) => new Promise((res, rej) => Object.assign(new FileReader(), { onload: (e) => res(e.target.result), onerror: rej }).readAsDataURL(blob))
   if (f.size <= 300_000 || f.type === 'image/gif') return { name: f.name, type: f.type, data: await dataOf(f), url: URL.createObjectURL(f) }
   const bmp = await createImageBitmap(f)
-  const scale = Math.min(1, 1600 / bmp.width)
+  const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height))
   const c = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * scale), height: Math.round(bmp.height * scale) })
-  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height)
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#fff'
+  ctx.fillRect(0, 0, c.width, c.height)
+  ctx.drawImage(bmp, 0, 0, c.width, c.height)
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85))
   const small = blob && blob.size < f.size ? blob : f
   return { name: f.name, type: small.type, data: await dataOf(small), url: URL.createObjectURL(small) }
@@ -2063,7 +2099,9 @@ function renderPending() {
     })
     box.append(t)
   })
-  $('btn-send').disabled = !input.value.trim() && !list.length
+  // While a batch of pictures is still being read/shrunk (18), sending is blocked — a message should not
+  // go out half-attached.
+  $('btn-send').disabled = addingPictures || (!input.value.trim() && !list.length)
 }
 
 // ------------------------------------------------------------------ composer: input
@@ -2082,7 +2120,7 @@ function loadDraft() {
 function autosize() {
   input.style.height = 'auto'
   input.style.height = Math.min(input.scrollHeight, 140) + 'px'
-  $('btn-send').disabled = !input.value.trim() && !(current && pending.get(current)?.length)
+  $('btn-send').disabled = addingPictures || (!input.value.trim() && !(current && pending.get(current)?.length))
 }
 input.addEventListener('input', () => {
   autosize()
