@@ -325,6 +325,8 @@ interface PendingLaunch {
   /** What it was launched with (--model / --effort), known before any hook or screen says so. */
   model?: string
   effort?: string
+  /** Said once that the launch is taking a while but the pane is still there, so it is not said again every timeout. */
+  warnedLate?: boolean
 }
 
 /** What a command handler is given. The pane is known to exist. */
@@ -3374,6 +3376,17 @@ export class Broker {
     }
     if (o.fork) this.startFork(threadTs, o.fork)
     const sessionKeyForLaunch = randomUUID()
+    // A resume's transcript already has everything from its earlier runs; if the shim is slow to say hello,
+    // the tailer must not start at "now" and skip whatever Claude Code writes in between. Seeding the offset
+    // with the file's size at launch time, before it has even started, makes "now" mean the same thing later.
+    if (o.resumeId) {
+      const path = (this.cfg.transcriptPathFor ?? transcriptPathFor)(cwd, o.resumeId)
+      if (path) {
+        try {
+          this.offsets.set(sessionKeyForLaunch, path, statSync(path).size)
+        } catch {}
+      }
+    }
     let launched: { window: string; pane: string }
     try {
       launched = await this.tmux.launch({
@@ -3430,20 +3443,38 @@ export class Broker {
 
   private scheduleLaunchTimeout(threadTs: string, statusTs: string): void {
     const timer = setTimeout(() => {
-      const gaveUpOn = this.pendingLaunches.get(threadTs!)
-      if (!this.pendingLaunches.delete(threadTs!)) return
-      if (gaveUpOn?.resumeId) this.refreshFailed.set(threadTs!, Date.now())
-      this.changed()
-      this.slack.update(statusTs, '⚠️ 세션이 연결되지 않았습니다', [{ type: 'section', text: { type: 'mrkdwn', text: '⚠️ *세션이 연결되지 않았습니다.* tmux 창을 직접 확인해 보세요: `tmux attach -t claude-slack`' } }]).catch(() => {})
-      // Whatever was waiting has nowhere to go now, and silently dropping it is
-      // how someone ends up wondering why their message was never answered.
-      if (gaveUpOn?.queued.length) {
-        this.slack
-          .post({ threadTs: threadTs!, text: `⚠️ 전달하지 못한 메시지 ${gaveUpOn.queued.length}개가 있습니다. 세션이 뜨면 다시 보내주세요.` })
-          .catch(() => {})
-      }
+      this.onLaunchTimeout(threadTs, statusTs).catch((e) => this.logAt('WARN', 'launch', `timeout check failed: ${describeError(e)}`, { t: threadTs }))
     }, this.cfg.launchTimeoutMs ?? LAUNCH_TIMEOUT_MS)
     timer.unref?.()
+  }
+
+  /**
+   * The launch timeout fired: a process that is actually still coming up (a loaded host, a slow Claude Code
+   * startup) gets more time rather than a second launch piling onto the same thread once it does say hello —
+   * only a pane that is genuinely gone is given up on.
+   */
+  private async onLaunchTimeout(threadTs: string, statusTs: string): Promise<void> {
+    const pending = this.pendingLaunches.get(threadTs)
+    if (!pending) return
+    if (await this.tmux.hasPane(pending.pane)) {
+      if (!pending.warnedLate) {
+        pending.warnedLate = true
+        await this.slack.post({ threadTs, text: '⏳ 세션이 아직 뜨는 중입니다 (예상보다 오래 걸리고 있습니다). 터미널 창은 열려 있으니 조금만 더 기다려 주세요.' }).catch(() => {})
+      }
+      this.scheduleLaunchTimeout(threadTs, statusTs)
+      return
+    }
+    this.pendingLaunches.delete(threadTs)
+    if (pending.resumeId) this.refreshFailed.set(threadTs, Date.now())
+    this.changed()
+    await this.slack.update(statusTs, '⚠️ 세션이 연결되지 않았습니다', [{ type: 'section', text: { type: 'mrkdwn', text: '⚠️ *세션이 연결되지 않았습니다.* tmux 창을 직접 확인해 보세요: `tmux attach -t claude-slack`' } }]).catch(() => {})
+    // Whatever was waiting has nowhere to go now, and silently dropping it is
+    // how someone ends up wondering why their message was never answered.
+    if (pending.queued.length) {
+      await this.slack
+        .post({ threadTs, text: `⚠️ 전달하지 못한 메시지 ${pending.queued.length}개가 있습니다. 세션이 뜨면 다시 보내주세요.` })
+        .catch(() => {})
+    }
   }
 
   /**

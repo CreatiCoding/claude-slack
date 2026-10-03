@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendFileSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { Broker, type BrokerConfig } from '../src/broker.ts'
 import { connect, listen, type Conn } from '../src/ipc.ts'
 import { slashCommandName, SLASH_COMMANDS, type SlackApi, type StreamChunk } from '../src/slack.ts'
@@ -2049,6 +2049,38 @@ test('유령 프로세스가 끝나도, 같은 스레드에 살아 있는 세션
   // 진짜 살아 있는 세션은 여전히 그 스레드의 주인이고, 메시지도 계속 간다.
   await t.broker.handleSlackMessage({ user: 'U1', text: '아직 살아있지', ts: '9.1', threadTs: s.ack, channel: 'C1' })
   await until(() => s.inbox.some((m) => (m as { text?: string }).text === '아직 살아있지'), '진짜 세션으로 전달된다')
+  s.conn.close()
+  t.close()
+})
+
+test('세션 연결이 늦어도, tmux 창이 아직 있으면 포기하지 않고 기다린다 (claude-web 이관: P0-7)', async () => {
+  const t = await setup({ launchTimeoutMs: 40 })
+  const dir = tmpdir()
+  t.tmux.alivePanes = new Set(['%9']) // FakeTmux.launch 는 항상 pane '%9' 를 돌려준다.
+  await t.broker.handleSlackMessage({ user: 'U1', text: `${dir} 시작해줘`, ts: '7.0', channel: 'C1' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: '이것도 봐줘', ts: '7.1', threadTs: '7.0', channel: 'C1' })
+  await tick(200) // 제한 시간을 여러 번 넘긴다.
+  assert.ok(t.slack.texts().some((x) => /세션이 아직 뜨는 중입니다/.test(x)), '포기하지 않고 기다린다는 안내')
+  assert.ok(!t.slack.texts().some((x) => /전달하지 못한 메시지/.test(x)), '아직 버리지 않았다')
+  // 창이 늦게라도 붙으면 쌓인 메시지를 받는다.
+  const s = await shim(t.socketPath, { tmuxPane: '%9', threadTs: '7.0' })
+  await until(() => s.inbox.some((m) => (m as { text?: string }).text?.includes('이것도 봐줘')), '뒤늦게 붙어도 쌓인 메시지를 받는다')
+  s.conn.close()
+  t.close()
+})
+
+test('재개로 띄울 때 이미 있던 트랜스크립트 크기를 기억해 두어, 늦게 붙어도 지난 내용을 다시 읽지 않고 새로 쓰인 것만 읽는다', async () => {
+  const transcript = join(mkdtempSync(join(tmpdir(), 'resume-')), 'existing.jsonl')
+  writeFileSync(transcript, assistant({ type: 'text', text: '이전 회차의 마지막 말' }))
+  const t = await setup({ transcriptPathFor: () => transcript })
+  await t.broker.launchSession({ cwd: '/home/u/proj', prompt: '', user: 'U1', resumeId: 'existing' })
+  const key = t.tmux.launches.at(-1)!.env.CLAUDE_SLACK_SESSION!
+  const threadTs = t.slack.posts[0]!.ts
+  const s = await shim(t.socketPath, { key, pid: 1, tmuxPane: '%9', threadTs })
+  appendFileSync(transcript, assistant({ type: 'text', text: '새로 쓰인 대답' }))
+  const seenInStreams = (needle: string) => t.slack.streams.some((st) => JSON.stringify(st.chunks).includes(needle))
+  await until(() => seenInStreams('새로 쓰인 대답'), '새로 쓰인 것은 읽는다')
+  assert.ok(!seenInStreams('이전 회차의 마지막 말'), '지난 내용은 다시 읽지 않는다')
   s.conn.close()
   t.close()
 })
