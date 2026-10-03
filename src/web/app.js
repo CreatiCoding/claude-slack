@@ -1143,6 +1143,7 @@ function drawConvo(evs, { live = false } = {}) {
   renderTodos()
   renderWaitingNote()
   renderActivity()
+  renderChoiceChips()
   if (follow) scrollToBottom()
   else if (view.rows.length > before) $('jump').hidden = false
   noteApply(performance.now() - t0)
@@ -1280,6 +1281,46 @@ function flush(before) {
     }
   }
   log.append(frag)
+}
+
+/**
+ * A trailing ```choices block (22): buttons under the last answer only — not every answer that ever had
+ * one, which is why this redraws on every `drawConvo`, not just when the choices themselves arrive.
+ * Picking one sends it as a message (§4.3.14's chips do the same: `sendText` directly, no composer round
+ * trip); the X remembers (`dismissed-choices`, last 50) so a closed set does not come back on reopen.
+ */
+function renderChoiceChips() {
+  $('log').querySelector('.choice-chips')?.remove()
+  const last = view.rows.at(-1)
+  if (!last || last.deleted || last.kind !== 'text' || !last.ev.choices?.length || !last.el) return
+  if (store.get('dismissed-choices', []).includes(last.ev.ts)) return
+  const box = document.createElement('div')
+  box.className = 'choice-chips'
+  for (const c of last.ev.choices) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'chip'
+    b.textContent = c
+    b.addEventListener('click', () => {
+      dismissChoices(last.ev.ts)
+      const s = current && sessionOf(current)
+      if (s) sendText(s, c)
+    })
+    box.append(b)
+  }
+  const x = document.createElement('button')
+  x.type = 'button'
+  x.className = 'chip-x icon-btn'
+  x.setAttribute('aria-label', '닫기')
+  x.innerHTML = icon('close')
+  x.addEventListener('click', () => dismissChoices(last.ev.ts))
+  box.append(x)
+  last.el.after(box)
+}
+function dismissChoices(ts) {
+  $('log').querySelector('.choice-chips')?.remove()
+  const dismissed = store.get('dismissed-choices', [])
+  if (!dismissed.includes(ts)) store.set('dismissed-choices', [...dismissed, ts].slice(-50))
 }
 
 /** Scrolled to the top: draw the previous 150 rows above, keeping what is on screen where it is. */

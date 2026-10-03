@@ -287,6 +287,10 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .chip:hover { background: var(--soft); }
 .chip .ic { width: 13px; height: 13px; }
 .chip.hot { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+/* 22: a trailing ```choices block's buttons, under the last answer only. */
+.choice-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; align-self: flex-start; margin: -4px 0 4px; }
+.choice-chips .chip-x { width: 24px; height: 24px; }
+.choice-chips .chip-x .ic { width: 14px; height: 14px; }
 .input-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 6px; }
 .input-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 /* 20: a repeated identical send is held back once — this is what says "같은 메시지예요" without words alone. */

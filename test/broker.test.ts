@@ -136,6 +136,35 @@ test('이미 흘려보낸 답변은 다시 올리지 않는다', async () => {
   t.close()
 })
 
+test('답 끝 ```choices 블록은 떼어 글로는 안 올리고, 버튼 메시지를 따로 올린다; 누르면 그 글을 보낸다 (22)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '1.1', threadTs: s.ack, channel: 'C1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'Stop', last_assistant_message: '무엇을 할까요?\n\n```choices\n계속하기\n그만두기\n```' })
+
+  const posts = t.slack.posts.filter((p) => p.threadTs === s.ack)
+  assert.ok(posts.some((p) => p.text === '무엇을 할까요?'), `블록을 뗀 글이 올라간다: ${JSON.stringify(posts.map((p) => p.text))}`)
+  assert.ok(!posts.some((p) => p.text?.includes('```choices')), '```choices 자체는 글로 안 올라간다')
+  const btnPost = posts.find((p) => (p.blocks as Array<{ block_id?: string }> | undefined)?.some((b) => b.block_id?.startsWith('choice_')))
+  assert.ok(btnPost, `버튼 메시지가 따로 올라간다: ${JSON.stringify(posts.map((p) => ({ text: p.text, blocks: p.blocks })))}`)
+  const elements = (btnPost!.blocks as Array<{ block_id?: string; elements?: Array<{ action_id: string; value: string }> }>).find((b) => b.block_id?.startsWith('choice_'))!.elements!
+  assert.equal(elements.length, 2)
+
+  await t.broker.handleAction({ user: 'U1', actionId: elements[0]!.action_id, value: elements[0]!.value, channel: 'C1', messageTs: btnPost!.ts })
+  await tick()
+  assert.ok(s.inbox.some((m) => (m as { type: string; text?: string }).type === 'inbound' && (m as { text: string }).text === '계속하기'), '고른 글이 세션에 들어간다')
+  assert.ok(t.slack.updates.some((u) => u.ts === btnPost!.ts && u.text?.includes('☑️ 계속하기')), '카드가 결과로 접힌다')
+
+  // 다른 선택지(그만두기)를 눌러도 — 이미 하나를 골라 지난 카드라 — 거절한다. (다른 value 를 써서
+  // 중복 눌림 걸러내기(1.5s 안의 같은 user·actionId·value·messageTs)와 겹치지 않게 한다.)
+  await t.broker.handleAction({ user: 'U1', actionId: elements[1]!.action_id, value: elements[1]!.value, channel: 'C1', messageTs: btnPost!.ts })
+  await tick()
+  assert.ok(t.slack.ephemerals.at(-1)?.text.includes('이미 지난 선택지'))
+  s.conn.close()
+  t.close()
+})
+
 test('streaming unavailable falls back to an edited plain message', async () => {
   const t = await setup()
   t.slack.failStreaming = true

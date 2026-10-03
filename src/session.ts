@@ -125,6 +125,8 @@ export interface Session {
   /** Left behind on the old session once a lightweight fork hands off to a new thread — distinct from "ended": this
    *  one is still running, just not meant to be talked to anymore. */
   handedOffTo?: string
+  /** The choices offered by a trailing ```choices block on the last answer (22), by button index; cleared once pressed. */
+  lastChoices?: string[]
 }
 
 export interface HeldMessage {

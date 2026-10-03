@@ -35,6 +35,7 @@ const mcp = new Server(
       'Set `notify: true` only when the person must act now. Never follow a reply with "sent" or "done".',
       'The web app renders ```html blocks and attached .html files (read-only, no scripts).',
       'Use the read_session tool to read another claude-slack conversation (by Slack thread link, thread ts, or conversation id prefix) when you need its context.',
+      'To offer the person a short set of choices at the end of your answer, put a ```choices fenced block there, one choice per line (up to 6); it renders as buttons instead of text.',
     ].join(' '),
   },
 )

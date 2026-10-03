@@ -95,6 +95,25 @@ export function toMrkdwn(md: string): string {
     .join('')
 }
 
+const CHOICES_RE = /\n?```choices\n([\s\S]*?)\n```\s*$/
+
+/**
+ * A trailing ```choices fenced block (22): up to 6 short options the person picks instead of typing a
+ * reply. Pulled off the end of the answer — never mid-answer — so the text that goes to Slack and the web
+ * is the same either way, with the choices carried separately for each surface to render as buttons.
+ */
+export function extractChoices(text: string): { text: string; choices?: string[] } {
+  const m = CHOICES_RE.exec(text)
+  if (!m) return { text }
+  const choices = m[1]!
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+  if (!choices.length) return { text }
+  return { text: text.slice(0, m.index).replace(/\s+$/, ''), choices }
+}
+
 /** Split long text for Slack, keeping ``` fences balanced across chunks. */
 export function chunk(text: string, max = SLACK_MAX_CHARS): string[] {
   if (text.length <= max) return [text]

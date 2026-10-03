@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { activityDetails, activityLine, activitySources, chunk, describeError, processAlive, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, sameMessage, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
+import { activityDetails, activityLine, activitySources, chunk, describeError, extractChoices, processAlive, detectContextUsage, duration, parseColumns, parseLaunchText, parseTodos, PERMISSION_REPLY_RE, sameMessage, screenDigest, systemEnvelope, tableBlock, todoList, toMrkdwn } from '../src/format.ts'
 import { decodeAnswer, decodeResume, encodeResume, OPTION_VALUE_MAX } from '../src/actions.ts'
 import { alertBlock, todoPlanBlock } from '../src/format.ts'
 
@@ -325,6 +325,19 @@ test('toMrkdwn 은 표를 줄 목록으로 바꾼다 (폰에서 | 가 그대로 
 test('processAlive: 지금 살아 있는 프로세스는 참, 없는 pid 는 거짓', () => {
   assert.equal(processAlive(process.pid), true)
   assert.equal(processAlive(999999), false)
+})
+
+test('extractChoices: 답 끝의 ```choices 블록을 떼어 최대 6개까지 (22)', () => {
+  const r = extractChoices('무엇을 할까요?\n\n```choices\n계속하기\n그만두기\n```')
+  assert.equal(r.text, '무엇을 할까요?')
+  assert.deepEqual(r.choices, ['계속하기', '그만두기'])
+  // 중간에 있으면(답 끝이 아니면) 떼지 않는다.
+  assert.deepEqual(extractChoices('```choices\na\n```\n뒤에 글이 더 있다'), { text: '```choices\na\n```\n뒤에 글이 더 있다' })
+  // 블록이 없으면 그대로.
+  assert.deepEqual(extractChoices('그냥 글'), { text: '그냥 글' })
+  // 7개 넘으면 앞 6개만.
+  const many = extractChoices('골라요\n```choices\n' + Array.from({ length: 7 }, (_, i) => `선택${i + 1}`).join('\n') + '\n```')
+  assert.equal(many.choices!.length, 6)
 })
 
 test('sameMessage: 이미지/파일 첨부 표시가 붙거나 바뀌어도 같은 메시지로 본다 (claude-web 이관: P3-28)', () => {

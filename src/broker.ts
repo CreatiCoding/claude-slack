@@ -21,8 +21,8 @@ import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction,
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, readSessionText, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
-import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
-import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
+import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, extractChoices, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
+import { answeredBlocks, choiceBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
 import { TitleStore } from './titles.ts'
@@ -2032,10 +2032,17 @@ export class Broker {
     // "sent" after a reply-tool call is the model narrating the tool result, not an answer.
     const echo = repliedThisTurn && isToolEcho(finalText)
     if (finalText && !echo && !turn?.rendered(finalText)) {
+      // A trailing ```choices block (22) is never part of the answer itself, on either surface.
+      const { text: stripped, choices } = extractChoices(finalText)
       const who = this.wantsMention(session, 'all') ? `<@${session.recipient || this.defaultRecipient}> ` : ''
-      const parts = chunk(toMrkdwn(finalText))
-      this.emitEvent(session.threadTs, { type: 'text', text: finalText })
+      const parts = chunk(toMrkdwn(stripped))
+      this.emitEvent(session.threadTs, { type: 'text', text: stripped, ...(choices ? { choices } : {}) })
       for (const [i, part] of parts.entries()) await this.quietSlack.post({ threadTs: session.threadTs, text: i === 0 ? who + part : part })
+      if (choices) {
+        session.lastChoices = choices
+        const cb = choiceBlocks(session.pid, choices, this.mentionFor(session, 'decision'))
+        await this.quietSlack.post({ threadTs: session.threadTs, text: cb.text, blocks: cb.blocks })
+      }
     } else if (echo) this.logAt('DEBUG', 'stream', 'dropped tool-echo final text', this.tag(session, { text: finalText.trim() }))
 
     if (session.triggerTs) {
@@ -4047,6 +4054,24 @@ export class Broker {
     now: { user: true, run: async (c) => void (c.session.held?.length ? await this.sendHeldNow(c.session) : await this.nothingHeld(c)) },
     sendnow: { run: async (c) => void (c.session.held?.length ? await this.sendHeldNow(c.session) : await this.nothingHeld(c)) },
     dropheld: { run: async (c) => void (c.session.held?.length ? await this.dropHeld(c.session) : await this.nothingHeld(c)) },
+
+    /** A button from a ```choices block (22): sends that line as if the person had typed it. */
+    choice: {
+      run: async (c) => {
+        const text = c.session.lastChoices?.[Number(c.arg)]
+        if (text === undefined) {
+          if (c.messageTs) await c.ack('이미 지난 선택지입니다.')
+          else await c.post('이미 지난 선택지입니다.')
+          return
+        }
+        c.session.lastChoices = undefined
+        await this.deliver(c.session, text, this.defaultRecipient, c.session.threadTs)
+        if (c.messageTs) {
+          const label = `☑️ ${text} · <@${c.user ?? this.defaultRecipient}>`
+          await this.slack.update(c.messageTs, label, [{ type: 'section', text: { type: 'mrkdwn', text: label } }]).catch(() => {})
+        } else await c.ack(`☑️ ${text}`)
+      },
+    },
 
     /** The "▶️ 계속해" button on a stuck notice. */
     continue: {

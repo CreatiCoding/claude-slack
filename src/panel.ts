@@ -293,6 +293,15 @@ export function stuckBlocks(pid: number, o: { text: string; actions: Array<'cont
   }
 }
 
+/** A trailing ```choices block (22): one button per choice, pressed in place of typing it. */
+export function choiceBlocks(pid: number, choices: string[], mention?: string): { text: string; blocks: unknown[] } {
+  const text = `${mention ? `<@${mention}> ` : ''}🔘 ${choices.join(' · ')}`
+  return {
+    text,
+    blocks: [{ type: 'actions', block_id: `choice_${pid}`, elements: choices.map((c, i) => btn(truncate(c, 75), ACTION.ctlBtn, encodeValue(pid, `choice ${i}`))) }],
+  }
+}
+
 /** AskUserQuestion rendered as one button row per question. */
 export function questionBlocks(pid: number, questions: Question[], intro?: string, mention?: string): { text: string; blocks: unknown[] } {
   const who = mention ? `<@${mention}> ` : ''
