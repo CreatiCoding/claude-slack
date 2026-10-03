@@ -1098,6 +1098,31 @@ scroller.addEventListener('scroll', () => {
 })
 $('jump').firstElementChild.addEventListener('click', scrollToBottom)
 
+// Dragging the conversation a real distance drops the phone keyboard (37) — a long pull to read something
+// above is treated the same as deliberately tapping away from the input. A short flick (reading a line or
+// two) and the inertia after letting go (no more touchmove fires) do not count, only the active drag.
+const KEYBOARD_DROP_DRAG_PX = 120
+let kbdDragY = null
+scroller.addEventListener(
+  'touchstart',
+  (e) => {
+    kbdDragY = e.touches.length === 1 ? e.touches[0].clientY : null
+  },
+  { passive: true },
+)
+scroller.addEventListener(
+  'touchmove',
+  (e) => {
+    if (kbdDragY == null) return
+    if (Math.abs(e.touches[0].clientY - kbdDragY) > KEYBOARD_DROP_DRAG_PX) {
+      input.blur()
+      kbdDragY = null // once per touch, not every px past the threshold
+    }
+  },
+  { passive: true },
+)
+scroller.addEventListener('touchend', () => (kbdDragY = null))
+
 function timeEl(at) {
   const d = document.createElement('div')
   d.className = 'time'
