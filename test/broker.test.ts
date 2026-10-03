@@ -2397,3 +2397,40 @@ test('사람이 지은 이름은 재시작·재개 뒤에도 남는다 (claude-w
   s2.conn.close()
   t2.close()
 })
+
+test(':btw 는 작업 중에도 받고, 화면을 읽어 답을 올린다 (claude-web 이관: P3-24)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  appendFileSync(t.transcript, assistant({ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'npm test' } }))
+  await tick(150)
+  t.tmux.screen = '  Running\n'
+  void t.broker.handleSlackMessage({ user: 'U1', text: ':btw 지금 몇 번째 파일 고치는 중이야?', ts: '9.2', threadTs: s.ack, channel: 'C1' })
+  await until(() => t.tmux.keys.some((k) => /\/btw/.test(k)), '작업 중에도 바로 친다')
+  await until(() => t.slack.texts().some((x) => /\/btw/.test(x)), '질문을 먼저 올린다')
+  t.tmux.screen = '  Running\n  /btw 지금 몇 번째 파일 고치는 중이야?\n  두 번째 파일을 고치고 있어요\n  ↑/↓ to scroll · c to copy\n'
+  await until(() => t.slack.texts().some((x) => /두 번째 파일을 고치고 있어요/.test(x)), '답을 올린다', 6000)
+  assert.ok(t.tmux.keys.includes('%1:Escape'), '패널을 닫는다')
+  s.conn.close()
+  t.close()
+})
+
+test(':btw 는 스피너만 있는 화면을 답으로 올리지 않고, 같은 내용이 두 번 읽혀야 답으로 받는다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%2' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  const frames = [
+    '  /btw 질문\n  ✽ Thinking… (1s)\n',
+    '  /btw 질문\n  ✽ Thinking… (2s)\n',
+    '  /btw 질문\n  일부만 나온 답\n',
+    '  /btw 질문\n  일부만 나온 답\n',
+  ]
+  let i = 0
+  t.tmux.capture = async () => frames[Math.min(i++, frames.length - 1)]!
+  void t.broker.handleSlackMessage({ user: 'U1', text: ':btw 질문', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await until(() => t.slack.texts().some((x) => /일부만 나온 답/.test(x)), '안정된 뒤에만 답으로 올린다', 6000)
+  assert.ok(!t.slack.texts().some((x) => /Thinking/.test(x)), '스피너는 답으로 올리지 않는다')
+  s.conn.close()
+  t.close()
+})

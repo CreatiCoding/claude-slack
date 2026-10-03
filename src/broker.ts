@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import type { Conn } from './ipc.ts'
 import { WAITING_LABEL, type HeldMessage, type NotifyMode, type Session, type ViewMode, type WaitingReason } from './session.ts'
 import type { Fields, Level, Logger } from './log.ts'
-import { detectStuckState, inputBoxHas, classifierDenial, isToolEcho, subagentReport } from './stuck.ts'
+import { detectStuckState, inputBoxHas, classifierDenial, isToolEcho, subagentReport, WORKING_RE } from './stuck.ts'
 import { SessionRegistry } from './registry.ts'
 import { RecentKeys } from './dedupe.ts'
 import { OffsetStore } from './offsets.ts'
@@ -272,6 +272,8 @@ const DIALOG_POLL_MS = 300
 const MODE_CYCLE_TRIES = 5
 /** Poll interval while waiting for a command's output to stop redrawing. */
 const SCREEN_SETTLE_MS = 400
+const BTW_TIMEOUT_MS = 60_000
+const BTW_POLL_MS = 400
 const SCREEN_SETTLE_TIMEOUT_MS = 4000
 /** Lines kept from a screen: enough for a glance, few enough to read on a phone. */
 const SCREEN_DIGEST_LINES = 20
@@ -2357,6 +2359,35 @@ export class Broker {
   }
 
   /**
+   * Read `/btw`'s answer off the screen: polled, not just "stopped changing" (a slow start can sit on the
+   * spinner just long enough to look settled), and only accepted once the same non-spinner content reads
+   * back twice in a row — a panel still filling in is "not yet", not a short, truncated answer.
+   */
+  private async readBtwAnswer(pane: string, before: string, timeoutMs = BTW_TIMEOUT_MS): Promise<string | undefined> {
+    const deadline = Date.now() + timeoutMs
+    let lastFresh: string | undefined
+    while (Date.now() < deadline) {
+      await sleep(BTW_POLL_MS)
+      const screen = await this.tmux.capture(pane)
+      const after = screenDigest(screen, 200)
+      const lines = after
+        .split('\n')
+        .filter((l) => !before.includes(l) && !l.includes('/btw') && !/to scroll · c to copy|Plugins updated|reload-plugins/i.test(l))
+        .map((l) => l.replace(/[▔]{3,}/g, '').trim())
+        .filter(Boolean)
+      // A spinner line alone ("✽ Thinking… (2s)") is still working, not an answer yet.
+      if (!lines.length || (lines.length === 1 && WORKING_RE.test(lines[0]!))) {
+        lastFresh = undefined
+        continue
+      }
+      const fresh = lines.join('\n')
+      if (fresh === lastFresh) return fresh
+      lastFresh = fresh
+    }
+    return lastFresh
+  }
+
+  /**
    * Show a terminal screen in the thread. The digest drops box rules, the status
    * line and the empty input box, which is nearly all of a full-height TUI on a
    * phone; `raw` keeps every line for when that is the point.
@@ -3791,22 +3822,15 @@ export class Broker {
       run: async (c) => {
         const q = c.arg.trim()
         if (!q) return void (await c.post('사용법: `:btw 질문` — 대화에 남기지 않고 지금까지의 맥락으로만 답합니다.'))
-        if (c.session.turn) return void (await c.post('작업 중에는 옆길 질문을 할 수 없습니다. 끝난 뒤 다시 보내세요.'))
+        // A side question does not touch the main turn — typed in even while one is running, same as Claude
+        // Code's own /btw is meant to be used (a question about the conversation, not a step in it).
         const before = screenDigest(await this.tmux.capture(c.pane), 200)
         await this.tmux.typeLine(c.pane, `/btw ${q}`)
         await c.post(`💬 \`/btw ${truncate(q, 120)}\``)
-        const screen = await this.settledScreen(c.pane, 60_000)
-        const after = screenDigest(screen, 200)
-        // What the answer added: the digest lines that were not there before the question,
-        // minus the panel's own chrome (its key hints, the plugin banner that shares its rule line).
-        const fresh = after
-          .split('\n')
-          .filter((l) => !before.includes(l) && !l.includes('/btw') && !/to scroll · c to copy|Plugins updated|reload-plugins/i.test(l))
-          .map((l) => l.replace(/[▔]{3,}/g, '').trim())
-          .filter(Boolean)
+        const fresh = await this.readBtwAnswer(c.pane, before)
         // The answer sits in a panel that keeps the keyboard until Esc; close it so the next message is not typed into it.
         await this.tmux.sendKeys(c.pane, ['Escape'])
-        await c.post(fresh.length ? '```' + truncate(fresh.join('\n').replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했습니다. `:screen` 으로 확인하세요.')
+        await c.post(fresh ? '```' + truncate(fresh.replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했습니다. 화면을 확인하세요.')
       },
     },
 

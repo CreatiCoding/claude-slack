@@ -23,7 +23,7 @@ const INTERRUPTED_RE = /Interrupted\s*[·•]\s*What should Claude do instead\?/
 const EMPTY_PROMPT_RE = /^\s*❯\s*$/m
 // `esc to interrupt` is the familiar hint; newer Claude Code also shows only a spinner line
 // (`✽ Flibbertigibbeting… (13m 20s · ↓ 14.5k tokens)`) while a long tool call runs, with no hint text at all.
-const WORKING_RE = /esc to interrupt|^\s*[✻✢✶✳✽✦*·]\s+\S+…\s*\(\d/im
+export const WORKING_RE = /esc to interrupt|^\s*[✻✢✶✳✽✦*·]\s+\S+…\s*\(\d/im
 
 /**
  * Read a stuck state off a screen. Only states that are unambiguous on the
