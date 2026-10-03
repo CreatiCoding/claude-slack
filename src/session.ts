@@ -103,6 +103,8 @@ export interface Session {
   autoAllowWatch?: ReturnType<typeof setInterval>
   /** The ts of the question/plan card currently open (waitingReason 'question'/'plan'), so a free-text answer can fold it instead of leaving it sitting there unanswered. */
   openDialogTs?: string
+  /** How many of a multi-question AskUserQuestion card's questions are still unanswered; 0 means it is time to press Claude Code's own "Submit answers". undefined outside a question card. */
+  openQuestionsRemaining?: number
   /** The last PreToolUse seen, so a permission card can show the actual edit rather than a one-line preview. */
   lastToolInput?: { name: string; input: unknown; at: number }
   /** The stuck state already reported for this screen, so it is not posted twice. */

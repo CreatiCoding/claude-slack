@@ -1728,6 +1728,9 @@ export class Broker {
           const questions = ((event.tool_input as { questions?: Question[] })?.questions ?? []) as Question[]
           const { text, blocks } = questionBlocks(session.pid, questions, undefined, this.mentionFor(session, 'decision'))
           session.openDialogTs = await post(text, blocks)
+          // More than one question needs Claude Code's own "Submit answers" pressed once every question has
+          // an answer; a single question submits itself (Enter) and there is no such line to press.
+          session.openQuestionsRemaining = questions.length > 1 ? questions.length : undefined
           this.markWaiting(session, 'question')
           await this.setStatus(session, 'suspended')
         } else if (event.tool_name === 'ExitPlanMode') {
@@ -3791,6 +3794,13 @@ export class Broker {
         // `answer <questionIndex> <optionNumber> [label]` — decoded by the shared contract.
         const n = decodeAnswer(c.cmd)?.optionNumber
         if (!n) return
+        // A button from a question/plan card that is no longer the open one (answered, replaced by a later
+        // question set) must not touch the terminal at all: the screen may by now hold an unrelated dialog
+        // that happens to offer the same number, and pressing it would answer the wrong thing.
+        if (c.fromButton && c.messageTs && c.session.openDialogTs && c.messageTs !== c.session.openDialogTs) {
+          await c.ack('이 선택은 이미 끝났습니다 (다른 카드로 넘어갔습니다).')
+          return
+        }
         // A stale button — an older card whose dialog is already answered or gone —
         // must not type the digit into the prompt, where it would be sent as a message.
         const answered = await this.dialogs.answerNumber(c.pane, n)
@@ -3808,6 +3818,10 @@ export class Broker {
             async (r) => {
               if (r === 'answered') {
                 await c.post(`☑️ ${n}번 선택 (프롬프트가 끝난 뒤 자동으로 눌렀습니다)`)
+                if (c.session.openQuestionsRemaining !== undefined) {
+                  c.session.openQuestionsRemaining = Math.max(0, c.session.openQuestionsRemaining - 1)
+                  if (c.session.openQuestionsRemaining === 0) await this.dialogs.answerMatching(c.pane, /submit answers?/i)
+                }
                 this.clearWaiting(c.session)
                 await this.setStatus(c.session, 'processing')
               } else await c.post(`⚠️ ${n}번을 누르려 했지만 그 창이 이미 사라졌습니다. \`:screen\` 으로 확인하세요.`)
@@ -3817,9 +3831,26 @@ export class Broker {
           return
         }
         if (!c.fromButton) await c.post(`☑️ ${n}번 선택`)
+        // A multi-question card: once every question has a ✓, Claude Code still needs its own "Submit
+        // answers" line pressed — the questions answering does not submit them on its own. Until then the
+        // card (and session.openQuestionsRemaining, which clearWaiting would otherwise reset) must survive
+        // past this one answer, since more are still coming to the same card.
+        let moreQuestions = false
+        if (c.session.openQuestionsRemaining !== undefined) {
+          c.session.openQuestionsRemaining = Math.max(0, c.session.openQuestionsRemaining - 1)
+          if (c.session.openQuestionsRemaining === 0) {
+            c.session.openQuestionsRemaining = undefined
+            const submitted = await this.dialogs.answerMatching(c.pane, /submit answers?/i)
+            this.logAt('INFO', 'dialog', submitted ? 'submitted answers' : 'no submit option found', this.tag(c.session))
+          } else {
+            moreQuestions = true
+          }
+        }
         c.session.stallShown = undefined
-        this.clearWaiting(c.session)
-        await this.setStatus(c.session, 'processing')
+        if (!moreQuestions) {
+          this.clearWaiting(c.session)
+          await this.setStatus(c.session, 'processing')
+        }
         this.noteActivity(c.session)
       },
     },

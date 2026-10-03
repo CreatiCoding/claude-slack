@@ -2166,3 +2166,61 @@ test('권한 요청(예/아니오) 카드가 열려 있을 때는 글로 답해�
   s.conn.close()
   t.close()
 })
+
+test('질문이 여러 개면 모두 답한 뒤 터미널의 "Submit answers" 를 찾아 누른다 (claude-web 이관: P1-10)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: {
+      questions: [
+        { question: '규칙 충돌?', header: 'Q1', options: [{ label: 'A' }, { label: 'B' }] },
+        { question: '진입 방식?', header: 'Q2', options: [{ label: 'C' }, { label: 'D' }] },
+      ],
+    },
+  })
+  const q = t.slack.posts.at(-1)!
+  t.tmux.screen = ' 규칙 충돌?\n ❯ 1. A\n   2. B\n'
+  await t.broker.handleAction({ user: 'U1', ...buttonWithValue(q.blocks, 'dlg_answer', '100:answer 0 1 A'), messageTs: q.ts, channel: 'C1' })
+  assert.ok(!t.tmux.keys.some((k) => /submit/i.test(k)), '하나만 답했을 땐 아직 Submit 을 찾지 않는다')
+
+  // D(2번)를 고르면 다이얼로그가 사라지고(선택했으니), 화면이 요약·제출 화면으로 바뀐다.
+  // 뒤이어 "Submit answers" 선택지를 찾아 누른다.
+  const qdScreen = ' 진입 방식?\n ❯ 1. C\n   2. D\n'
+  const submitScreen = ' 답을 확인하세요\n ❯ 1. Submit answers\n   2. Edit an answer\n'
+  let qdCaptures = 0
+  t.tmux.capture = async () => (qdCaptures++ < 2 ? qdScreen : submitScreen)
+  await t.broker.handleAction({ user: 'U1', ...buttonWithValue(q.blocks, 'dlg_answer', '100:answer 1 2 D'), messageTs: q.ts, channel: 'C1' })
+  assert.deepEqual(t.tmux.keys.slice(-4), ['%1:2', '%1:Enter', '%1:1', '%1:Enter'], 'D(2번) 선택 뒤, Submit answers(1번)도 누른다')
+  s.conn.close()
+  t.close()
+})
+
+test('예전(이미 넘어간) 질문 카드의 버튼은, 화면에 같은 번호가 있어도 누르지 않는다 (claude-web 이관: P1-10)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [{ question: '첫 번째 질문?', header: 'Q1', options: [{ label: 'A' }, { label: 'B' }] }] },
+  })
+  const firstCard = t.slack.posts.at(-1)!
+  t.tmux.screen = '❯ 1. A\n  2. B\n'
+  await t.broker.handleAction({ user: 'U1', ...buttonWithValue(firstCard.blocks, 'dlg_answer', '100:answer 0 1 A'), messageTs: firstCard.ts, channel: 'C1' })
+
+  // 두 번째 질문이 새로 뜬다(카드가 다시 올라간다 = openDialogTs 가 새 카드로 넘어간다).
+  await hook(t.socketPath, 100, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [{ question: '두 번째 질문?', header: 'Q2', options: [{ label: 'C' }, { label: 'D' }] }] },
+  })
+  const keysBefore = t.tmux.keys.length
+  // 화면은 마침 두 번째 질문의 다이얼로그라, 번호만 보면 구분이 안 된다 — 그래도 예전 카드(firstCard)의 버튼은 거절되어야 한다.
+  t.tmux.screen = '❯ 1. C\n  2. D\n'
+  await t.broker.handleAction({ user: 'U1', ...buttonWithValue(firstCard.blocks, 'dlg_answer', '100:answer 0 2 B'), messageTs: firstCard.ts, channel: 'C1' })
+  assert.equal(t.tmux.keys.length, keysBefore, '터미널에 아무 키도 보내지 않는다')
+  assert.ok(t.slack.ephemerals.some((e) => /이미 끝났습니다/.test(e.text)))
+  s.conn.close()
+  t.close()
+})
