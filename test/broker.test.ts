@@ -1609,6 +1609,7 @@ test('어드민 이어서 하기: 목록에 있는 세션만 resume 으로 띄�
   const r = await t.broker.adminResume('sess-1')
   assert.equal(r.ok, true, JSON.stringify(r))
   assert.deepEqual(t.tmux.launches.at(-1)!.command, ['/bin/claude-slack', '--resume', 'sess-1'])
+  assert.match(r.thread!, /^\d+\.\d+$/, '성공하면 새 스레드 ts 를 실어 페이지가 바로 열 수 있다 (19)')
   const before = t.tmux.launches.length
   assert.equal((await t.broker.adminResume('nope')).ok, false)
   assert.equal(t.tmux.launches.length, before, 'unknown id launches nothing')
@@ -1782,6 +1783,7 @@ test('같은 대화를 이미 실행 중이면 이어서 하기는 새로 띄우
   const r = await t.broker.adminResume('sess-dup')
   assert.equal(r.ok, false)
   assert.match(r.note, /이미 실행 중인 대화/)
+  assert.match(r.thread!, /^\d+\.\d+$/, '실패여도 그 실행 중 스레드로 갈 수 있게 thread 를 싣는다 (19)')
   // Slack 의 /ccresume <id>
   await t.broker.handleCommand({ user: 'U1', name: 'resume', text: 'sess-dup', channel: 'C1', triggerId: 'x' })
   assert.match(t.slack.ephemerals.at(-1)!.text, /이미 실행 중인 대화/)

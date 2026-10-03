@@ -1076,16 +1076,17 @@ export class Broker {
   }
 
   /** Reopen a recent conversation (from the "이어서 하기" list) as a new Slack thread, as `/ccresume` does. */
-  async adminResume(id: string): Promise<{ ok: boolean; note: string }> {
+  async adminResume(id: string): Promise<{ ok: boolean; note: string; thread?: string }> {
     const recent = (await (this.cfg.listSessions ?? listRecentSessions)(25)).find((r) => r.id === id)
     const archived = listArchives(1000, this.cfg.archiveDir).find((a) => a.sessionId === id)
     const hit = recent ?? (archived && { id: archived.sessionId, cwd: archived.cwd })
     if (!hit) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없습니다.' }
+    // `thread` rides along even on this "failure": already running is somewhere to go to, not nothing (19).
     const busy = this.runningOf(hit.id)
-    if (busy) return { ok: false, note: await this.alreadyRunningText(busy.threadTs) }
+    if (busy) return { ok: false, note: await this.alreadyRunningText(busy.threadTs), thread: busy.threadTs }
     if (!existsSync(hit.cwd)) return { ok: false, note: `폴더가 없습니다: ${shortenHome(hit.cwd)}` }
-    await this.launchSession({ cwd: hit.cwd, prompt: '', resumeId: hit.id, user: this.defaultRecipient })
-    return { ok: true, note: `${shortenHome(hit.cwd)} 의 대화를 이어서 띄웁니다. 스레드는 채널에 생깁니다.` }
+    const thread = await this.launchSession({ cwd: hit.cwd, prompt: '', resumeId: hit.id, user: this.defaultRecipient })
+    return { ok: true, note: `${shortenHome(hit.cwd)} 의 대화를 이어서 띄웁니다. 스레드는 채널에 생깁니다.`, thread }
   }
 
   /** What the terminal shows right now, as `:screen` renders it. */

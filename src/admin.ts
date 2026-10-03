@@ -24,7 +24,8 @@ export interface AdminApi {
   adminKill(pid: number): Promise<{ ok: boolean; note: string }>
   adminPurge(pid: number): Promise<{ ok: boolean; note: string }>
   adminDeleteArchive?(path: string): Promise<{ ok: boolean; note: string }>
-  adminResume?(id: string): Promise<{ ok: boolean; note: string }>
+  /** `thread`: the thread to go to — set even when `ok` is false, for "already running" (19; the page still navigates there). */
+  adminResume?(id: string): Promise<{ ok: boolean; note: string; thread?: string }>
   adminDeleteRecent?(id: string): Promise<{ ok: boolean; note: string }>
   adminPin?(key: string, pinned: boolean): Promise<{ ok: boolean; note: string }>
   adminScreenPng?(pid: number, part?: 'screen' | 'conversation' | 'panel'): Promise<Buffer | undefined>

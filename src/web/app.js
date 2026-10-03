@@ -637,6 +637,9 @@ function renderList() {
   const match = (...vals) => !q || vals.some((v) => (v || '').toLowerCase().includes(q))
   const list = $('list')
   const keepScroll = list.scrollTop
+  // Rebuilt below from scratch; remember what had the keyboard's focus so Tab/Enter navigation is not
+  // thrown back to the top of the page by a session simply changing state while busy (19).
+  const focusedThread = list.contains(document.activeElement) ? document.activeElement.dataset.thread : null
   list.innerHTML = ''
 
   const shown = sessions.filter((s) => match(s.title, s.preview, s.cwd, s.last?.text))
@@ -651,7 +654,10 @@ function renderList() {
   }
   const loose = groups.loose || []
   const rank = (s) => (loose.includes(s.thread) ? loose.indexOf(s.thread) : Infinity)
-  const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => rank(a) - rank(b) || (b.state === 'waiting') - (a.state === 'waiting') || b.lastAt - a.lastAt)
+  // Only two keys (19; `waiting` and `lastAt` used to be a third and fourth): a row's own position in the
+  // list no longer shifts while it works, which used to move whatever a person was about to click out from
+  // under the pointer and drop keyboard focus. "기다리는 중" shows as a badge/colour (liveRow), not a move.
+  const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => rank(a) - rank(b) || a.startedAt - b.startedAt)
   const h = secHead('live', '진행 중', live.length, { dropOut: true })
   list.append(h.el)
   if (h.open) {
@@ -677,6 +683,7 @@ function renderList() {
       list.append(plainRow({ lead: icon('clipboard'), name: a.title || folderOf(a.cwd), sub: a.preview, where: `${folderOf(a.cwd)} · ${ago(at)}`, when: ago(at), title: a.cwd }, () => viewArchive(a), (p) => openMenu(p, [{ label: '기록 보기', icon: 'file', run: () => viewArchive(a) }])))
     }
   list.scrollTop = keepScroll
+  if (focusedThread) list.querySelector(`.row[data-thread="${focusedThread}"]`)?.focus()
 }
 
 function liveRow(s, groupId) {
@@ -785,9 +792,16 @@ setInterval(() => {
 }, 30_000)
 
 async function resume(r) {
+  // 19: a confirm first (this codebase's own convention for a start-something action, not a separate
+  // sheet component), then go straight to the thread — success or "already running" both land somewhere.
+  if (!confirm(`"${r.title || folderOf(r.cwd)}" 대화를 이어서 할까요?`)) return
   try {
     const res = await api('/api/session/resume', { id: r.id })
     toast(res.note)
+    if (res.thread) {
+      if (res.thread === current) await catchUp(res.thread) // already there: just make sure it's fresh
+      else open(res.thread)
+    }
   } catch (err) {
     toast(err.message, 'err')
   }
