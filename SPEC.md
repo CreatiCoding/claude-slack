@@ -265,6 +265,7 @@ flowchart LR
 | REQ-F-085 | 훅 설치기가 훅과 mcp.json 을 등록한다 |
 | REQ-F-086 | 모델 선택지를 문서에서 갱신한다 |
 | REQ-F-087 | 사건을 한 줄 로그로 남긴다 |
+| REQ-F-088 | 백그라운드 작업이 끝나면 한 줄로 알린다 |
 
 ### 2.3 사용자 특성
 
@@ -3143,6 +3144,26 @@ cache-control: no-store
 - 근거: `src/log.ts`(ASM-002, ASM-013)
 - 추적: §4.6, §5.3 GT-14
 
+### REQ-F-088 백그라운드 작업이 끝나면 한 줄로 알린다
+- 의무: MUST
+- 액터: 브로커
+- 트리거: 트랜스크립트의 `user` 사건(REQ-F-017 7단계의 `user` 종류) 글에 `<task-notification>` 블록이 있음
+- 전제조건: 세션이 살아 있다
+- 입력: 글 가운데 `<task-notification>…</task-notification>` 0개 이상, 각각 `<task-id>`·`<tool-use-id>`·`<status>`·`<summary>`(모두 선택, `<status>` 없으면 그 블록은 버린다)
+- 처리 규칙:
+  1. 블록마다: `status` 가 `running`·`killed`·`stopped` 면 건너뛴다. `task-id` 와 `tool-use-id` 가 둘 다 없으면 건너뛴다.
+  2. 알림 키 = `<실행 키>:<task-id, 없으면 tool-use-id>`. 이미 알린 키면 건너뛴다(같은 트랜스크립트 바이트를 다시 읽어도 두 번 알리지 않는다). 알리기로 하면 키를 기억한다.
+  3. 실패 판정: `status` 가 `completed` 가 아니거나, `summary` 가 `/exit code [1-9]|failed|error/i` 에 맞으면 실패다.
+  4. 글 = `<summary 의 첫 줄을 200자로 자른 것, 없으면 task-id·tool-use-id>`. 실패면 멘션(있으면) + `⚠️ 백그라운드 작업 실패: <글>`, 아니면 `✅ 백그라운드 작업 완료: <글>` 을 스레드에 올린다.
+- 출력: 스레드 안내 1줄(블록마다 최대 1개)
+- 사후조건: 그 알림 키가 "이미 알림" 목록에 있다
+- 예외·오류: Slack 호출 실패는 조용히 넘어간다
+- 경계값: `summary` 가 없으면 `task-id`나 `tool-use-id` 를 글로 쓴다. 한 글에 블록이 여러 개면 모두 처리한다
+- 동시성: 알림 키는 세션이 끝날 때 그 실행 키의 몫만 지운다(끝나지 않는 한 전역으로 쌓인다)
+- 수용 기준: AC-141
+- 근거: `src/broker.ts` `notifyBackgroundTasks`, `src/background.ts` `parseTaskNotifications`(ASM-002)
+- 추적: REQ-F-017
+
 ### 3.3 데이터 요구사항 (DM-nnn)
 
 저장 매체는 로컬 파일과 브로커 프로세스의 메모리다(CON-010). 관계형 저장소가 없으므로 아래 템플릿의 "자료형"은 JSON 자료형이고, "관계"의 FK 는 값으로 가리키는 참조이며 참조 무결성 강제는 없다. "인덱스"는 메모리 안의 조회 표를 뜻한다. 기본 경로의 `~/.claude-slack` 은 `<상태 폴더>`로 줄여 쓴다.
@@ -5226,6 +5247,7 @@ Slack 오류 표:
 | AC-138 | DM-017 | 보관 기록의 대화 id 에 저장된 이름이 없다가, 어드민에서 그 보관 기록 이름을 바꾼다 | 그 대화를 나중에 재개한다 | 재개한 세션이 바로 그 이름으로 뜬다(ai-title 이 나중에 와도 안 덮인다) |
 | AC-139 | §4.3.11 | 턴이 도는 중 | `:btw 질문` | 거절하지 않는다. 바로 `/btw 질문` 을 친다 |
 | AC-140 | §4.3.11 | `/btw` 화면이 스피너 두 번, 그 뒤 같은 답을 두 번 연속 보인다 | `:btw 질문` | 스피너는 올리지 않는다. 같은 답이 두 번째로 읽힌 뒤에야 그 답을 올린다 |
+| AC-141 | REQ-F-088 | 트랜스크립트에 `<task-notification>` 이 `status=completed`, `summary="tests all passed"` 로 온다 | 한 번 읽고, 같은 바이트를 또 읽는다 | 스레드에 `✅ 백그라운드 작업 완료: tests all passed` 1번만 올라간다 |
 
 ### 5.2 추적성 매트릭스
 
@@ -5320,6 +5342,7 @@ Slack 오류 표:
 | REQ-F-085 | README "npm run install-hooks" | AC-085 | `scripts/install-hooks.ts`, `node-path.ts` |
 | REQ-F-086 | 원문 `src/models.ts` | AC-086 | `models.ts`, `panel.ts` |
 | REQ-F-087 | README "로그: 무슨 일이 있었는지 되짚기" | AC-087 | `log.ts` |
+| REQ-F-088 | 요청 "백그라운드 작업이 끝나면 알린다" | AC-141 | `broker.ts`, `background.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |

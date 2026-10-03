@@ -35,7 +35,7 @@ import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.t
 import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
-import { BackgroundTracker, processFacts, type BackgroundTask } from './background.ts'
+import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
 import { execFile } from 'node:child_process'
@@ -1936,6 +1936,7 @@ export class Broker {
     }
     if (ev.kind === 'user') {
       this.confirmInjected(session, ev.text)
+      await this.notifyBackgroundTasks(session, ev.text)
       return
     }
     if (ev.kind === 'local') return this.showLocalOutput(session, ev.text, ev.isError)
@@ -2530,6 +2531,25 @@ export class Broker {
    * conversation again. The thread keeps one status line — the old panel goes,
    * because its buttons address a pid that no longer exists.
    */
+  /** taskId (or tool-use-id when a notice carries none) of background work already announced, so a
+   *  notice does not get posted twice if the same transcript bytes are read again. */
+  private notifiedBgTasks = new Set<string>()
+
+  /** A background job (bash moved to the background, a Monitor, an async agent) finished: say so once. */
+  private async notifyBackgroundTasks(session: Session, text: string): Promise<void> {
+    for (const n of parseTaskNotifications(text)) {
+      if (n.status === 'running' || n.status === 'killed' || n.status === 'stopped') continue
+      const key = `${session.key}:${n.taskId ?? n.toolUseId ?? ''}`
+      if (!n.taskId && !n.toolUseId) continue
+      if (this.notifiedBgTasks.has(key)) continue
+      this.notifiedBgTasks.add(key)
+      const failed = n.status !== 'completed' || /exit code [1-9]|failed|error/i.test(n.summary ?? '')
+      const label = truncate((n.summary ?? n.taskId ?? n.toolUseId ?? '').split('\n')[0]!, 200)
+      const who = failed && this.mentionFor(session, 'all') ? `<@${this.mentionFor(session, 'all')}> ` : ''
+      await this.slack.post({ threadTs: session.threadTs, text: `${who}${failed ? '⚠️' : '✅'} 백그라운드 작업 ${failed ? '실패' : '완료'}: ${label}` }).catch(() => {})
+    }
+  }
+
   private bgTrackers = new Map<string, BackgroundTracker>()
   /** Background work this session's process started and has not finished (by key+pid: a refresh keeps the key). */
   async backgroundTasks(session: Session): Promise<BackgroundTask[]> {
@@ -4299,6 +4319,7 @@ export class Broker {
     // What was kept per process (background work, skill lines) goes with it.
     const mine = `${session.key}:${session.pid}:`
     for (const k of this.bgTrackers.keys()) if (k.startsWith(mine)) this.bgTrackers.delete(k)
+    for (const k of this.notifiedBgTasks) if (k.startsWith(`${session.key}:`)) this.notifiedBgTasks.delete(k)
     for (const k of this.skillReaders.keys()) if (k.startsWith(mine)) this.skillReaders.delete(k)
     this.pluginCache.delete(`${session.key}:${session.pid}`)
     // Ended on purpose, so it must not come back at the next start.

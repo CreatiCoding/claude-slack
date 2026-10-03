@@ -2434,3 +2434,27 @@ test(':btw 는 스피너만 있는 화면을 답으로 올리지 않고, 같은 
   s.conn.close()
   t.close()
 })
+
+test('백그라운드 작업이 끝나면 스레드에 한 줄로 알리고, 같은 알림을 두 번 올리지 않는다 (claude-web 이관: P3-25)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  const envelope = (taskId: string, status: string, summary: string) =>
+    JSON.stringify({ type: 'user', message: { role: 'user', content: `<task-notification>\n<task-id>${taskId}</task-id>\n<status>${status}</status>\n<summary>${summary}</summary>\n</task-notification>`, isMeta: true } }) + '\n'
+  appendFileSync(t.transcript, envelope('bg1', 'completed', 'tests all passed'))
+  await until(() => t.slack.texts().some((x) => /✅ 백그라운드 작업 완료: tests all passed/.test(x)), '완료를 알린다')
+  // 같은 알림이 다시 읽혀도(트랜스크립트 재전송 등) 두 번 올리지 않는다.
+  appendFileSync(t.transcript, envelope('bg1', 'completed', 'tests all passed'))
+  await tick(150)
+  assert.equal(t.slack.texts().filter((x) => /bg1|tests all passed/.test(x)).length, 1, '한 번만 알린다')
+  // running·killed·stopped 는 무시한다.
+  appendFileSync(t.transcript, envelope('bg2', 'running', '여전히 도는 중'))
+  appendFileSync(t.transcript, envelope('bg3', 'killed', '사용자가 종료'))
+  await tick(150)
+  assert.ok(!t.slack.texts().some((x) => /여전히 도는 중|사용자가 종료/.test(x)))
+  // 실패(exit code)는 사람을 부르고 경고로 알린다.
+  appendFileSync(t.transcript, envelope('bg4', 'completed', 'failed with exit code 1'))
+  await until(() => t.slack.texts().some((x) => /⚠️.*백그라운드 작업 실패.*exit code 1/.test(x)), '실패는 경고로 알린다')
+  s.conn.close()
+  t.close()
+})

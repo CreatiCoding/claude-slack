@@ -199,3 +199,33 @@ export function processFacts(pid: number, ps = 'ps'): Promise<{ startedAt?: numb
     return { ...(startedAt ? { startedAt } : {}), ...(all ? { shells: countShells(all, pid) } : {}) }
   })
 }
+
+export interface TaskNotification {
+  toolUseId?: string
+  taskId?: string
+  status: string
+  summary?: string
+}
+
+/**
+ * The `<task-notification>` blocks in one piece of text (a transcript's `user` entry carries these as a
+ * system-injected message), for telling the person a background job finished — independent of
+ * {@link BackgroundTracker}, which exists to know what is *still* running for a refresh, not to announce
+ * endings as they happen.
+ */
+export function parseTaskNotifications(text: string): TaskNotification[] {
+  if (!text.includes('<task-notification>')) return []
+  const out: TaskNotification[] = []
+  for (const m of text.matchAll(/<task-notification>([\s\S]*?)<\/task-notification>/g)) {
+    const body = m[1]!
+    const status = /<status>([^<]+)<\/status>/.exec(body)?.[1]?.trim()
+    if (!status) continue
+    out.push({
+      toolUseId: /<tool-use-id>([^<]+)<\/tool-use-id>/.exec(body)?.[1],
+      taskId: /<task-id>([^<]+)<\/task-id>/.exec(body)?.[1],
+      status,
+      summary: /<summary>([\s\S]*?)<\/summary>/.exec(body)?.[1]?.trim(),
+    })
+  }
+  return out
+}
