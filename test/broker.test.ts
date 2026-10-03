@@ -2084,3 +2084,46 @@ test('재개로 띄울 때 이미 있던 트랜스크립트 크기를 기억해 
   s.conn.close()
   t.close()
 })
+
+test('전부 허용은 터미널을 manual 모드로 돌릴 수 있을 때만 켜진다 (claude-web 이관: P1-8)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  // 기본 화면은 auto 모드: shift+tab 네 번으로 manual 에 닿을 수 있다.
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick(50)
+  assert.ok(t.slack.texts().some((x) => /전부 허용.*켬/.test(x)), '켜졌다')
+  assert.equal((t.broker as unknown as { registry: { byThreadTs: (t: string) => { autoAllow?: boolean } | undefined } }).registry.byThreadTs(s.ack)?.autoAllow, true)
+  s.conn.close()
+  t.close()
+})
+
+test('전부 허용: manual 로 못 돌리면 켜지지 않고 이유를 알린다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  // 모드 문구가 아예 없는 화면: shift+tab 을 눌러도 바뀌지 않는다(끝내 manual 에 닿지 못함을 흉내).
+  t.tmux.screen = '❯ 뭔가 입력 중\n'
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick(50)
+  assert.ok(t.slack.texts().some((x) => /전부 허용을 켜지 않았습니다/.test(x)))
+  assert.ok(!t.slack.texts().some((x) => /전부 허용.*켬/.test(x)), '켜졌다는 안내는 없다')
+  s.conn.close()
+  t.close()
+})
+
+test('전부 허용: 켜진 동안 터미널이 manual 을 벗어나면 되돌리거나(성공) 전부 허용을 끈다(실패) (claude-web 이관: P1-8)', async () => {
+  const t = await setup({ autoAllowCheckMs: 30 })
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick(50)
+  // 터미널이 혼자 auto 모드로 돌아갔다(예: /mode 를 직접 쳤거나 세션이 재시작됨). 되돌릴 수 있는 상황.
+  t.tmux.screen = '  ⏵⏵ auto mode on (shift+tab to cycle)\n❯ \n'
+  await until(() => t.slack.texts().some((x) => /manual 로 되돌렸습니다/.test(x)), '되돌리고 알린다')
+
+  // 이번엔 되돌릴 수 없는 상황(문구가 아예 없음): 전부 허용을 끈다.
+  t.tmux.screen = '❯ 입력 중이라 아무 문구도 없음\n'
+  await until(() => t.slack.texts().some((x) => /전부 허용을 껐습니다/.test(x)), '포기하고 끈다', 8000)
+  await tick(50)
+  assert.equal((t.broker as unknown as { registry: { byThreadTs: (t: string) => { autoAllow?: boolean } | undefined } }).registry.byThreadTs(s.ack)?.autoAllow, undefined)
+  s.conn.close()
+  t.close()
+})

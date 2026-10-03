@@ -1660,7 +1660,8 @@ cache-control: no-store
 - 전제조건: 세션이 살아 있다
 - 입력: 권한 요청 또는 명령 인자(`on`｜`off`｜`켬`｜`끔`, 소문자로 바꿔 비교)
 - 처리 규칙:
-  1. 켜기·끄기: 세션의 `autoAllow` 를 바꾸고 INFO 로그 `auto-allow on｜off`. 스레드에 켤 때 `` ⚡ *전부 허용* 켬 · 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 여기에 남깁니다. 끄려면 `:auto off` ``, 끌 때 `🔐 *전부 허용* 끔 · 권한 요청을 다시 버튼으로 묻습니다.` 를 올린다. 켤 때는 그 세션의 열린 권한 요청을 모두 REQ-F-024 의 `allow`(누른 사람 = 기본 수신자)로 처리한다.
+  1. 켜기: 페인이 있으면 먼저 터미널을 manual 모드로 돌린다 — shift+tab 을 최대 5번 누르며, 누를 때마다 상태줄을 100 ms 간격으로 최대 1,200 ms 본다(§4.3.9 류, `cycleToMode`). manual 에 닿지 못하면 켜지 않고 스레드에 `⚠️ 터미널을 manual 모드로 바꾸지 못해 전부 허용을 켜지 않았습니다 (지금 <mode> 모드). 화면을 확인하세요.` 를 올리고 끝낸다 — 터미널이 manual 이 아니면 권한 요청 자체가 브로커에 오지 않아(Claude Code 분류기가 대신 막는다), 켜 둬도 아무 효과가 없기 때문이다. 페인이 없으면 이 검사를 건너뛴다.
+  2. 켜기·끄기: 세션의 `autoAllow` 를 바꾸고 INFO 로그 `auto-allow on｜off`. 스레드에 켤 때 `` ⚡ *전부 허용* 켬 · 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 여기에 남깁니다. 끄려면 `:auto off` ``, 끌 때 `🔐 *전부 허용* 끔 · 권한 요청을 다시 버튼으로 묻습니다.` 를 올린다. 켤 때는 그 세션의 열린 권한 요청을 모두 REQ-F-024 의 `allow`(누른 사람 = 기본 수신자)로 처리한다. 페인이 있으면 30,000 ms(설정 `autoAllowCheckMs`)마다 터미널의 모드를 보는 감시를 건다(끌 때·세션 종료 때 지운다): manual 이 아니면 — 분류기 거부가 와도 이 감시는 돈다 — 1단계와 같은 방식으로 manual 로 되돌려 보고, 되면 `🔁 전부 허용인데 터미널이 <mode> 모드여서 manual 로 되돌렸습니다.`, 안 되면 전부 허용을 끄고 `⚠️ 터미널이 <mode> 모드라 전부 허용을 껐습니다.` 를 올린다.
   2. 인자가 4개 값이 아니면 `` 현재 전부 허용: `<on｜off>`. 사용법: `:auto on` (권한 요청을 브로커가 바로 허용) · `:auto off` `` 를 올린다.
   3. 권한 요청이 오면: 기록 카드를 올린다. 글 `⚡ 자동 허용 · <toolName> · <requestId>`, 블록 = section(`` ⚡ 자동 허용 · *<toolName>* · `<requestId>` `` + 설명이 있으면 ` · <truncate(description, 200)>`) + 권한 카드의 상세 블록(첫 블록·actions·context 를 뺀 것). INFO 로그 `auto-allowed`.
   4. REQ-F-024 를 `allow` 로 실행한다. 단, 터미널 다이얼로그에서는 `allow-session` 선택지를 먼저 찾고 없으면 `allow-once` 를 누른다. 카드는 기록 카드 그대로 두고, 꼬리말이 있으면 context 블록으로 덧붙인다.
@@ -1670,8 +1671,8 @@ cache-control: no-store
 - 예외·오류: REQ-F-024 와 같다
 - 경계값: `allow-always`(설정 파일에 남는 선택지)와 `other`(예: `Yes, allow all edits during this session (shift+tab)`)는 누르지 않는다(CON-015). 질문·플랜 다이얼로그(거부 선택지가 없는 것)는 누르지 않는다
 - 동시성: 요청마다 독립
-- 수용 기준: AC-026, AC-117
-- 근거: `src/broker.ts` `autoAllowPermission`·`setAutoAllow`·`surfaceDialog`, `src/dialog.ts` `answerProceed`(ASM-002)
+- 수용 기준: AC-026, AC-117, AC-124, AC-125, AC-126, AC-127
+- 근거: `src/broker.ts` `autoAllowPermission`·`setAutoAllow`·`cycleToMode`·`checkAutoAllowMode`·`surfaceDialog`, `src/dialog.ts` `answerProceed`(ASM-002)
 - 추적: CON-015, §4.3.8, ST-002, §5.3 GT-04
 
 ### REQ-F-027 질문을 버튼 카드로 올리고 번호로 답한다
@@ -5190,6 +5191,10 @@ Slack 오류 표:
 | AC-121 | REQ-F-046 | 한 스레드에 세션 A(산 것)와 B(막 끝남)가 등록되어 있다(스레드 찾기가 B 를 가리키던 상태) | B 가 `SessionEnd` 로 끝난다 | B 가 끝났다는 안내·루트 "종료됨"·패널 갱신이 없다. 레지스트리의 스레드 찾기는 다시 A 를 가리킨다. A 로 보낸 메시지는 전달된다 |
 | AC-122 | REQ-F-008 | 대기 중 시작, 제한 시간이 지났지만 그 pane 이 tmux 에 아직 있다 | 타이머가 울린다 | 대기 중 시작과 쌓인 메시지를 지우지 않는다. 스레드에 "세션이 아직 뜨는 중입니다" 안내(한 번만). 타이머를 다시 건다 |
 | AC-123 | REQ-F-006 | 재개할 대화의 트랜스크립트가 이미 있고 내용이 있다 | `launchSession({resumeId})` | 그 실행 키의 읽은 위치가 그 시점의 파일 크기로 적힌다. 세션이 늦게 붙어도 그 지점 이전 내용은 다시 읽지 않고, 그 뒤에 쓰인 것은 읽는다 |
+| AC-124 | REQ-F-026 | 터미널이 auto 모드(shift+tab 4번으로 manual 에 닿는다) | `:auto on` | manual 에 닿은 뒤 켜진다. 스레드에 켬 안내 |
+| AC-125 | REQ-F-026 | 터미널에 권한 모드 문구가 아예 없음(5번 눌러도 안 바뀜) | `:auto on` | 켜지지 않는다. "전부 허용을 켜지 않았습니다" 안내. `autoAllow` 는 그대로 거짓 |
+| AC-126 | REQ-F-026 | 전부 허용 켜짐(manual). 감시 주기가 되자 터미널이 auto 모드로 바뀌어 있다 | 감시 타이머가 돈다 | manual 로 되돌리고 "되돌렸습니다" 안내. `autoAllow` 는 그대로 참 |
+| AC-127 | REQ-F-026 | 전부 허용 켜짐. 감시 때 터미널에 권한 모드 문구가 없어 되돌리지 못한다 | 감시 타이머가 돈다 | 전부 허용을 끄고 "전부 허용을 껐습니다" 안내 |
 
 ### 5.2 추적성 매트릭스
 

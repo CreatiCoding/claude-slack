@@ -214,6 +214,8 @@ export interface BrokerConfig {
   userToken?: string
   /** How long a busy session may go without transcript activity before we look at the terminal. Tests lower it. */
   stallMs?: number
+  /** How often, while 전부 허용 is on, to check the terminal is still in manual mode. Tests lower it. */
+  autoAllowCheckMs?: number
   /** How long the quiet must last before we say anything about it. Tests lower it. */
   quietMs?: number
   /** How long after start a thread that was alive before shutdown is given to reattach. Tests lower it. */
@@ -309,6 +311,7 @@ const PROMPT_MIRROR_MAX = 600
 /** How long `:mode` waits for the status line to redraw after each shift+tab. */
 const MODE_SETTLE_POLL_MS = 100
 const MODE_SETTLE_MAX_MS = 1200
+const AUTO_ALLOW_CHECK_MS = 30_000
 
 interface PendingLaunch {
   threadTs: string
@@ -3114,14 +3117,75 @@ export class Broker {
     await this.resolvePermission(session, msg.requestId, 'allow', this.defaultRecipient, msgTs, record)
   }
 
+  /**
+   * Cycle shift+tab until the terminal's own status line shows `want` (or gives up after MODE_CYCLE_TRIES).
+   * Reads the real screen each time rather than trusting a remembered mode — a `:mode` command, autoAllow
+   * turning on, and the autoAllow watchdog all need the terminal's actual, current mode, not a guess.
+   */
+  private async cycleToMode(pane: string, want: string): Promise<{ reached: string | null }> {
+    let reached: string | null = null
+    for (let i = 0; i < MODE_CYCLE_TRIES; i++) {
+      reached = detectPermissionMode(await this.tmux.capture(pane))
+      if (!want || reached === want) break
+      await this.tmux.sendKeys(pane, ['BTab'])
+      const deadline = Date.now() + MODE_SETTLE_MAX_MS
+      while (Date.now() < deadline && detectPermissionMode(await this.tmux.capture(pane)) === reached) await sleep(MODE_SETTLE_POLL_MS)
+    }
+    return { reached }
+  }
+
   /** Turn "전부 허용" on or off; turning it on also answers what is already waiting. */
   async setAutoAllow(session: Session, on: boolean): Promise<void> {
+    if (on && session.pane) {
+      // 전부 허용 only means anything when the terminal itself hands permission decisions to the broker
+      // (manual mode). In any other mode (auto, acceptEdits, plan, bypassPermissions) Claude Code's own
+      // classifier decides, the broker never sees the request, and 전부 허용 would sit there doing nothing
+      // while looking "on".
+      const { reached } = await this.cycleToMode(session.pane, 'default')
+      if (reached !== 'default') {
+        await this.slack.post({ threadTs: session.threadTs, text: `⚠️ 터미널을 manual 모드로 바꾸지 못해 전부 허용을 켜지 않았습니다 (지금 ${reached ?? '?'} 모드). 화면을 확인하세요.` })
+        return
+      }
+      session.permissionMode = 'default'
+    }
     session.autoAllow = on || undefined
     this.logAt('INFO', 'perm', `auto-allow ${on ? 'on' : 'off'}`, this.tag(session))
     await this.slack.post({ threadTs: session.threadTs, text: on ? '⚡ *전부 허용* 켬 · 권한 요청을 브로커가 바로 허용하고, 허용한 내용은 여기에 남깁니다. 끄려면 `:auto off`' : '🔐 *전부 허용* 끔 · 권한 요청을 다시 버튼으로 묻습니다.' })
     this.changed()
+    if (session.autoAllowWatch) {
+      clearInterval(session.autoAllowWatch)
+      session.autoAllowWatch = undefined
+    }
     if (!on) return
     for (const p of [...this.pendingPermissions.values()].filter((x) => x.pid === session.pid)) await this.resolvePermission(session, p.requestId, 'allow', this.defaultRecipient, p.msgTs)
+    if (session.pane) {
+      const timer = setInterval(() => {
+        this.checkAutoAllowMode(session).catch((e) => this.logAt('WARN', 'perm', `auto-allow mode check failed: ${describeError(e)}`, this.tag(session)))
+      }, this.cfg.autoAllowCheckMs ?? AUTO_ALLOW_CHECK_MS)
+      timer.unref?.()
+      session.autoAllowWatch = timer
+    }
+  }
+
+  /**
+   * While 전부 허용 is on, the terminal can leave manual mode without the broker ever hearing about it —
+   * the classifier just starts deciding instead, with the broker none the wiser. Checked on a timer
+   * (independent of any blocked request) so a stray tool call cannot slip through unnoticed.
+   */
+  private async checkAutoAllowMode(session: Session): Promise<void> {
+    if (!session.autoAllow || session.ended || !session.pane) return
+    const mode = detectPermissionMode(await this.tmux.capture(session.pane))
+    if (mode === 'default') return
+    const label = mode ?? '알 수 없는'
+    const { reached } = await this.cycleToMode(session.pane, 'default')
+    if (reached === 'default') {
+      session.permissionMode = 'default'
+      this.schedulePanelRefresh(session, PANEL_REFRESH_SETTLE_MS)
+      await this.slack.post({ threadTs: session.threadTs, text: `🔁 전부 허용인데 터미널이 ${label} 모드여서 manual 로 되돌렸습니다.` }).catch(() => {})
+    } else {
+      await this.setAutoAllow(session, false)
+      await this.slack.post({ threadTs: session.threadTs, text: `⚠️ 터미널이 ${label} 모드라 전부 허용을 껐습니다.` }).catch(() => {})
+    }
   }
 
   // ------------------------------------------------------------ injection
@@ -3812,22 +3876,12 @@ export class Broker {
 
     mode: {
       run: async (c) => {
-        // Cycle shift+tab until the status line shows the requested mode.
-        const want = c.arg
-        let reached: string | null = null
-        for (let i = 0; i < MODE_CYCLE_TRIES; i++) {
-          reached = detectPermissionMode(await this.tmux.capture(c.pane))
-          if (!want || reached === want) break
-          await this.tmux.sendKeys(c.pane, ['BTab'])
-          // Wait for the status line to actually change, not a guessed interval.
-          const deadline = Date.now() + MODE_SETTLE_MAX_MS
-          while (Date.now() < deadline && detectPermissionMode(await this.tmux.capture(c.pane)) === reached) await sleep(MODE_SETTLE_POLL_MS)
-        }
+        const { reached } = await this.cycleToMode(c.pane, c.arg)
         if (reached) {
           c.session.permissionMode = reached
           this.schedulePanelRefresh(c.session, PANEL_REFRESH_SETTLE_MS)
         }
-        await c.ack(want && reached !== want ? `⚠️ 권한 모드를 ${want}로 못 바꿨습니다 (현재 ${reached ?? '?'}). 화면을 확인하세요.` : `→ 권한 모드 ${reached ?? want}`)
+        await c.ack(c.arg && reached !== c.arg ? `⚠️ 권한 모드를 ${c.arg}로 못 바꿨습니다 (현재 ${reached ?? '?'}). 화면을 확인하세요.` : `→ 권한 모드 ${reached ?? c.arg}`)
       },
     },
 
@@ -4054,6 +4108,7 @@ export class Broker {
     session.ended = true
     this.logAt('INFO', 'session', `ended: ${why}`, this.tag(session, { held: session.held?.length ?? 0 }))
     this.clearStall(session)
+    if (session.autoAllowWatch) clearInterval(session.autoAllowWatch)
     for (const r of session.dialogRetries?.values() ?? []) r.cancel()
     if (session.waitingTimer) clearTimeout(session.waitingTimer)
     if (session.injectCheck?.timer) clearTimeout(session.injectCheck.timer)

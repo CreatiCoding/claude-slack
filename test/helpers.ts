@@ -150,6 +150,22 @@ export class FakeTmux implements TmuxLike {
   }
   async sendKeys(pane: string, keys: string[]) {
     this.keys.push(`${pane}:${keys.join(' ')}`)
+    if (keys.length === 1 && keys[0] === 'BTab') this.cycleMode()
+  }
+  /** shift+tab cycles the permission mode phrase in `screen`, in the same order Claude Code does, so tests that
+   *  drive `:mode`/`:auto on` through real shift+tab presses see the screen actually change. A screen with none
+   *  of the recognized phrases (a custom fixture) is left alone — there is nothing to cycle. */
+  private cycleMode(): void {
+    const order: Array<{ re: RegExp; phrase: string }> = [
+      { re: /auto mode on/i, phrase: 'auto mode on' },
+      { re: /accept edits on/i, phrase: 'accept edits on' },
+      { re: /plan mode on/i, phrase: 'plan mode on' },
+      { re: /bypass(?:ing)? permissions/i, phrase: 'bypassing permissions' },
+      { re: /manual mode on/i, phrase: 'manual mode on' },
+    ]
+    const idx = order.findIndex((o) => o.re.test(this.screen))
+    if (idx === -1) return
+    this.screen = this.screen.replace(order[idx]!.re, order[(idx + 1) % order.length]!.phrase)
   }
   async typeLine(pane: string, text: string) {
     this.keys.push(`${pane}:${text}⏎`)

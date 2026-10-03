@@ -99,6 +99,8 @@ export interface Session {
   view?: ViewMode
   /** "전부 허용" (`:auto on`): the broker allows every permission request itself and leaves a record card. */
   autoAllow?: boolean
+  /** Watches the terminal's own permission mode while autoAllow is on (REQ-F-030-ish): a tool bypasses the broker entirely when the terminal itself is not in manual mode. */
+  autoAllowWatch?: ReturnType<typeof setInterval>
   /** The last PreToolUse seen, so a permission card can show the actual edit rather than a one-line preview. */
   lastToolInput?: { name: string; input: unknown; at: number }
   /** The stuck state already reported for this screen, so it is not posted twice. */
