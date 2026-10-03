@@ -4055,9 +4055,18 @@ export class Broker {
     this.pluginCache.delete(`${session.key}:${session.pid}`)
     // Ended on purpose, so it must not come back at the next start.
     this.revive.forget(session.key)
+    // A second, still-live session can already own this thread (two Claude Code processes under one key, briefly,
+    // or a race around a refresh): if so, this one ending must not read as the conversation itself ending, and the
+    // thread lookup — which only ever remembers the one added last — must point back at the one still running.
+    const replacement = this.registry.live.find((x) => x !== session && x.threadTs === session.threadTs && !x.ended)
     this.registry.remember(session)
+    if (replacement) this.registry.add(replacement)
     this.refreshHome()
     if (session.refreshing) return this.reopenForRefresh(session, carried)
+    if (replacement) {
+      this.logAt('WARN', 'session', 'a live session already owns this thread; not announcing this one as ended', this.tag(session))
+      return
+    }
     this.emitEvent(session.threadTs, { type: 'end', why })
     await this.slack.post({ threadTs: session.threadTs, text: `⚫ 세션 ${why}` })
     if (session.rootTs) await this.slack.update(session.rootTs, this.rootText(session, '⚫', '종료됨'))

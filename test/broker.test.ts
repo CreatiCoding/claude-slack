@@ -2022,3 +2022,33 @@ test('되살리기: tmux 창이 이미 없으면 평소처럼 다시 띄운다',
   assert.ok(t2.tmux.launches.length > 0, '다시 띄운다')
   t2.close()
 })
+
+test('유령 프로세스가 끝나도, 같은 스레드에 살아 있는 세션이 있으면 "종료됨"으로 보이지 않는다 (claude-web 이관: P0-6)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%3', sessionId: 'sess-a', cwd: '/home/u/proj' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  // 두 번째(유령) 세션이, 같은 스레드를 가리키며 다른 키로 등록된다(레지스트리 수준의 레이스를 그대로 재현).
+  ;(t.broker as unknown as { registry: { add: (s: unknown) => void } }).registry.add({
+    key: '54321',
+    pid: 54321,
+    sessionId: 'sess-ghost',
+    cwd: '/home/u/proj',
+    threadTs: s.ack,
+    origin: 'terminal',
+    ended: false,
+    recipient: 'U1',
+    statusCreated: false,
+    state: 'idle',
+    startedAt: Date.now(),
+  })
+  // 유령이 끝난다.
+  await hook(t.socketPath, 54321, { hook_event_name: 'SessionEnd', reason: 'exit' })
+  // 끝남 안내나 "종료됨" 갱신이 없어야 한다.
+  assert.ok(!t.slack.posts.some((p) => p.threadTs === s.ack && /⚫ 세션/.test(p.text)), '끝남 안내를 올리지 않는다')
+  assert.ok(!t.slack.updates.some((u) => /종료됨/.test(u.text)), '루트를 종료됨으로 바꾸지 않는다')
+  // 진짜 살아 있는 세션은 여전히 그 스레드의 주인이고, 메시지도 계속 간다.
+  await t.broker.handleSlackMessage({ user: 'U1', text: '아직 살아있지', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await until(() => s.inbox.some((m) => (m as { text?: string }).text === '아직 살아있지'), '진짜 세션으로 전달된다')
+  s.conn.close()
+  t.close()
+})

@@ -17,6 +17,8 @@ export class SessionRegistry {
   private byKey = new Map<string, Session>()
   private byThread = new Map<string, Session>()
   private endedByPid = new Map<number, Session>()
+  /** Ended sessions kept findable by thread too, for callers that mean "a session was here" (the orphan scan's `ended` vs `unknown`). A live replacement in `add` below takes priority. */
+  private endedByThread = new Map<string, Session>()
 
   /** Sessions that have not ended. */
   get live(): Session[] {
@@ -28,7 +30,7 @@ export class SessionRegistry {
   }
 
   byThreadTs(threadTs: string): Session | undefined {
-    return this.byThread.get(threadTs)
+    return this.byThread.get(threadTs) ?? this.endedByThread.get(threadTs)
   }
 
   /** Live session with this pid, else one that ended recently. */
@@ -39,7 +41,10 @@ export class SessionRegistry {
   /** Register a session (or re-register it after its thread is known). */
   add(session: Session): void {
     this.byKey.set(session.key, session)
-    if (session.threadTs) this.byThread.set(session.threadTs, session)
+    if (session.threadTs) {
+      this.byThread.set(session.threadTs, session)
+      this.endedByThread.delete(session.threadTs)
+    }
   }
 
   /**
@@ -48,6 +53,15 @@ export class SessionRegistry {
    */
   remember(session: Session): void {
     this.byKey.delete(session.key)
+    // Only if it is still the one on file: a second session can have taken the thread over already
+    // (two processes briefly alive for one thread), and this must not evict that live one.
+    if (this.byThread.get(session.threadTs) === session) {
+      this.byThread.delete(session.threadTs)
+      this.endedByThread.set(session.threadTs, session)
+      if (this.endedByThread.size > REMEMBER_ENDED) {
+        this.endedByThread.delete(this.endedByThread.keys().next().value!)
+      }
+    }
     this.endedByPid.set(session.pid, session)
     if (this.endedByPid.size > REMEMBER_ENDED) {
       this.endedByPid.delete(this.endedByPid.keys().next().value!)
