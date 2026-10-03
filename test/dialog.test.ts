@@ -172,7 +172,10 @@ test('parseKeyedDialog 는 번호 없는 체크박스 창을 읽는다 (세션�
   assert.ok(d, '창을 알아본다')
   assert.equal(d!.question, 'Teach auto mode about your environment?')
   assert.match(d!.footer, /Enter to continue/)
-  assert.match(d!.body!, /Also scan shell history/)
+  assert.match(d!.body!, /How you use Claude here/)
+  // 커서 줄만이 아니라, 커서부터 꼬리말 사이의 모든 줄이 고를 수 있는 선택지다.
+  assert.deepEqual(d!.options, ['Also scan shell history   [ ]', 'Also scan your other repos [ ]', 'Continue'])
+  assert.equal(d!.selected, 0, '❯ 가 있는 줄의 인덱스')
   // 번호가 없으니 기존 파서는 그대로 비켜 간다.
   assert.equal(parseDialog(screen), null)
 })

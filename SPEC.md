@@ -1733,19 +1733,20 @@ cache-control: no-store
 - 입력: 화면 글
 - 처리 규칙:
   1. 알려진 다이얼로그(§4.3.7)가 그려져 있으면 넘기고 INFO 로그 `auto-confirmed <이름>`, 스레드에 `↩️ 터미널 확인 창(<이름>)을 자동으로 넘겼습니다`. 결과 참.
-  2. 번호 다이얼로그(§4.3.6)가 없으면 키 다이얼로그(§4.3.7)를 찾는다. 있으면 서명 `keyed|<질문>|<본문>` 이 직전에 올린 서명과 다를 때 키 다이얼로그 카드(§4.3.15)를 올리고 대기 사유 `dialog`, Slack 상태 `suspended`. 결과 참. 없으면 결과 거짓.
+  2. 번호 다이얼로그(§4.3.6)가 없으면 키 다이얼로그(§4.3.7)를 찾는다. 있으면 서명 `keyed|<질문>|<본문>` 이 직전에 올린 서명과 다를 때 키 다이얼로그 카드(§4.3.15)를 올리고 그 `ts` 를 세션에 적어 둔다(`openDialogTs`). 대기 사유 `dialog`, Slack 상태 `suspended`. 결과 참. 없으면 결과 거짓.
   3. 번호 다이얼로그의 서명 = `<질문>|<선택지 라벨을 | 로 이은 것>`. 직전에 올린 서명과 같으면 결과 참(다시 올리지 않는다).
   4. 전부 허용이 켜져 있고 진행 확인 다이얼로그면 REQ-F-026 5단계. 눌렀으면 결과 참.
   5. 서명을 기억한다. 서명별 횟수를 센다(마지막으로 본 지 900,000 ms 가 넘으면 0 부터). 횟수 > 2 이면: 정확히 3번째에만 설명 카드를 올린다 — 선택지 라벨에 `Authenticate`·`Reconnect`·`Re-authenticate`·`Reauthenticate` 로 시작하는 것이 있으면 `⚠️ MCP 서버 인증 메뉴가 되풀이됩니다. 설정 파일의 서버 주소와 실행 중인 세션이 쓰는 주소가 다르거나, 설정을 바꾼 뒤 세션을 다시 띄우지 않은 경우입니다. 설정은 세션을 다시 띄워야 반영됩니다.`, 아니면 `⚠️ 같은 확인 창이 되풀이됩니다. 답해도 다시 뜨는 창이라 카드를 더 올리지 않습니다. 설정을 바꿨다면 세션을 다시 띄워야 반영됩니다.` + 버튼 `🔄 새로고침 (다시 열기)`(값 `<pid>:refresh`, primary), `🖥 화면`(값 `<pid>:screen`). 대기 사유 `dialog`. 결과 참.
-  6. 질문 카드로 올린다: 머리 `터미널`, 질문 = 다이얼로그의 질문, 선택지 = 라벨·설명, 소개글 = (맥락이 있으면 코드 블록 `truncate(맥락, 2500)`) + (설명). 대기 사유 `dialog`, Slack 상태 `suspended`. 결과 참.
+  6. 질문 카드로 올린다: 머리 `터미널`, 질문 = 다이얼로그의 질문, 선택지 = 라벨·설명, 소개글 = (맥락이 있으면 코드 블록 `truncate(맥락, 2500)`) + (설명). 그 `ts` 를 세션에 적어 둔다(`openDialogTs`). 대기 사유 `dialog`, Slack 상태 `suspended`. 결과 참.
   7. 훅 `Notification` 에서 결과가 거짓이면 ``[<@수신자> ]⏸️ 터미널에서 입력을 기다리는 중: <truncate(message, 500)>\n`:screen` 으로 화면을 확인하세요.`` 를 올리고 대기 사유 `dialog`, Slack 상태 `suspended`.
+  8. 명령 `dlgkey <이동|esc>`(키 다이얼로그 카드의 버튼 전용, 사람이 직접 칠 수 없다): `esc` 면 `Escape` 키만 보낸다(`:esc` 명령과 달리 턴을 끊지 않는다 — 이 창에서 Esc 는 그 창을 취소할 뿐, 작업을 중단하는 것이 아니다). 그 외에는 `cursorKeys(이동)`(§4.3.7)을 보낸다. 메시지가 세션의 `openDialogTs` 와 같으면 카드를 `⌨️ 답함` 으로 접고 `openDialogTs` 를 지운다. 다이얼로그 표시 기록을 지우고 대기를 풀고 Slack 상태 `processing`, 마지막 활동 시각 = 지금.
 - 출력: 카드 또는 안내
 - 사후조건: 세션 상태 `waiting`(1단계 제외)
 - 예외·오류: 화면 읽기 실패는 호출한 쪽이 WARN 로그로 남긴다
 - 경계값: 선택지가 1개뿐인 번호 줄은 다이얼로그가 아니다(§4.3.6). 같은 다이얼로그가 3번째 나타남 → 설명 카드 1회. 4번째 이후 → 아무것도 올리지 않는다
 - 동시성: 서명 비교로 같은 화면이 두 번 올라가지 않는다
-- 수용 기준: AC-029
-- 근거: `src/broker.ts` `surfaceDialog`·`surfaceKeyedDialog`, `src/dialog.ts`(ASM-002, ASM-026)
+- 수용 기준: AC-029, AC-131
+- 근거: `src/broker.ts` `surfaceDialog`·`surfaceKeyedDialog`·명령 `dlgkey`, `src/dialog.ts` `cursorKeys`(ASM-002, ASM-026)
 - 추적: §4.3.6~§4.3.8, §4.3.15
 
 ### REQ-F-030 프롬프트가 키보드를 쥔 동안의 다이얼로그 응답을 다시 시도한다
@@ -4319,7 +4320,7 @@ Markdown → Slack mrkdwn `toMrkdwn(md)`:
 | 9 | pid 의 세션이 레지스트리에 없음 | 무시 |
 | 10 | id 가 `perm_allow` 또는 `perm_deny` | REQ-F-024(명령 = `requestId`) |
 | 11 | id 가 `perm_always` | REQ-F-025 |
-| 12 | id 가 `dlg_key` | 페인이 있고 화면에 키 다이얼로그가 없으면 누른 사람에게만 ``그 창은 이미 닫혔습니다. `:screen` 으로 지금 화면을 보세요.``(ERR-066). 아니면 다이얼로그 표시 기록을 지우고 명령을 실행한다 |
+| 12 | id 가 `dlg_key` | 메시지가 세션에 적힌 열린 창(`openDialogTs`)이 아니면 누른 사람에게만 `이 창은 이미 끝났습니다 (다른 창으로 넘어갔습니다).`. 아니면 페인이 있고 화면에 키 다이얼로그가 없으면 누른 사람에게만 ``그 창은 이미 닫혔습니다. `:screen` 으로 지금 화면을 보세요.``(ERR-066). 아니면 다이얼로그 표시 기록을 지우고 명령을 실행한다(`dlgkey`, REQ-F-029) |
 | 13 | 명령이 `purge` | 세션이 끝났으면 정리(REQ-F-047, 요청자 = 누른 사람). 아니면 명령 `purge` 실행 |
 | 14 | 명령이 `confirm purge` | 누른 사람에게만 확인 블록(§4.3.15) |
 | 15 | 세션이 끝남 | 누른 사람에게만 `⚫ 이 세션은 종료되었습니다.` |
@@ -4373,7 +4374,7 @@ Markdown → Slack mrkdwn `toMrkdwn(md)`:
 
 #### 4.3.7 키 다이얼로그·프롬프트 포커스·알려진 다이얼로그
 
-키 다이얼로그: 안내 줄 정규식 `(?:Enter|↵)\s+to\s+(?:continue|confirm|select|submit|proceed|accept)`(대소문자 무시). ① 안내 줄(첫 번째)을 찾는다. 없으면 없음. ② 그 위에 `^\s*❯\s*\S` 인 줄이 있어야 한다. 없으면 없음. ③ 안내 줄 위로 올라가며 양 끝의 테두리·공백을 뗀 줄을 모은다(구분선에서 멈춤, 빈 줄은 건너뜀, 최대 12줄). 0줄이면 없음. ④ 결과 `{question: 첫 줄, body: 나머지를 \n 으로(없으면 값 없음), footer: 안내 줄을 trim}`.
+키 다이얼로그: 안내 줄 정규식 `(?:Enter|↵)\s+to\s+(?:continue|confirm|select|submit|proceed|accept)`(대소문자 무시). ① 안내 줄(첫 번째)을 찾는다. 없으면 없음. ② 그 위에 `^\s*❯\s*\S` 인 줄(커서 줄)이 있어야 한다. 없으면 없음. ③ 커서 줄부터 안내 줄 바로 앞까지, 구분선이 아니고 빈 줄이 아닌 줄을 모두 선택지로 삼는다(커서 표시를 뗀 글이 라벨; 커서 줄의 인덱스가 `selected`) — 커서가 있는 줄만 고를 수 있던 것을 고치려는 것이라, 번호가 없을 뿐 여러 줄이 보기다. ④ 커서 줄 바로 위부터 위로 올라가며 양 끝의 테두리·공백을 뗀 줄을 모은다(구분선에서 멈춤, 빈 줄은 건너뜀, 최대 12줄). 0줄이면 없음. ⑤ 결과 `{question: 첫 줄, body: 나머지를 \n 으로(없으면 값 없음), footer: 안내 줄을 trim, options: ③의 라벨들, selected: 커서 인덱스}`.
 
 프롬프트 포커스(`promptHoldsFocus`): 화면의 마지막 선택지 줄을 찾는다. 선택지 줄이 없으면 거짓. 그 아래에 `❯` 로 시작하면서 선택지 줄이 아닌 줄이 있으면 참.
 
@@ -4580,7 +4581,7 @@ effort 목록: `low`, `medium`, `high`, `xhigh`, `max`.
 | 규칙 미리보기 | 해당 없음 | `Bash`: 명령(`trim`)이 빈 문자열이거나 ``\| ; & ` $`` 또는 줄바꿈을 포함하면 없음. 아니면 `Bash(<첫 낱말>[ <둘째 낱말>]:*)` — 둘째 낱말은 첫 낱말이 `git npm yarn pnpm docker kubectl gh make cargo go pip brew` 중 하나이고 둘째 낱말이 `-` 로 시작하지 않을 때만. `Edit`·`Write`·`Read`: `<도구>(<file_path ?? …>)`. `WebFetch`: `WebFetch(domain:<url 의 host>)`(주소를 읽을 수 없으면 없음). 이름이 `mcp__` 로 시작: 도구 이름. 그 외 없음 |
 | 질문 카드 | `[멘션]❓ Claude가 선택을 기다립니다` | section `[멘션]❓ *Claude가 선택을 기다립니다*` + (소개글이 있으면: 백틱 3개의 연속을 포함하면 section(앞 2,900자), 아니면 context `truncate(소개글, 500)`) + 질문마다 [section `*[<header>] <truncate(question, 500)>*`(`header` 가 없으면 대괄호 부분 없음, 복수 선택이면 뒤에 ` _(복수 선택: 번호를 차례로 누른 뒤 확정)_`) + (선택지가 있으면) actions(`block_id: dlg_q<i>_<pid>`: 선택지 앞 20개마다 버튼 `truncate("<n>. <label>", 75)`(`dlg_answer`, 값 `<pid>:answer <i> <n> <truncate(label, 60)>`), 복수 선택이면 `확정 (Enter)`(`dlg_answer`, 값 `<pid>:key Enter`, primary)) + (설명이 있는 선택지가 있으면) context `truncate("<n>. <description>" 을 " · " 로 이은 것, 300)`] + context ``직접 입력하려면 `:type 내용` 뒤 `:key Enter`. 번호로 답하려면 `:answer 3`.`` + (생략한 선택지 D > 0 이면 ``  선택지 <D>개는 너무 많아 생략했습니다 — `:screen` 으로 확인하세요. ``) |
 | 플랜 승인 카드 | `[멘션]📋 플랜 승인을 기다립니다` | section `[멘션]📋 *플랜 승인을 기다립니다.* 위에 스트리밍된 내용이 플랜입니다.` + actions(`block_id: dlg_plan_<pid>`, REQ-F-028 의 버튼 4개. 첫 버튼만 primary) |
-| 키 다이얼로그 카드 | `[멘션]⌨️ *터미널이 입력을 기다립니다*\n<question>` | section `[멘션]⌨️ *터미널이 입력을 기다립니다*\n<truncate(question, 500)>` + (본문이 있으면) section 코드 블록 `truncate(body, 1500)` + context `truncate(footer, 300)` + actions(`Enter로 진행`(`dlg_key`, 값 `<pid>:key Enter`, primary), `Esc로 취소`(`dlg_key`, 값 `<pid>:esc`)) |
+| 키 다이얼로그 카드 | `[멘션]⌨️ *터미널이 입력을 기다립니다*\n<question>` | section `[멘션]⌨️ *터미널이 입력을 기다립니다*\n<truncate(question, 500)>` + (본문이 있으면) section 코드 블록 `truncate(body, 1500)` + context `truncate(footer, 300)` + actions(`options` 의 앞 5개, 각각 `dlg_key`, 값 `<pid>:dlgkey <그 선택지 인덱스 − selected>`, 커서가 있는 선택지만 primary + `Esc로 취소`(`dlg_key`, 값 `<pid>:dlgkey esc`)) |
 | 붙잡음 안내 | `🕓 메시지 <N>개를 붙잡고 있습니다. 실행 중인 도구가 끝나면 전달합니다.` | section `<글>\n_지금 보내면 실행 중인 작업을 끊고 바로 전달합니다 (터미널의 Ctrl+Enter)._` + actions(`block_id: held_<pid>`: `⚡ 지금 보내기`(`ctl_btn`, 값 `<pid>:sendnow`, primary), `취소`(`ctl_btn`, 값 `<pid>:dropheld`)) |
 | 정지 카드 | `[멘션]⏸️ <문구>` | section 같은 글 + actions(`block_id: stuck_<pid>`: REQ-F-032 3단계의 버튼, 기본 id `ctl_btn`) |
 | 접힌 결과 | 결과 한 줄 | section 그 한 줄 |
@@ -5201,6 +5202,7 @@ Slack 오류 표:
 | AC-128 | REQ-F-011 | 질문 카드가 열려 있다(대기 사유 `question`). 터미널에 그 번호 다이얼로그가 떠 있다 | 버튼 대신 글로 답한다 | Esc 를 다이얼로그가 사라질 때까지(최대 5번) 보낸다. 카드가 "💬 메시지로 답함" 으로 접힌다. 메시지는 그 뒤 전달된다 |
 | AC-129 | REQ-F-027 | 질문 2개짜리 카드, 둘 다 아직 답 전. 화면이 매 답마다 다음 다이얼로그로, 마지막엔 "Submit answers" 가 있는 번호 화면으로 바뀐다 | 1번·2번 질문을 순서대로 버튼으로 답한다 | 각 답마다 그 번호+Enter. 마지막 답 뒤 "Submit answers" 선택지도 찾아 누른다 |
 | AC-130 | REQ-F-027 | 질문 카드 A 에 답한 뒤, 세션이 질문 카드 B 를 새로 올렸다(세션의 열린 카드 = B) | A 의 버튼을 누른다(화면은 마침 B 의 번호와 같은 번호를 쓴다) | 터미널에 키를 보내지 않는다. 누른 사람에게만 "다른 카드로 넘어갔습니다" 안내 |
+| AC-131 | REQ-F-029 | 키 다이얼로그: 커서가 "Open System Settings", 그 아래 "Try again" | "Try again" 버튼을 누른다 | `Down` + `Enter` 를 보낸다. 카드가 "⌨️ 답함" 으로 접힌다. 대기가 풀리고 상태 `processing` |
 
 ### 5.2 추적성 매트릭스
 

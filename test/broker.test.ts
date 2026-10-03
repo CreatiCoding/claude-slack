@@ -1289,7 +1289,10 @@ test('번호 없는 창도 버튼으로 올린다 (여기서 세션이 조용히
   // 두 버튼을 각각 집는다. 같은 버튼을 연달아 누르면 중복 클릭 방지에 먼저 걸려
   // 정작 확인하려는 방어 장치를 지나치게 된다.
   const row = (posted[0]!.blocks as Array<{ type: string; elements?: Array<{ action_id: string; value: string }> }>).find((b) => b.type === 'actions')!
-  const [enterBtn, escBtn] = row.elements!.map((e) => ({ actionId: e.action_id, value: e.value }))
+  const buttons = row.elements!.map((e) => ({ actionId: e.action_id, value: e.value }))
+  assert.equal(buttons.length, 3, '두 선택지(현재 커서 포함)마다 버튼 + Esc 버튼')
+  const enterBtn = buttons[0]!
+  const escBtn = buttons.at(-1)!
 
   const keysBefore = t.tmux.keys.length
   await t.broker.handleAction({ user: 'U1', ...enterBtn!, messageTs: posted[0]!.ts, channel: 'C1' })
@@ -2221,6 +2224,48 @@ test('예전(이미 넘어간) 질문 카드의 버튼은, 화면에 같은 번�
   await t.broker.handleAction({ user: 'U1', ...buttonWithValue(firstCard.blocks, 'dlg_answer', '100:answer 0 2 B'), messageTs: firstCard.ts, channel: 'C1' })
   assert.equal(t.tmux.keys.length, keysBefore, '터미널에 아무 키도 보내지 않는다')
   assert.ok(t.slack.ephemerals.some((e) => /이미 끝났습니다/.test(e.text)))
+  s.conn.close()
+  t.close()
+})
+
+test('번호 없는 창: 여러 선택지를 각각 누를 수 있고, Esc 는 작업 중단이 아니라 키만 보내며, 누른 뒤 카드를 접고 대기를 푼다 (claude-web 이관: P1-11)', async () => {
+  const t = await setup({ stallMs: 60, quietMs: 100_000 })
+  const s = await shim(t.socketPath, { tmuxPane: '%61' })
+  await tick(100)
+  t.tmux.screen = [
+    '  Permission needed',
+    '  ❯ Open System Settings',
+    '    Try again',
+    '  Enter to confirm · Esc to cancel',
+  ].join('\n')
+  await tick(250)
+  const posted = t.slack.posts.find((p) => /입력을 기다립니다/.test(p.text))!
+  const row = (posted.blocks as Array<{ type: string; elements?: Array<{ action_id: string; value: string; text: { text: string } }> }>).find((b) => b.type === 'actions')!
+  const labels = row.elements!.map((e) => e.text.text)
+  assert.deepEqual(labels, ['Open System Settings', 'Try again', 'Esc로 취소'], '커서 줄만이 아니라 둘째 선택지도 버튼이 된다')
+
+  // 둘째 선택지("Try again")를 고른다: 커서를 한 칸 내리고 Enter.
+  const tryAgain = { actionId: row.elements![1]!.action_id, value: row.elements![1]!.value }
+  await t.broker.handleAction({ user: 'U1', ...tryAgain, messageTs: posted.ts, channel: 'C1' })
+  assert.deepEqual(t.tmux.keys.slice(-1), ['%61:Down Enter'])
+  assert.match(t.slack.updates.find((u) => u.ts === posted.ts)!.text, /답함/, '카드를 접는다')
+  assert.equal(t.slack.statuses.at(-1), `processing@${s.ack}`, '대기를 풀고 processing 으로 돌아간다')
+  s.conn.close()
+  t.close()
+})
+
+test('번호 없는 창의 Esc 버튼은 `:esc`(작업 중단) 가 아니라 Escape 키만 보낸다', async () => {
+  const t = await setup({ stallMs: 60, quietMs: 100_000 })
+  const s = await shim(t.socketPath, { tmuxPane: '%62' })
+  await tick(100)
+  t.tmux.screen = ['  Permission needed', '  ❯ Open System Settings', '  Enter to confirm · Esc to cancel'].join('\n')
+  await tick(250)
+  const posted = t.slack.posts.find((p) => /입력을 기다립니다/.test(p.text))!
+  const row = (posted.blocks as Array<{ type: string; elements?: Array<{ action_id: string; value: string }> }>).find((b) => b.type === 'actions')!
+  const escBtn = row.elements!.at(-1)!
+  await t.broker.handleAction({ user: 'U1', actionId: escBtn.action_id, value: escBtn.value, messageTs: posted.ts, channel: 'C1' })
+  assert.deepEqual(t.tmux.keys.slice(-1), ['%62:Escape'], 'Escape 키만 보낸다(Enter 를 덧붙이지 않는다)')
+  assert.ok(!t.slack.texts().some((x) => /멈췄습니다/.test(x)), '작업 중단으로 처리되지 않는다')
   s.conn.close()
   t.close()
 })

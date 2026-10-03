@@ -15,7 +15,7 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { SlackApi, InMsg, InAction, InStop, InCommand, InView } from './slack.ts'
 import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
-import { DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
+import { cursorKeys, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
@@ -2270,7 +2270,7 @@ export class Broker {
       about || undefined,
       this.mentionFor(session, 'decision'),
     )
-    await this.slack.post({ threadTs: session.threadTs, text, blocks })
+    session.openDialogTs = await this.slack.post({ threadTs: session.threadTs, text, blocks })
     this.markWaiting(session, 'dialog')
     await this.setStatus(session, 'suspended')
     return true
@@ -2289,7 +2289,7 @@ export class Broker {
     session.stallShown = sig
     this.logAt('INFO', 'dialog', 'keyed dialog surfaced', this.tag(session, { question: truncate(keyed.question, 80) }))
     const { text, blocks } = keyedDialogBlocks(session.pid, keyed, this.mentionFor(session, 'decision'))
-    await this.slack.post({ threadTs: session.threadTs, text, blocks })
+    session.openDialogTs = await this.slack.post({ threadTs: session.threadTs, text, blocks })
     this.markWaiting(session, 'dialog')
     await this.setStatus(session, 'suspended')
     return true
@@ -2756,12 +2756,16 @@ export class Broker {
     // not reach a prompt the dialog has already left. Same rule the numbered
     // buttons follow, for the same reason.
     if (isAction(a.actionId, ACTION.dlgKey)) {
+      if (a.messageTs && session.openDialogTs && a.messageTs !== session.openDialogTs) {
+        await this.slack.postEphemeral(a.user, '이 창은 이미 끝났습니다 (다른 창으로 넘어갔습니다).', session.threadTs)
+        return
+      }
       if (session.pane && !parseKeyedDialog(await this.tmux.capture(session.pane))) {
         await this.slack.postEphemeral(a.user, '그 창은 이미 닫혔습니다. `:screen` 으로 지금 화면을 보세요.', session.threadTs)
         return
       }
       session.stallShown = undefined
-      return this.runCommand(session, rest, a.user)
+      return this.runCommand(session, rest, a.user, a.messageTs || undefined)
     }
     if (rest === 'purge') return session.ended ? this.purgeThread(session, a.user) : this.runCommand(session, 'purge', a.user)
     if (rest === 'confirm purge') {
@@ -3860,6 +3864,23 @@ export class Broker {
       run: async (c) => {
         if (!c.args.length) return void (await c.post('사용법: `:key Down Enter` (tmux send-keys 토큰)'))
         await this.tmux.sendKeys(c.pane, c.args)
+      },
+    },
+
+    /** A keyed (no-number) dialog's own buttons: move the cursor to a choice (arg = the move count, +/-) and
+     *  confirm, or `esc` to just send Escape. Internal only — panel.ts is the only thing that encodes this. */
+    dlgkey: {
+      run: async (c) => {
+        const arg = c.arg.trim()
+        await this.tmux.sendKeys(c.pane, arg === 'esc' ? ['Escape'] : cursorKeys(Number(arg) || 0))
+        if (c.messageTs && c.messageTs === c.session.openDialogTs) {
+          await this.slack.update(c.messageTs, '⌨️ 답함', [{ type: 'section', text: { type: 'mrkdwn', text: '⌨️ 답함' } }]).catch(() => {})
+          c.session.openDialogTs = undefined
+        }
+        c.session.stallShown = undefined
+        this.clearWaiting(c.session)
+        await this.setStatus(c.session, 'processing')
+        this.noteActivity(c.session)
       },
     },
 

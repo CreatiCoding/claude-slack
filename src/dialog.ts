@@ -161,6 +161,10 @@ export interface KeyedDialog {
   body?: string
   /** The key hints Claude Code prints, quoted as-is. */
   footer: string
+  /** The choice lines themselves (e.g. "Open System Settings", "Try again"), cursor-marker stripped, in screen order. */
+  options: string[]
+  /** Index into `options` the ❯ cursor currently sits on. */
+  selected: number
 }
 
 /**
@@ -177,14 +181,30 @@ export function parseKeyedDialog(screen: string): KeyedDialog | null {
   const cursor = lines.findIndex((l, i) => i < foot && /^\s*❯\s*\S/.test(l))
   if (cursor < 0) return null
 
+  // Every non-blank, non-separator line from the cursor down to the footer is a choice — the cursor's own
+  // line plus whichever others sit alongside it (e.g. "❯ Open System Settings" / "Try again"); only the
+  // first ever had the ❯, which is exactly what made every choice past it unreachable before this.
+  const options: string[] = []
+  let selected = 0
+  for (let i = cursor; i < foot; i++) {
+    const raw = lines[i]!
+    if (SEPARATOR_RE.test(raw.trim())) continue
+    const isCursor = /^\s*❯\s*\S/.test(raw)
+    const label = raw.replace(/^\s*❯?\s*/, '').trim()
+    if (!label) continue
+    if (isCursor) selected = options.length
+    options.push(label)
+  }
+  if (!options.length) return null
+
   const body: string[] = []
-  for (let i = foot - 1; i >= 0 && body.length < 12; i--) {
+  for (let i = cursor - 1; i >= 0 && body.length < 12; i--) {
     const l = lines[i]!.replace(/^[\s│|]+/, '').replace(/[\s│|]+$/, '').trim()
     if (SEPARATOR_RE.test(l)) break
     if (l) body.unshift(l)
   }
   if (!body.length) return null
-  return { question: body[0]!, body: body.slice(1).join('\n') || undefined, footer: lines[foot]!.trim() }
+  return { question: body[0]!, body: body.slice(1).join('\n') || undefined, footer: lines[foot]!.trim(), options, selected }
 }
 
 /** The indented lines under an option, joined; empty when there are none. */

@@ -238,9 +238,15 @@ export interface Question {
  * A terminal dialog with nothing numbered to press. There is no option list to
  * turn into buttons, so show what it says and offer the two keys it accepts.
  */
-export function keyedDialogBlocks(pid: number, d: { question: string; body?: string; footer: string }, mention?: string): { text: string; blocks: unknown[] } {
+export function keyedDialogBlocks(pid: number, d: { question: string; body?: string; footer: string; options: string[]; selected: number }, mention?: string): { text: string; blocks: unknown[] } {
   const who = mention ? `<@${mention}> ` : ''
   const text = `${who}⌨️ *터미널이 입력을 기다립니다*\n${d.question}`
+  // One button per choice line, not just the one the cursor happens to sit on: moving there is
+  // `dlgkey <moves>` (↑/↓ the cursor to it, then Enter), handled as its own command so it can fold
+  // the card and clear the wait, which a raw `:key` press never did.
+  const moveButtons = d.options.slice(0, 5).map((label, i) =>
+    btn(truncate(label, 75), ACTION.dlgKey, encodeValue(pid, `dlgkey ${i - d.selected}`), i === d.selected ? 'primary' : undefined),
+  )
   return {
     text,
     blocks: [
@@ -249,10 +255,9 @@ export function keyedDialogBlocks(pid: number, d: { question: string; body?: str
       { type: 'context', elements: [{ type: 'mrkdwn', text: truncate(d.footer, 300) }] },
       {
         type: 'actions',
-        elements: [
-          btn('Enter로 진행', ACTION.dlgKey, encodeValue(pid, 'key Enter'), 'primary'),
-          btn('Esc로 취소', ACTION.dlgKey, encodeValue(pid, 'esc')),
-        ],
+        // Esc sends just the key (`dlgkey esc`), not the `:esc` command — `:esc` means "stop the running
+        // turn", which this dialog usually is not.
+        elements: [...moveButtons, btn('Esc로 취소', ACTION.dlgKey, encodeValue(pid, 'dlgkey esc'))],
       },
     ],
   }
