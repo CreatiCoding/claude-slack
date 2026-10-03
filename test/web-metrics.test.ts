@@ -150,6 +150,35 @@ test('SSE: 붙을 때 전체 목록 한 번, 그 뒤로는 바뀐 세션만(같�
   }
 })
 
+test('hello 는 웹 파일들의 해시를 싣고, 두 연결(= 한 프로세스)에서 같다 (21)', async () => {
+  const server = createAdminServer(fakeApi(), { port: 0 })
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
+  const { port } = server.address() as { port: number }
+  const base = `http://127.0.0.1:${port}`
+  const read = () =>
+    new Promise<string>((resolve) => {
+      let buf = ''
+      const req = request(`${base}/api/stream`, (res) =>
+        res.on('data', (c) => {
+          buf += String(c)
+          const m = /event: hello\ndata: (.*)\n/.exec(buf)
+          if (m) {
+            req.destroy()
+            resolve(JSON.parse(m[1]!).webHash)
+          }
+        }),
+      )
+      req.end()
+    })
+  try {
+    const [a, b] = await Promise.all([read(), read()])
+    assert.match(a, /^[0-9a-f]{12}$/)
+    assert.equal(a, b, '같은 프로세스가 섬긴 두 연결은 같은 해시를 받는다')
+  } finally {
+    server.close()
+  }
+})
+
 test('구독: 페이지가 보고 있는 스레드의 이벤트만 그 페이지로 간다; 구독 전에는 이벤트가 없다', async () => {
   const api = fakeApi()
   const log = api.events as EventLog

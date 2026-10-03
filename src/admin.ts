@@ -13,7 +13,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https'
 import { readFileSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { gzipSync } from 'node:zlib'
 import type { AdminState, Orphan, ThreadView, WebSession } from './broker.ts'
 import type { SessionEvent } from './events.ts'
@@ -177,6 +177,24 @@ const WEB_FILES: Record<string, string> = {
   '/web/qr.js': 'qr.js',
 }
 const WEB_TYPES: Record<string, string> = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8' }
+
+/**
+ * One hash for the whole set of files this process is serving (21). A tab that opened before a broker
+ * restart deployed new code is otherwise none the wiser until something it does breaks — this ships in
+ * `hello`, and a value the page did not start with means "새 버전이 나왔어요 · 새로고침". Computed once:
+ * this process serves one version of these files for its whole life.
+ */
+const WEB_HASH: string = (() => {
+  const hash = createHash('sha256')
+  for (const file of new Set(Object.values(WEB_FILES))) {
+    try {
+      hash.update(readFileSync(new URL(`./web/${file}`, import.meta.url)))
+    } catch {
+      // Missing in a test fixture, say: still a stable (if not meaningful) hash for this process's life.
+    }
+  }
+  return hash.digest('hex').slice(0, 12)
+})()
 
 export interface AdminOptions {
   host?: string
@@ -385,7 +403,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const conn = randomBytes(8).toString('hex')
     const me: { thread: string | null; live?: string; thinking?: boolean; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
-    write('hello', { conn })
+    write('hello', { conn, webHash: WEB_HASH })
     const offEvent = api.events.subscribe((thread, ev) => {
       if (me.thread === thread) write('ev', { thread, ev }, `ev:${ev.type}`)
     })

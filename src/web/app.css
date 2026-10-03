@@ -84,7 +84,9 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 12px; background: var(--side); border-bottom: 1px solid var(--line); min-width: 0; }
 .topbar .left { display: flex; align-items: center; gap: 2px; flex: none; }
-.icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--text-2); }
+.icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--text-2); position: relative; }
+/* 21: a new build is up — noticeable before opening the menu to read why. */
+.icon-btn.dot::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--bg); }
 .icon-btn:hover { background: var(--hover); }
 .icon-btn:disabled { opacity: .35; }
 .icon-btn .ic { width: 18px; height: 18px; }

@@ -32,6 +32,11 @@ const store = {
       localStorage.setItem(k, JSON.stringify(v))
     } catch {}
   },
+  del(k) {
+    try {
+      localStorage.removeItem(k)
+    } catch {}
+  },
 }
 
 // Static icons in the frame.
@@ -135,6 +140,30 @@ function toast(text, kind = 'ok', ms = 2600) {
 const reported = new Map()
 /** At most 20 a minute from this page, whatever they are: a loop of different errors must not flood the broker. */
 const reportTimes = []
+/**
+ * Queued in localStorage first, not sent straight off (21): an error while offline — the exact moment one
+ * is more likely — used to just drop silently (the `fetch` failing is caught and ignored). Up to 50 wait
+ * here; `flushErrorQueue` sends what it can whenever the connection looks like it might be back.
+ */
+const ERR_QUEUE_KEY = 'errq'
+function queueError(entry) {
+  const q = store.get(ERR_QUEUE_KEY, [])
+  q.push(entry)
+  store.set(ERR_QUEUE_KEY, q.slice(-50))
+}
+async function flushErrorQueue() {
+  const q = store.get(ERR_QUEUE_KEY, [])
+  if (!q.length) return
+  for (let i = 0; i < q.length; i++) {
+    try {
+      const r = await fetch(withToken('/api/client-error'), { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(q[i]) })
+      if (!r.ok) return store.set(ERR_QUEUE_KEY, q.slice(i)) // this one and the rest wait for the next flush
+    } catch {
+      return store.set(ERR_QUEUE_KEY, q.slice(i)) // offline: everything from here on waits for the next flush
+    }
+  }
+  store.set(ERR_QUEUE_KEY, [])
+}
 function reportError(where, err) {
   const message = String(err?.message ?? err ?? '알 수 없는 오류').slice(0, 500)
   const key = where + '|' + message
@@ -145,16 +174,26 @@ function reportError(where, err) {
   reportTimes.push(now)
   reported.set(key, now)
   if (reported.size > 200) reported.delete(reported.keys().next().value)
-  try {
-    fetch(withToken('/api/client-error'), {
-      method: 'POST',
-      headers: { ...authHeaders, 'content-type': 'application/json' },
-      body: JSON.stringify({ where, message, stack: String(err?.stack ?? '').slice(0, 4000), view: isPhone() ? 'phone' : 'pc', url: location.pathname + location.hash, ua: navigator.userAgent.slice(0, 200) }),
-    }).catch(() => {})
-  } catch {}
+  queueError({ where, message, stack: String(err?.stack ?? '').slice(0, 4000), view: isPhone() ? 'phone' : 'pc', url: location.pathname + location.hash, ua: navigator.userAgent.slice(0, 200) })
+  flushErrorQueue()
 }
 addEventListener('error', (e) => reportError('window', e.error ?? e.message))
 addEventListener('unhandledrejection', (e) => reportError('promise', e.reason))
+addEventListener('online', () => flushErrorQueue())
+
+/**
+ * A heartbeat written every 5,000 ms and cleared on a clean `pagehide` (21): if one is still there when
+ * the page opens again, nothing cleared it last time — a crash or a forced-closed tab, not a normal close
+ * or reload (those fire `pagehide`). Reported once, the same way a caught error is.
+ */
+const HEARTBEAT_KEY = 'heartbeat'
+if (store.get(HEARTBEAT_KEY, null)) {
+  queueError({ where: 'crash', message: '지난번에 정리되지 않고 끝났어요(하트비트가 남아 있었어요)', view: isPhone() ? 'phone' : 'pc', url: location.pathname + location.hash, ua: navigator.userAgent.slice(0, 200) })
+  flushErrorQueue()
+}
+setInterval(() => store.set(HEARTBEAT_KEY, Date.now()), 5000)
+setInterval(() => flushErrorQueue(), 60_000) // a safety net in case 'online' never fires (some proxies, some phones)
+addEventListener('pagehide', () => store.del(HEARTBEAT_KEY))
 
 // ------------------------------------------------------------------ measurement
 // Once a minute the page tells the broker what it received and what showing it cost, for the log.
@@ -211,6 +250,8 @@ function brokerAway() {
   restarting = true
 }
 let connId = null
+let webHash = null // this load's baseline (21); a later `hello` with a different one means new code is up
+let newVersionSeen = false
 async function subscribe(ts) {
   if (!connId) return
   try {
@@ -241,7 +282,17 @@ function connect() {
   })
   // Each stream has an id; the page tells the broker which thread it shows, and only that thread's events come.
   on('hello', (e) => {
-    connId = JSON.parse(e.data).conn
+    const hello = JSON.parse(e.data)
+    connId = hello.conn
+    // The broker restarting with new code (21): a tab open from before has no reason to notice on its
+    // own otherwise. First value seen this load is the baseline — a later, different one is the new code.
+    if (hello.webHash) {
+      if (!webHash) webHash = hello.webHash
+      else if (hello.webHash !== webHash && !newVersionSeen) {
+        newVersionSeen = true
+        $('btn-more').classList.add('dot')
+      }
+    }
     if (current) subscribe(current).then(() => catchUp(current))
   })
   on('error', () => {
@@ -2504,6 +2555,7 @@ function globalItems() {
       ],
     },
     { label: '이전 관리 화면', icon: 'screen', run: () => (location.href = withToken('/admin')) },
+    ...(newVersionSeen ? [{ label: '새 버전이 나왔어요 · 새로고침', icon: 'refresh', run: () => location.reload() }] : []),
   ]
   const s = current && sessionOf(current)
   // This session's items, without the destructive ones (강제 종료, 폴더 버리고 종료): those stay in its own menu.

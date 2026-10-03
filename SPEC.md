@@ -2409,7 +2409,7 @@ cache-control: no-store
 - 전제조건: 인증 통과
 - 입력: 없음. 보는 스레드는 IF-009 로 알린다
 - 처리 규칙:
-  1. 접속 직후 프레임을 이 순서로 보낸다: `retry: 2000` → `sessions`(세션 목록 전체, `WebSession[]`) → `groups`(그룹 상태) → `hello {conn}`(`conn` = 무작위 8 byte 의 16진 16자).
+  1. 접속 직후 프레임을 이 순서로 보낸다: `retry: 2000` → `sessions`(세션 목록 전체, `WebSession[]`) → `groups`(그룹 상태) → `hello {conn, webHash}`(`conn` = 무작위 8 byte 의 16진 16자, `webHash` = 이 프로세스가 섬기는 웹 파일(`index.html`, `app.js`, `app.css`, `markdown.js`, `icons.js`, `idb.js`, `qr.js`) 전체 내용의 sha256 앞 12자 — 기동 때 한 번만 계산해 그 프로세스가 사는 동안 바뀌지 않는다, 21).
   2. 세션 목록(§4.3.23): 살아 있는 세션을 레지스트리 등록 순서로 놓는다. 그 뒤에 "직전에 보였지만 지금 살아 있지 않은 스레드"를 붙인다 — 그 스레드가 다시 여는 중이거나 대기 중 시작이 있으면 직전 행을 `state: "starting"`, `held: 0`, 대기·권한 없음으로 바꿔 유지하고, 새로고침 실패 시각 뒤 600,000 ms 안이면 `state: "ended"` 로 유지하고, 둘 다 아니면 버린다.
   3. 목록 변경 알림(250 ms 묶음)이 오면 차분을 계산한다: 직전에 이 연결로 보낸 각 세션의 JSON 문자열과 비교해 달라진 세션만 `changed` 에 넣고, `order` = 지금 목록의 스레드 `ts` 배열. 달라진 세션이 0개이고 순서도 같으면 보내지 않는다. 아니면 `sessions_delta {order, changed}`.
   4. 그룹 상태의 JSON 문자열이 직전과 다르면 `groups` 를 다시 보낸다.
@@ -2417,6 +2417,7 @@ cache-control: no-store
   6. 쓰는 중 글: REQ-F-067.
   7. 25,000 ms 마다 `: ping <epoch ms>`.
   8. 연결이 닫히면 그 연결의 구독·타이머를 지운다.
+  9. 페이지는 이 로드에서 처음 받은 `webHash` 를 기준값으로 둔다. 그 뒤 다른 `webHash` 를 받으면(브로커가 새 코드로 다시 떠서 다른 프로세스가 섬긴다는 뜻, 21) 메뉴 버튼에 점을 띄우고, 메뉴에 `새 버전이 나왔어요 · 새로고침`(누르면 `location.reload()`) 을 더한다. 한 번 뜨면 그 로드가 끝날 때까지 유지(다시 같아져도 안 내린다).
 - 출력: SSE 프레임
 - 사후조건: 연결 표에 `conn` 이 있다
 - 예외·오류:
@@ -2426,7 +2427,7 @@ cache-control: no-store
   | 인증 실패 | ERR-001 | 401 |
 - 경계값: 구독하지 않은 연결은 `ev`·`live` 를 받지 않는다. 구독 스레드를 `null` 로 바꾸면 다시 받지 않는다
 - 동시성: 연결마다 차분 상태를 따로 가진다. 같은 변경이 모든 연결에 각각 계산된다
-- 수용 기준: AC-055
+- 수용 기준: AC-055, AC-158(1·9단계, webHash, 21)
 - 근거: `src/admin.ts` `/api/stream`·`sessionsDelta`, `src/broker.ts` `webSessions`·`liveRows`·`changed`(ASM-002)
 - 추적: IF-003, IF-009, §4.3.23, §5.3 GT-10
 
@@ -2800,12 +2801,14 @@ cache-control: no-store
   2. 페이지 지표: INFO(영역 `admin`) `page tab=<단어> view=<단어> recv=<n>B/<n>ev apply=<n>×avg<평균>ms/max<최대>ms catchup=<개수>×<rounds 합>rounds/<events 합>ev/<ms 합>ms stalls=<n>/max<최대>ms dom=<n>`. 단어 = `[^\w.-]` 를 지우고 앞 24자, 빈 문자열이면 `-`. 숫자는 반올림(`Math.round`), 숫자가 아니면 0. 평균 = `round(sum / n)`(n = 0 이면 0).
   3. 보낸 양: 종류별(`sessions`, `sessions_delta`, `groups`, `hello`, `ev:<이벤트 종류>`, `live`, `image`, `events`) 건수와 byte 를 세어 60,000 ms 마다 INFO(영역 `admin`) `web sent 1m total=<건수>/<byte>B <종류>=<건수>/<byte>B …`(byte 내림차순)를 남긴다. 보낸 것이 없으면 남기지 않는다. 1건이 500,000 byte 를 넘으면 즉시 `web big <종류> <byte>B[ <설명>]`.
   4. 페이지 쪽 제한: 같은 (위치, 메시지)는 60,000 ms 에 1회, 전체 60,000 ms 에 20건.
+  5. 페이지는 화면 오류를 바로 보내지 않고 localStorage(`errq`, 최대 50개)에 먼저 쌓고(21; 끊긴 동안 생긴 오류가 `fetch` 실패로 조용히 버려지던 것을 막는다), `online` 이벤트·60,000 ms 주기·매 새 오류마다 앞에서부터 순서대로 보내려 한다. 하나가 실패(응답 실패 포함)하면 그것부터 다시 큐에 남기고 그 시도는 멈춘다.
+  6. 5,000 ms 마다 localStorage(`heartbeat`)에 지금 시각을 쓰고, `pagehide`(정상적으로 닫히거나 새로고침할 때 뜨는 이벤트)에서 지운다. 페이지가 열릴 때 그 값이 남아 있으면(지난번이 `pagehide` 없이 끝났다 — 크래시나 강제로 닫힌 탭) `where: "crash"` 로 한 번 큐에 넣는다.
 - 출력: 로그 줄
 - 사후조건: 해당 없음
 - 예외·오류: ERR-008(429)
 - 경계값: 61번째 화면 오류 → 429. 줄바꿈이 든 `where` → 공백으로 바뀌어 한 줄
 - 동시성: 해당 없음
-- 수용 기준: AC-072
+- 수용 기준: AC-072, AC-157(5·6단계, 21)
 - 근거: `src/admin.ts`, `src/meter.ts`, `src/index.ts`(ASM-002)
 - 추적: IF-010, IF-011, REQ-S-007, ERR-008
 
@@ -5313,6 +5316,8 @@ Slack 오류 표:
 | AC-070 | REQ-F-070 | 이벤트 글에 `https://github.com/o/r/pull/7` 과 `https://github.com/o/r/pull/9`. 가짜 조회: 7 = `MERGED`, 9 = `OPEN`. 브랜치 PR 없음 | `GET /api/session/4242/links` | `prs` 의 순서 = 9, 7 |
 | AC-071 | REQ-F-071 | 토큰 `s3cret`, `publicUrl` `https://x.example` | `POST /api/qr-code {}` → 받은 주소로 `GET` 두 번 | `url` 이 `https://x.example/login?c=` + 32자 16진. 첫 `GET` 302 `location: /?t=s3cret`. 둘째 `GET` 403 |
 | AC-072 | REQ-F-072 | 접수 0건 | `POST /api/client-error {"where":"a\nb","message":"m","view":"pc","url":"/"}` 를 61번 | 처음 60번 204, 61번째 429. `web-client.log` 의 첫 줄이 `화면 오류 [pc] a b: m (/)` 로 끝난다 |
+| AC-157 | REQ-F-072 | `/api/client-error` 가 처음엔 네트워크 오류, 그 뒤 성공 | 오류를 하나 일으킨다. `online` 이벤트 | localStorage `errq` 에 1개가 쌓인다(바로 안 사라진다). `online` 뒤 전송 성공하면 `errq` 가 빈다. localStorage `heartbeat` 를 지우지 않고 새로고침하면 `errq` 에 `where:"crash"` 항목이 생긴다 |
+| REQ-F-072 | 요청 "오류·크래시 기록"(21) | AC-157 | `web/app.js` |
 | AC-073 | REQ-F-073 | 채널에 봇 루트 메시지 T(답글 3개), 세션 없음, 기록 없음 | `GET /api/orphans` → `POST /api/orphan/resume {"ts":"T"}` | 목록에 `{"ts":"T","kind":"unknown","replies":3}`. 재개는 400 `이어서 할 대화 정보가 없는 스레드입니다. 정리만 할 수 있습니다.` |
 | AC-074 | REQ-F-074 | 보관 폴더 밖의 파일 `/tmp/x.json` | `POST /api/archive/delete {"path":"/tmp/x.json"}` | 404 `{"ok":false,"note":"보관 기록을 찾지 못했습니다."}`. 파일이 그대로 있다 |
 | AC-075 | REQ-F-075 | 트랜스크립트: `Bash` 호출(설명 `sleep 45`)과 결과 `Command running in background with ID: b1.`. 프로세스의 자식 셸 1개 | `GET /api/session/4242/refresh-info` → 그 뒤 `<task-notification><task-id>b1</task-id><status>completed</status></task-notification>` 가 `queue-operation` 줄로 온다 | 처음 `tasks` = `[{"kind":"bash","label":"sleep 45"}]`. 알림 뒤 `[]` |
@@ -5454,6 +5459,8 @@ Slack 오류 표:
 | REQ-F-053 | 원문 `wakeDormant` | AC-053 | `broker.ts` |
 | REQ-F-054 | README "이벤트는 스레드마다 번호(seq)를 붙여" | AC-054 | `events.ts`, `broker.ts` |
 | REQ-F-055 | README "SSE(/api/stream) 하나로 세션 목록(바뀐 것만)" | AC-055 | `admin.ts`, `broker.ts` |
+| AC-158 | REQ-F-055 | 두 번 `GET /api/stream` 연결 | 각 연결의 `hello` 를 본다 | 둘 다 `webHash` 가 있고(12자 16진) 서로 같다(같은 프로세스가 섬긴다) |
+| REQ-F-055 | 요청 "열린 탭이 새 코드를 알아채게"(21) | AC-158 | `admin.ts`, `web/app.js` |
 | REQ-F-056 | README "after=seq 로 빠진 것만 받는다" | AC-056 | `events.ts`, `admin.ts` |
 | REQ-F-057 | README "웹에서 보낸 글은 스레드에 🌐 웹: 으로 남는다" | AC-057 | `broker.ts`, `admin.ts`, `images.ts` |
 | REQ-F-058 | README "Slack 클릭과 같은 handleAction 을 부른다" | AC-058 | `broker.ts`, `admin.ts`, `actions.ts` |
