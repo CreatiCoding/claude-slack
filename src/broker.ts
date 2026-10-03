@@ -373,7 +373,7 @@ const HELP = [
   '• `/compact` `/model opus` `/review` 처럼 `/`로 시작하면 Claude Code 명령으로 터미널에 그대로 들어갑니다. `!npm test` 처럼 `!`는 bash 모드. Slack이 `/`를 가로채면 `:/명령`.',
   '• 세션 제어: `:esc` 중단 · `:screen` 화면(`:screen raw` 전체) · `:status` 상태 · `:answer 2` 번호 응답 · `:key Down Enter` 키 입력 · `:type 텍스트` 타이핑 · `:canvas` 기록을 캔버스로 · `:refresh` 세션 다시 열기(스킬·플러그인 반영) · `:kill` Slack에서 띄운 세션 종료',
   '• 도구가 도는 중에 보낸 메시지는 붙잡았다가 도구가 끝나면 전달합니다. 바로 보내려면 안내의 *지금 보내기* 또는 `:now`.',
-  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달',
+  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달 · `:retract` 방금 보낸 메시지 철회',
   '• 권한 요청은 버튼으로, 또는 `yes abcde` / `no abcde` 로 답합니다. `:auto on` 이면 브로커가 모든 권한 요청을 바로 허용하고 무엇을 허용했는지 스레드에 남깁니다(`:auto off` 로 끔).',
 ].join('\n')
 
@@ -3354,6 +3354,9 @@ export class Broker {
   private async deliver(session: Session, text: string, user: string, ts: string, via: 'channel' | 'keys' = 'channel'): Promise<void> {
     session.lastInjected = text
     session.triggerTs = ts
+    // A synthetic delivery (계속해, :tell, the retraction notice itself) carries the thread's own ts;
+    // `:retract` only ever means the last real reply someone typed.
+    if (ts !== session.threadTs) session.lastUserMessage = { text, ts }
     await this.beginTurn(session, user)
     if (via === 'keys' && session.pane) {
       // Typed into the terminal, it is the person's own input. A channel notification that arrives while
@@ -3962,6 +3965,29 @@ export class Broker {
           await this.setStatus(c.session, 'processing')
         }
         this.noteActivity(c.session)
+      },
+    },
+
+    retract: {
+      user: true,
+      run: async (c) => {
+        const last = c.session.lastUserMessage
+        if (!last) return void (await c.post('철회할 메시지가 없습니다(아직 아무것도 보내지 않았거나, 이미 철회했습니다).'))
+        c.session.lastUserMessage = undefined
+        await this.slack.react(last.ts, 'x').catch(() => {})
+        // Only when a turn is actually running: 턴이 쉬는 중이면 Esc 는 끊을 것이 없어 "이미 유휴" 로만 읽힌다.
+        if (c.session.turn) {
+          await this.tmux.sendKeys(c.pane, ['Escape']).catch(() => {})
+          await sleep(this.cfg.escSettleMs ?? ESC_SETTLE_MS)
+          const turn = c.session.turn
+          if (turn) {
+            await turn.end().catch(() => {})
+            c.session.turn = undefined
+          }
+        }
+        const quoted = truncate(last.text.replace(/\s+/g, ' ').trim(), 80)
+        await this.inject(c.session, `[정정] 방금 보낸 "${quoted}" 는 잘못 보낸 메시지예요. 그 지시는 따르지 마세요. 이미 파일을 바꾸거나 명령을 실행했다면 무엇을 했는지만 짧게 알려 주세요.`, c.user ?? this.defaultRecipient, c.session.threadTs)
+        await c.post('✖ 철회했습니다.')
       },
     },
 

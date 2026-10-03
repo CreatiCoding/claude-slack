@@ -42,6 +42,8 @@ export interface Session {
   recipient: string
   /** Slack ts of the message that started the current turn, for reactions. */
   triggerTs?: string
+  /** The last genuine Slack reply delivered to this session (not a synthetic one like 계속해/:tell), for `:retract`. */
+  lastUserMessage?: { text: string; ts: string }
   lastInjected?: string
   statusCreated: boolean
   panelTs?: string
