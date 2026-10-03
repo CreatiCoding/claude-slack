@@ -151,18 +151,30 @@ function queueError(entry) {
   q.push(entry)
   store.set(ERR_QUEUE_KEY, q.slice(-50))
 }
+// Guards re-entry: `reportError` calls this on every new error with no await, so a burst (a loop of
+// distinct errors, say) used to start one overlapping flush per error — each reading/writing `errq` off
+// its own stale snapshot, racing each other into losing or duplicating entries.
+let flushingErrors = false
 async function flushErrorQueue() {
-  const q = store.get(ERR_QUEUE_KEY, [])
-  if (!q.length) return
-  for (let i = 0; i < q.length; i++) {
-    try {
-      const r = await fetch(withToken('/api/client-error'), { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(q[i]) })
-      if (!r.ok) return store.set(ERR_QUEUE_KEY, q.slice(i)) // this one and the rest wait for the next flush
-    } catch {
-      return store.set(ERR_QUEUE_KEY, q.slice(i)) // offline: everything from here on waits for the next flush
+  if (flushingErrors) return
+  flushingErrors = true
+  try {
+    for (;;) {
+      const q = store.get(ERR_QUEUE_KEY, [])
+      if (!q.length) return
+      try {
+        const r = await fetch(withToken('/api/client-error'), { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(q[0]) })
+        if (!r.ok) return // rejected (rate limit, say) — leave the queue as-is for the next trigger
+      } catch {
+        return // offline — leave the queue as-is
+      }
+      // Sent: drop exactly that one off the front of the *current* queue (re-read, not the `q` above —
+      // another tab, or this one mid-await, may have queued more since).
+      store.set(ERR_QUEUE_KEY, store.get(ERR_QUEUE_KEY, []).slice(1))
     }
+  } finally {
+    flushingErrors = false
   }
-  store.set(ERR_QUEUE_KEY, [])
 }
 function reportError(where, err) {
   const message = String(err?.message ?? err ?? '알 수 없는 오류').slice(0, 500)

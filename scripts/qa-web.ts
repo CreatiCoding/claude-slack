@@ -426,7 +426,9 @@ for (const [label, size, phone] of [
   await page.waitForSelector('.row')
   check(`${label}: 목록에 떠 있는 세션들`, (await page.locator('.row[data-thread]').count()) >= 3)
   check(`${label}: 응답 대기 배지`, ((await page.locator(`.row[data-thread="${B}"] .badge`).first().textContent()) ?? '').includes('권한 대기'))
-  check(`${label}: 대기 세션이 맨 위`, ((await page.locator('.row[data-loose] .name').first().textContent()) ?? '') === '베타')
+  // 19: waiting no longer moves a row to the top — only the badge says so — so the order here is by
+  // startedAt (C started earliest, then B, then A), unaffected by B being the one waiting.
+  check(`${label}: 정렬은 시작 순(waiting 이라고 맨 위로 안 간다, 19)`, ((await page.locator('.row[data-loose] .name').first().textContent()) ?? '') === '긴 세션')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
 
   // B waits for a permission, so a modal asks about it on whatever screen this is; tapping outside dismisses it.
@@ -893,6 +895,29 @@ for (const [label, size, phone] of [
   changed()
   await ctx.close()
 }
+// 36: how much the layout jumps around while opening a long conversation (claude-web measured CLS 0.65
+// before fixing it — collapsed space before content arrives, a fixed "latest N rows" window, pictures
+// without a reserved aspect ratio). Measured first, fixed only if it reproduces here.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  await page.addInitScript(() => {
+    ;(window as unknown as { __cls: number }).__cls = 0
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as Array<PerformanceEntry & { value: number; hadRecentInput: boolean }>) {
+        if (!entry.hadRecentInput) (window as unknown as { __cls: number }).__cls += entry.value
+      }
+    }).observe({ type: 'layout-shift', buffered: true })
+  })
+  await page.goto(base + '/#' + C)
+  await page.waitForSelector('.item.text')
+  await page.waitForTimeout(1000)
+  const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls)
+  console.log(`36: CLS 실측(PC, 긴 대화 ${C}, 이벤트 ${1600 * 4}개) = ${cls.toFixed(4)}`)
+  check('36: 대화를 여는 동안의 레이아웃 이동(CLS) < 0.1(권장 임계)', cls < 0.1, String(cls))
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 localServer.close()
