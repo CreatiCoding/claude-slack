@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { lastModelInTranscript, parseTranscriptLine, TranscriptTailer, transcriptPathFor } from '../src/transcript.ts'
 
 test('parseTranscriptLine distills assistant and user entries', () => {
@@ -56,4 +56,23 @@ test('parseTranscriptLine: 로컬 명령이 출력한 것은 stdout/stderr 로 �
     { kind: 'local', text: 'oops', isError: true },
   ])
   assert.deepEqual(parseTranscriptLine(line('그냥 메시지')), [{ kind: 'user', text: '그냥 메시지' }])
+})
+
+test('readSessionText: 사람 메시지(채널 포함)·답·도구 호출만 글로 뽑고, 도구 출력은 넣지 않는다', async () => {
+  const { readSessionText } = await import('../src/transcript.ts')
+  const path = join(mkdtempSync(join(tmpdir(), 'read-session-unit-')), 't.jsonl')
+  writeFileSync(
+    path,
+    [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '<channel source="slack" user="U1">질문입니다</channel>' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '답변입니다' }, { type: 'tool_use', id: 't1', name: 'Write', input: { file_path: '/x', content: 'x'.repeat(500) } }] } }),
+      JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: '이 출력은 포함되지 않는다' }] } }),
+    ].join('\n') + '\n',
+  )
+  const text = readSessionText(path)
+  assert.match(text, /User: 질문입니다/)
+  assert.match(text, /Claude: 답변입니다/)
+  assert.match(text, /Tool: Write\(/)
+  assert.ok(!text.includes('이 출력은 포함되지 않는다'), '도구 결과 본문은 넣지 않는다')
+  assert.ok((/Tool: Write\((.*)\)/.exec(text)?.[1]?.length ?? 999) <= 160, '도구 입력은 160자까지만')
 })

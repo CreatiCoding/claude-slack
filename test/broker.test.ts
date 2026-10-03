@@ -2492,3 +2492,38 @@ test(':retract: 세션이 쉬는 중이면 Esc 를 누르지 않는다. 이미 �
   s.conn.close()
   t.close()
 })
+
+test('read_session: 스레드 ts·세션 id 접두어로 다른 대화를 찾아 최근 트랜스크립트를 글로 돌려준다 (claude-web 이관: P3-27)', async () => {
+  const transcript = join(mkdtempSync(join(tmpdir(), 'read-session-')), 'other.jsonl')
+  writeFileSync(
+    transcript,
+    [
+      JSON.stringify({ type: 'user', message: { role: 'user', content: '<channel source="slack" user="U1">이 버그 왜 나는지 봐줘</channel>' } }),
+      JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: '원인을 찾았습니다' }, { type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'grep -rn foo' } }] } }),
+    ].join('\n') + '\n',
+  )
+  const t = await setup({ transcriptPathFor: () => transcript })
+  const other = await shim(t.socketPath, { tmuxPane: '%1', sessionId: 'other-session-id', cwd: '/home/u/other' })
+
+  const s = await shim(t.socketPath, { tmuxPane: '%2', sessionId: 's2' })
+  s.conn.send({ type: 'read_session', reqId: 'r1', session: other.ack })
+  await until(() => s.inbox.some((m) => (m as { type?: string }).type === 'read_session_result'), '스레드 ts 로 찾는다')
+  const r1 = s.inbox.find((m) => (m as { type?: string }).type === 'read_session_result') as { text?: string; error?: string }
+  assert.ok(r1.text?.includes('이 버그 왜 나는지 봐줘'), '채널로 들어온 사람 메시지를 포함한다')
+  assert.ok(r1.text?.includes('Claude: 원인을 찾았습니다'))
+  assert.ok(r1.text?.includes('Tool: Bash('))
+
+  s.conn.send({ type: 'read_session', reqId: 'r2', session: 'other-sess' })
+  await until(() => s.inbox.filter((m) => (m as { type?: string }).type === 'read_session_result').length >= 2, '세션 id 접두어로도 찾는다')
+  const r2 = s.inbox.filter((m) => (m as { type?: string }).type === 'read_session_result').at(-1) as { text?: string }
+  assert.ok(r2.text?.includes('원인을 찾았습니다'))
+
+  s.conn.send({ type: 'read_session', reqId: 'r3', session: 'no-such-session' })
+  await until(() => s.inbox.filter((m) => (m as { type?: string }).type === 'read_session_result').length >= 3, '못 찾으면 오류')
+  const r3 = s.inbox.filter((m) => (m as { type?: string }).type === 'read_session_result').at(-1) as { error?: string }
+  assert.match(r3.error ?? '', /no session found/)
+
+  s.conn.close()
+  other.conn.close()
+  t.close()
+})

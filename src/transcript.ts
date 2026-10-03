@@ -306,3 +306,55 @@ export function transcriptTurnLooksOpen(path: string, tailBytes = 262_144): bool
     if (fd !== undefined) closeSync(fd)
   }
 }
+
+const READ_SESSION_TAIL_BYTES = 8 * 1024 * 1024
+const READ_SESSION_TOOL_INPUT_MAX = 160
+
+/**
+ * A conversation's recent transcript as plain text, for the `read_session` MCP tool: another session's
+ * Claude reading what happened in this one. Reads the last 8 MiB of the file; includes what a person said
+ * (typed or sent through Slack, `<channel>`-wrapped lines unwrapped), what Claude answered, and each tool
+ * call by name with its input cut to 160 chars — not the tool's own output, which is usually the bulk of
+ * the file and rarely what a cross-reading Claude needs.
+ */
+export function readSessionText(path: string, tailBytes = READ_SESSION_TAIL_BYTES): string {
+  let fd: number | undefined
+  const out: string[] = []
+  try {
+    fd = openSync(path, 'r')
+    const size = statSync(path).size
+    const start = Math.max(0, size - tailBytes)
+    const buf = Buffer.alloc(size - start)
+    readSync(fd, buf, 0, buf.length, start)
+    const lines = buf.toString('utf8').split('\n')
+    if (start > 0 && lines.length) lines.shift() // a tail that does not start at byte 0 may begin mid-record
+    for (const line of lines) {
+      if (!line.trim()) continue
+      let entry: { type?: string; isSidechain?: boolean; message?: { role?: string; content?: unknown } }
+      try {
+        entry = JSON.parse(line)
+      } catch {
+        continue
+      }
+      if (entry.isSidechain) continue
+      const content = entry.message?.content
+      if (entry.type === 'user') {
+        const text = typeof content === 'string' ? content : Array.isArray(content) ? (content as Array<Record<string, unknown>>).find((b) => b.type === 'text')?.text : undefined
+        if (typeof text !== 'string' || !text.trim()) continue
+        const unwrapped = /^\s*<channel\b[^>]*>([\s\S]*?)<\/channel>/.exec(text)?.[1]?.trim() ?? text.trim()
+        if (unwrapped.startsWith('<')) continue // another system wrapper (task-notification, local-command, …): not something a person said
+        out.push(`User: ${unwrapped}`)
+      } else if (entry.type === 'assistant' && Array.isArray(content)) {
+        for (const block of content as Array<Record<string, unknown>>) {
+          if (block.type === 'text' && typeof block.text === 'string' && block.text.trim()) out.push(`Claude: ${block.text.trim()}`)
+          else if (block.type === 'tool_use') out.push(`Tool: ${String(block.name)}(${JSON.stringify(block.input).slice(0, READ_SESSION_TOOL_INPUT_MAX)})`)
+        }
+      }
+    }
+  } catch {
+    // unreadable: whatever was gathered so far (likely nothing) is returned
+  } finally {
+    if (fd !== undefined) closeSync(fd)
+  }
+  return out.join('\n')
+}

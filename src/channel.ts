@@ -10,6 +10,7 @@ import { ListToolsRequestSchema, CallToolRequestSchema } from '@modelcontextprot
 import { z } from 'zod'
 import { statSync } from 'node:fs'
 import { isAbsolute } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { connect, type Conn } from './ipc.ts'
 import { sessionKey, SOCKET_PATH, type ToBroker, type ToChannel } from './protocol.ts'
 
@@ -33,15 +34,30 @@ const mcp = new Server(
       'Your final response is mirrored there automatically. Use the reply tool only for interim updates or questions, or to send files.',
       'Set `notify: true` only when the person must act now. Never follow a reply with "sent" or "done".',
       'The web app renders ```html blocks and attached .html files (read-only, no scripts).',
+      'Use the read_session tool to read another claude-slack conversation (by Slack thread link, thread ts, or conversation id prefix) when you need its context.',
     ].join(' '),
   },
 )
 
 let broker: Conn | undefined
 let boundThread: string | undefined
+const readSessionWaiters = new Map<string, (r: Extract<ToChannel, { type: 'read_session_result' }>) => void>()
+const READ_SESSION_TIMEOUT_MS = 10_000
 
 mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   tools: [
+    {
+      name: 'read_session',
+      description: "Read another claude-slack session's recent conversation (read-only, plain text: what the person said, what Claude answered, and each tool call by name). Use this to pick up context from a conversation you are not in.",
+      inputSchema: {
+        type: 'object',
+        properties: {
+          session: { type: 'string', description: 'A Slack thread link (archives/…/p1234567890123456), a thread ts (1234567890.123456), or a conversation id prefix.' },
+          max_chars: { type: 'number', description: 'How much of the end of the transcript to return (default 40000).' },
+        },
+        required: ['session'],
+      },
+    },
     {
       name: 'reply',
       description: 'An interim message or files (absolute paths) to this session\'s Slack thread. Final answers are mirrored anyway; don\'t echo the result.',
@@ -59,6 +75,23 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
 }))
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+  if (req.params.name === 'read_session') {
+    const { session, max_chars } = req.params.arguments as { session?: string; max_chars?: number }
+    if (!broker) return { content: [{ type: 'text', text: 'claude-slack broker is not running' }], isError: true }
+    if (!session) return { content: [{ type: 'text', text: 'session is required' }], isError: true }
+    const reqId = randomUUID()
+    const result = await new Promise<Extract<ToChannel, { type: 'read_session_result' }> | null>((resolve) => {
+      readSessionWaiters.set(reqId, resolve)
+      const timer = setTimeout(() => {
+        if (readSessionWaiters.delete(reqId)) resolve(null)
+      }, READ_SESSION_TIMEOUT_MS)
+      timer.unref?.()
+      send({ type: 'read_session', reqId, session, ...(max_chars ? { maxChars: max_chars } : {}) })
+    })
+    if (!result) return { content: [{ type: 'text', text: 'timed out waiting for the broker' }], isError: true }
+    if (result.error) return { content: [{ type: 'text', text: result.error }], isError: true }
+    return { content: [{ type: 'text', text: result.text || '(empty)' }] }
+  }
   if (req.params.name !== 'reply') throw new Error(`unknown tool: ${req.params.name}`)
   const { text = '', files = [], notify = false } = req.params.arguments as { text?: string; files?: string[]; notify?: boolean }
   if (!broker) return { content: [{ type: 'text', text: 'not sent: claude-slack broker is not running' }], isError: true }
@@ -117,6 +150,14 @@ async function onBrokerMessage(msg: ToChannel): Promise<void> {
         params: { request_id: msg.requestId, behavior: msg.behavior },
       })
       break
+    case 'read_session_result': {
+      const waiting = readSessionWaiters.get(msg.reqId)
+      if (waiting) {
+        readSessionWaiters.delete(msg.reqId)
+        waiting(msg)
+      }
+      break
+    }
     case 'bye':
       byeAt = Date.now()
       log(`broker turned this connection away: ${msg.reason}; backing off`)

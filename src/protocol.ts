@@ -33,6 +33,9 @@ export type ToBroker =
       inputPreview: string
     }
   | { type: 'hook'; key: string; pid: number; event: HookEvent }
+  /** Read another conversation's recent transcript (the `read_session` MCP tool). `session` names it by a Slack
+   *  thread link, a thread ts, or a conversation id prefix. */
+  | { type: 'read_session'; reqId: string; session: string; maxChars?: number }
 
 /** Messages the broker sends to a channel shim. */
 export type ToChannel =
@@ -41,6 +44,7 @@ export type ToChannel =
   | { type: 'permission'; requestId: string; behavior: 'allow' | 'deny' }
   /** Sent instead of `hello_ack`: another, still-live process already owns this run; this one should not reconnect. */
   | { type: 'bye'; reason: string }
+  | { type: 'read_session_result'; reqId: string; text?: string; error?: string }
 
 export const SOCKET_PATH = process.env.CLAUDE_SLACK_SOCKET ?? join(homedir(), '.claude-slack.sock')
 

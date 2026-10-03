@@ -18,7 +18,7 @@ import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
 import { cursorKeys, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
-import { lastModelInTranscript, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
+import { lastModelInTranscript, readSessionText, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
@@ -318,6 +318,8 @@ const MODE_SETTLE_MAX_MS = 1200
 const AUTO_ALLOW_CHECK_MS = 30_000
 const AUTO_ALLOW_PRESS_TRIES = 3
 const AUTO_ALLOW_PRESS_RETRY_MS = 1_000
+const READ_SESSION_MAX_CHARS = 40_000
+const READ_SESSION_MAX_CHARS_CAP = 200_000
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
 
@@ -1583,6 +1585,9 @@ export class Broker {
         if (caption) await this.quietSlack.post({ threadTs: session.threadTs, text: caption })
         await this.slack.post({ threadTs: session.threadTs, text: `⚠️ 파일 업로드에 실패했습니다. ${describeError(err)}` })
       }
+    } else if (msg.type === 'read_session') {
+      const result = await this.resolveReadSession(msg.session, msg.maxChars)
+      session.conn?.send({ type: 'read_session_result', reqId: msg.reqId, ...result })
     } else if (msg.type === 'permission_request') {
       // Where the tool's arguments come from, in order of reliability:
       // 1. `input_preview` — the relay sends the whole input as JSON, so it is the real thing.
@@ -1602,6 +1607,50 @@ export class Broker {
       this.markWaiting(session, 'permission')
       await this.setStatus(session, 'suspended')
     }
+  }
+
+  /** `https://…/archives/<channel>/p<16 digits>` → the ts it names (`<first 10>.<last 6>`), else undefined. */
+  private threadTsFromLink(ref: string): string | undefined {
+    const m = /p(\d{10})(\d{6})/.exec(ref)
+    return m ? `${m[1]}.${m[2]}` : undefined
+  }
+
+  /** Find a conversation's cwd/sessionId from whatever `read_session` was given: a thread link, a thread ts, or a session id prefix. */
+  private findReadableSession(ref: string): { cwd: string; sessionId: string } | undefined {
+    const threadTs = this.threadTsFromLink(ref) ?? (/^\d+\.\d+$/.test(ref) ? ref : undefined)
+    if (threadTs) {
+      const live = this.registry.byThreadTs(threadTs)
+      if (live?.sessionId) return { cwd: live.cwd, sessionId: live.sessionId }
+      const rec = this.recordedAtStart.find((e) => e.threadTs === threadTs) ?? this.dormant.get(threadTs)
+      if (rec) return { cwd: rec.cwd, sessionId: rec.sessionId }
+      return undefined
+    }
+    // A session id prefix: the live registry, then what was recorded at start, then the saved lists.
+    const liveHit = this.registry.live.find((x) => x.sessionId.startsWith(ref))
+    if (liveHit) return { cwd: liveHit.cwd, sessionId: liveHit.sessionId }
+    const recHit = this.recordedAtStart.find((e) => e.sessionId.startsWith(ref))
+    if (recHit) return { cwd: recHit.cwd, sessionId: recHit.sessionId }
+    return undefined
+  }
+
+  /** The `read_session` MCP tool: another session's recent transcript, read-only, as plain text. */
+  private async resolveReadSession(ref: string, maxChars = READ_SESSION_MAX_CHARS): Promise<{ text?: string; error?: string }> {
+    let hit = this.findReadableSession(ref)
+    if (!hit) {
+      const recent = await (this.cfg.listSessions ?? listRecentSessions)(500)
+      const r = recent.find((x) => x.id.startsWith(ref))
+      if (r) hit = { cwd: r.cwd, sessionId: r.id }
+    }
+    if (!hit) {
+      const a = listArchives(1000, this.cfg.archiveDir).find((x) => x.sessionId.startsWith(ref))
+      if (a) hit = { cwd: a.cwd, sessionId: a.sessionId }
+    }
+    if (!hit) return { error: `no session found matching "${ref}" (give a thread link, a thread ts, or a conversation id prefix)` }
+    const path = (this.cfg.transcriptPathFor ?? transcriptPathFor)(hit.cwd, hit.sessionId)
+    if (!path) return { error: `transcript not found for session ${hit.sessionId.slice(0, 8)}` }
+    const text = readSessionText(path)
+    const clamped = Math.max(1, Math.min(maxChars, READ_SESSION_MAX_CHARS_CAP))
+    return { text: text.length > clamped ? text.slice(-clamped) : text }
   }
 
   // ------------------------------------------------------------ attention

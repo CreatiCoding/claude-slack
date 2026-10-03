@@ -267,6 +267,7 @@ flowchart LR
 | REQ-F-087 | 사건을 한 줄 로그로 남긴다 |
 | REQ-F-088 | 백그라운드 작업이 끝나면 한 줄로 알린다 |
 | REQ-F-089 | 보낸 메시지를 철회한다 |
+| REQ-F-090 | 다른 대화를 읽는 도구(`read_session`) |
 
 ### 2.3 사용자 특성
 
@@ -793,6 +794,8 @@ cache-control: no-store
 | IF-065 | `inbound` | 브로커 → 채널 심 | `type: "inbound"`, `text`: string 필수, `user`: string 필수, `ts`: string 필수 | 채널 심이 IF-067 의 채널 알림을 보낸다 |
 | IF-066 | `permission` | 브로커 → 채널 심 | `type: "permission"`, `requestId`: string 필수, `behavior`: `"allow"`｜`"deny"` 필수 | 채널 심이 IF-067 의 권한 알림을 보낸다 |
 | IF-084 | `bye` | 브로커 → 채널 심 | `type: "bye"`, `reason`: string 필수 | `hello_ack` 대신 온다: 같은 실행 키를 살아 있는 다른 프로세스가 이미 쥐고 있다는 뜻. 채널 심은 재접속 간격을 60,000 ms 로 늘린다. REQ-F-002 |
+| IF-085 | `read_session` | 채널 심 → 브로커 | `type: "read_session"`, `reqId`: string 필수, `session`: string 필수, `maxChars`: number 선택 | 뒤에 IF-086 이 온다. REQ-F-090 |
+| IF-086 | `read_session_result` | 브로커 → 채널 심 | `type: "read_session_result"`, `reqId`: string 필수, `text`: string 선택, `error`: string 선택 | 없음. REQ-F-090 |
 
 ```json
 {
@@ -3186,6 +3189,29 @@ cache-control: no-store
 - 근거: `src/broker.ts` 명령 `retract`(ASM-002)
 - 추적: REQ-F-011, REQ-F-018
 
+### REQ-F-090 다른 대화를 읽는 도구(`read_session`)
+- 의무: MUST
+- 액터: Claude Code(MCP 도구 호출)
+- 트리거: 도구 `read_session` 호출
+- 전제조건: 채널 심이 브로커에 붙어 있다
+- 입력: `session`: string, 필수(Slack 스레드 링크 `.../p<16자리>`, 스레드 `ts`(`^\d+\.\d+$`), 또는 대화 id 접두어). `max_chars`: number, 선택(기본 40,000, 상한 200,000)
+- 처리 규칙:
+  1. 채널 심: 요청 id(UUID)를 붙여 브로커에 `read_session` 메시지를 보내고, 같은 요청 id 의 `read_session_result` 를 최대 10,000 ms 기다린다. 시간이 다 되면 도구 오류 `timed out waiting for the broker`.
+  2. 브로커: `session` 에서 스레드 `ts` 를 얻는다 — 링크면 `p` 뒤 16자리를 `<앞10자리>.<뒤6자리>` 로, 이미 `ts` 형식이면 그대로. 얻었으면: 살아 있는 세션 중 그 스레드 것, 없으면 시작 때 읽은 재시작 기록(REQ-F-001 1단계) 중 그 스레드 것, 없으면 휴면 스레드 목록 중 그 스레드 것에서 `cwd`·대화 id 를 찾는다.
+  3. 스레드 `ts` 를 못 얻었으면(대화 id 접두어로 준 경우): 살아 있는 세션 → 시작 때 읽은 재시작 기록 → 최근 대화 500개(REQ-F-074) → 보관 기록 1,000개(REQ-F-047) 순서로, 대화 id 가 그 접두어로 시작하는 첫 번째에서 `cwd`·대화 id 를 찾는다.
+  4. 못 찾았으면 `read_session_result` 에 `error: "no session found matching \"<session>\" (…)"`. 찾았으면 그 `cwd`·대화 id 로 트랜스크립트 경로를 찾는다(§4.3.9 류 `transcriptPathFor`). 못 찾으면 `error: "transcript not found for session <대화 id 앞 8자>"`.
+  5. 트랜스크립트 끝 8 MiB 를 글로 만든다(§4.3.9 류 `readSessionText`): 줄마다 — `user` 항목의 글(`<channel>` 로 감쌌으면 벗긴 것, 그 밖의 시스템 봉투로 시작하면 버린다)은 `User: <글>`. `assistant` 항목의 `text` 블록은 `Claude: <글>`. `tool_use` 블록은 `Tool: <이름>(<입력을 JSON 으로, 160자까지>)`. `tool_result`·`thinking` 은 넣지 않는다.
+  6. 만든 글의 끝에서부터 `max_chars`(1~200,000 으로 자른 값) 만큼만 `read_session_result` 의 `text` 로 돌려준다.
+  7. 채널 심: `error` 가 있으면 도구 오류로, 아니면 `text`(비었으면 `(empty)`)를 도구 결과로 돌려준다.
+- 출력: 도구 결과(텍스트) 또는 도구 오류
+- 사후조건: 해당 없음(읽기 전용)
+- 예외·오류: 해당 없음(찾지 못함·시간 초과는 도구 오류 문구로 돌아간다)
+- 경계값: `max_chars` 가 0 이하면 1로, 200,000 을 넘으면 200,000 으로 자른다. 트랜스크립트가 아예 없거나 읽을 수 없으면 빈 글
+- 동시성: 요청 id 마다 독립. 같은 요청 id 가 두 번 안 쓰인다(UUID)
+- 수용 기준: AC-143
+- 근거: `src/channel.ts`, `src/broker.ts` `resolveReadSession`·`findReadableSession`, `src/transcript.ts` `readSessionText`(ASM-002)
+- 추적: IF-085, IF-086, REQ-F-074, REQ-F-047
+
 ### 3.3 데이터 요구사항 (DM-nnn)
 
 저장 매체는 로컬 파일과 브로커 프로세스의 메모리다(CON-010). 관계형 저장소가 없으므로 아래 템플릿의 "자료형"은 JSON 자료형이고, "관계"의 FK 는 값으로 가리키는 참조이며 참조 무결성 강제는 없다. "인덱스"는 메모리 안의 조회 표를 뜻한다. 기본 경로의 `~/.claude-slack` 은 `<상태 폴더>`로 줄여 쓴다.
@@ -5368,6 +5394,8 @@ Slack 오류 표:
 | REQ-F-088 | 요청 "백그라운드 작업이 끝나면 알린다" | AC-141 | `broker.ts`, `background.ts` |
 | AC-142 | REQ-F-089 | 턴이 도는 중, 마지막 답글 `9.1` | `:retract` | `9.1` 에 `x` 반응. Esc 를 보낸다. 새 메시지(정정 글)가 전달된다. "철회했습니다" 안내 |
 | REQ-F-089 | 요청 "잘못 보냄을 Slack 에서도" | AC-142 | `broker.ts` |
+| AC-143 | REQ-F-090 | 다른 스레드의 대화가 살아 있다 | `read_session` 을 그 스레드 링크로 호출한다 | 사람 메시지·답·도구 호출이 글로 돌아온다(도구 출력 본문은 없다). 없는 대화를 주면 "no session found" 오류 |
+| REQ-F-090 | 요청 "다른 세션을 읽는 도구 read_session" | AC-143 | `channel.ts`, `broker.ts`, `transcript.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |
