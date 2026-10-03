@@ -234,6 +234,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       screenImages: false,
       pendingPurgesPath: join(tmpdir(), `cs-pending-${id}.json`),
       pinsPath: join(tmpdir(), `cs-pins-${id}.json`),
+      titlesPath: join(tmpdir(), `cs-titles-${id}.json`),
       ...brokerExtra,
     },
     slack,

@@ -2362,3 +2362,38 @@ test('턴이 끝날 때 결과 없이 남은 도구는 "(중단됨)" 으로 닫�
   s.conn.close()
   t.close()
 })
+
+test('사람이 지은 이름은 ai-title 이 와도 덮이지 않는다 (claude-web 이관: P3-23)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1', sessionId: 'sess-named' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':rename 내가 지은 이름', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  assert.match(t.slack.updates.at(-1)!.text, /내가 지은 이름/, '루트에 바로 반영된다')
+  // ai-title 이 뒤늦게 온다.
+  appendFileSync(t.transcript, JSON.stringify({ type: 'ai-title', aiTitle: 'Claude 가 지은 제목' }) + '\n')
+  await tick(150)
+  assert.ok(!t.slack.updates.some((u) => /Claude 가 지은 제목/.test(u.text)), 'ai-title 이 덮지 않는다')
+  assert.match(t.slack.updates.at(-1)!.text, /내가 지은 이름/, '여전히 사람이 지은 이름이다')
+  s.conn.close()
+  t.close()
+})
+
+test('사람이 지은 이름은 재시작·재개 뒤에도 남는다 (claude-web 이관: P3-23)', async () => {
+  const titlesPath = join(tmpdir(), `cs-titles-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
+  const t = await setup({ titlesPath })
+  const s = await shim(t.socketPath, { tmuxPane: '%1', sessionId: 'sess-named-2', cwd: '/home/u/proj' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':rename 끝까지 남는 이름', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  s.conn.close()
+  t.close()
+
+  // 완전히 새 브로커(같은 titles 파일)에서, 같은 대화 id 로 다시 붙는다 — ai-title 이 한 번도 온 적 없는 새 세션이라도 이름을 먼저 쓴다.
+  const t2 = await setup({ titlesPath })
+  const s2 = await shim(t2.socketPath, { tmuxPane: '%2', sessionId: 'sess-named-2', cwd: '/home/u/proj' })
+  void s2
+  await tick()
+  const live = (await t2.broker.adminState()).live.find((x) => x.threadTs === s2.ack)
+  assert.equal(live?.title, '끝까지 남는 이름')
+  s2.conn.close()
+  t2.close()
+})

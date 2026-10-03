@@ -101,13 +101,15 @@ test('답변·도구·할 일은 자기 이벤트로 가고 Slack 스트림 메�
   t.close()
 })
 
-test('웹 이름은 Claude Code 자동 제목에 덮이지 않고, Slack 은 지금처럼 자동 제목을 따른다', async () => {
+test('사람이 지은 이름은 Claude Code 자동 제목에 덮이지 않는다 — 웹도 Slack 도 (claude-web 이관: P3-23)', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, {})
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
   await t.broker.adminRename(100, '내 이름')
+  await tick()
   appendFileSync(t.transcript, JSON.stringify({ type: 'ai-title', aiTitle: '자동 제목' }) + '\n')
-  await until(() => t.slack.updates.some((u) => u.text.includes('자동 제목')), 'Slack 상태줄은 자동 제목으로')
+  await tick(150)
+  assert.ok(!t.slack.updates.some((u) => u.text.includes('자동 제목')), 'Slack 쪽도 이제 자동 제목에 덮이지 않는다')
   assert.equal(t.broker.webSessions()[0]!.title, '내 이름')
   s.conn.close()
   t.close()

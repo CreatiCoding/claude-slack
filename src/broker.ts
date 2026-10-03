@@ -24,6 +24,7 @@ import { activityDetails, activityLine, activitySources, alertBlock, chunk, desc
 import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
+import { TitleStore } from './titles.ts'
 import { ThreadLinks } from './thread-links.ts'
 import { countUserMessages, deleteRecentSession, listRecentSessions, readFirstMessage, type RecentSession } from './sessions-list.ts'
 import { countArchives, deleteArchive, listArchives, renameArchive, type SessionArchive } from './archive.ts'
@@ -146,6 +147,7 @@ const ORPHAN_SCAN_TTL_MS = 30_000
 export interface BrokerConfig {
   /** Where the pinned rows are kept. Tests use a temp file. */
   pinsPath?: string
+  titlesPath?: string
   /** Where the web app's session events are kept (one file per thread). */
   eventsDir?: string
   /** Where pictures shown in the web app are kept. */
@@ -481,6 +483,7 @@ export class Broker {
     this.confirmDialogs = confirmDialogs
     this.dialogs = new DialogDriver(tmux, (m) => this.logAt('INFO', 'dialog', m))
     this.pinStore = new PinStore(cfg.pinsPath)
+    this.titles = new TitleStore(cfg.titlesPath)
     this.purges = new PurgeService(slack, { archiveDir: cfg.archiveDir, gapMs: cfg.purgeGapMs, pendingFile: cfg.pendingPurgesPath, log: (m) => this.logAt('INFO', 'purge', m) })
     this.offsets = new OffsetStore(cfg.offsetsPath)
     this.revive = new ReviveStore(cfg.revivePath)
@@ -965,7 +968,10 @@ export class Broker {
       live,
       pins: this.pinStore.list(),
       recent: await this.resumable(25),
-      archives: listArchives(50, this.cfg.archiveDir),
+      archives: listArchives(50, this.cfg.archiveDir).map((a) => {
+        const stored = this.titles.get(a.sessionId)
+        return stored ? { ...a, title: stored } : a
+      }),
     }
   }
 
@@ -1050,6 +1056,7 @@ export class Broker {
   }
 
   private pinStore: PinStore
+  private titles: TitleStore
   private orphanScan?: { at: number; items: Orphan[] }
 
   /**
@@ -1212,8 +1219,9 @@ export class Broker {
   /** Give a live session a new title everywhere it shows: root message, Slack session name, panel, Home tab. */
   private async applyTitle(session: Session, title: string): Promise<void> {
     session.title = title
-    // Claude Code's own title (ai-title) replaces `title` later; the web app keeps showing the one a person chose.
+    // Claude Code's own title (ai-title) must never replace this, here or anywhere it shows.
     session.manualTitle = title
+    if (session.sessionId) this.titles.set(session.sessionId, title)
     await this.refreshRoot(session)
     if (session.statusCreated) await this.slack.renameSession(session.threadTs, title).catch((e) => this.logAt('WARN', 'slack', `rename failed: ${describeError(e)}`, this.tag(session)))
     this.schedulePanelRefresh(session)
@@ -1233,8 +1241,10 @@ export class Broker {
 
   /** Rename one archived session. Only files the archive listing offers. */
   async adminRenameArchive(path: string, title: string): Promise<{ ok: boolean; note: string }> {
-    const known = listArchives(1000, this.cfg.archiveDir).some((a) => a.path === path)
+    const known = listArchives(1000, this.cfg.archiveDir).find((a) => a.path === path)
     if (!known || !renameArchive(path, title, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했거나 이름이 비어 있습니다.' }
+    // So a later resume starts already carrying the name, not whatever ai-title the resumed run comes up with.
+    this.titles.set(known.sessionId, title.trim())
     return { ok: true, note: `이름을 "${title.trim()}" 으로 바꿨습니다.` }
   }
 
@@ -1399,7 +1409,10 @@ export class Broker {
 
     // The record before the session can be found: a hook arriving right after registration (a permission
     // dialog) must already see 전부 허용 and the rest.
-    if (!existing) this.restoreFromRecord(session)
+    if (!existing) {
+      this.restoreFromRecord(session)
+      this.applyStoredTitle(session)
+    }
     this.refreshFailed.delete(session.threadTs)
     this.registry.add(session)
     this.logAt('INFO', 'session', `attached (${session.origin})`, this.tag(session, { pid: session.pid, key: session.key.slice(0, 8), pane: session.pane }))
@@ -1491,6 +1504,15 @@ export class Broker {
       this.logAt('INFO', 'perm', 'restored open permission after restart', this.tag(session, { req: p.requestId, tool: p.toolName }))
     }
     if (this.hasOpenPermission(session)) this.markWaiting(session, 'permission')
+  }
+
+  /** A name a person chose for this conversation, from an earlier run: applied without writing it back (it is already on file). */
+  private applyStoredTitle(session: Session): void {
+    if (session.manualTitle || !session.sessionId) return
+    const stored = this.titles.get(session.sessionId)
+    if (!stored) return
+    session.title = stored
+    session.manualTitle = stored
   }
 
   /** Model / effort / permission mode are only in broker memory; after a restart read them back from the transcript and the screen. */
@@ -1696,6 +1718,7 @@ export class Broker {
     switch (event.hook_event_name) {
       case 'SessionStart': {
         session.sessionId = event.session_id
+        this.applyStoredTitle(session)
         if (event.source === 'clear') await post('🧹 `/clear` · 대화가 초기화되었습니다')
         else if (event.source === 'compact') await post('📦 컨텍스트 압축 완료')
         break
@@ -1889,6 +1912,9 @@ export class Broker {
     if (session.transcriptPath && session.tailer) this.offsets.set(session.key, session.transcriptPath, session.tailer.position)
     if (session.turn) this.noteActivity(session)
     if (ev.kind === 'title') {
+      // A name a person chose (applyTitle) always wins: Claude Code's own ai-title must not overwrite it
+      // anywhere — root message, Slack session name, panel, home tab alike, not just the web app.
+      if (session.manualTitle) return
       session.title = ev.title
       await this.refreshRoot(session)
       if (session.statusCreated) await this.slack.renameSession(session.threadTs, ev.title).catch((e) => this.logAt('WARN', 'slack', `rename failed: ${describeError(e)}`, this.tag(session)))
@@ -3458,7 +3484,15 @@ export class Broker {
     const exists = this.cfg.folderExists ?? existsSync
     // "이어서 하기 비우기" hides what is older than when it was cleared; a conversation used again shows again.
     const cleared = this.groupStore.get().recentClearedAt
-    return all.filter((r) => !taken.has(r.id) && exists(r.cwd) && (!cleared || r.mtime > cleared)).slice(0, limit)
+    // A name a person chose outlives the live session it was chosen in; the ai-title/last-prompt guess
+    // listRecentSessions falls back to is only for conversations nobody ever named.
+    return all
+      .filter((r) => !taken.has(r.id) && exists(r.cwd) && (!cleared || r.mtime > cleared))
+      .map((r) => {
+        const stored = this.titles.get(r.id)
+        return stored ? { ...r, title: stored } : r
+      })
+      .slice(0, limit)
   }
 
   /** The session (or a launch still coming up) that already has this conversation open, in a thread other than `exceptThread`. */
