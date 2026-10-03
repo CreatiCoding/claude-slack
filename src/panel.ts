@@ -326,12 +326,21 @@ export function questionBlocks(pid: number, questions: Question[], intro?: strin
 }
 
 /** ExitPlanMode approval dialog. Options follow Claude Code's numbering. */
-export function planApprovalBlocks(pid: number, mention?: string): { text: string; blocks: unknown[] } {
+/** Slack rejects a section whose text exceeds this; a long plan is split across several sections instead. */
+const PLAN_SECTION_MAX = 2900
+
+export function planApprovalBlocks(pid: number, mention?: string, plan?: string): { text: string; blocks: unknown[] } {
   const who = mention ? `<@${mention}> ` : ''
+  const intro = plan ? '📋 *플랜 승인을 기다립니다.*' : '📋 *플랜 승인을 기다립니다.* 위에 스트리밍된 내용이 플랜입니다.'
+  // Carrying the plan's own text on the card (not just relying on what streamed above it) means the card
+  // still says what it is asking about even if the stream was summary-only or scrolled out of view.
+  const planChunks: string[] = []
+  for (let i = 0; plan && i < plan.length; i += PLAN_SECTION_MAX) planChunks.push(plan.slice(i, i + PLAN_SECTION_MAX))
   return {
     text: `${who}📋 플랜 승인을 기다립니다`,
     blocks: [
-      { type: 'section', text: { type: 'mrkdwn', text: `${who}📋 *플랜 승인을 기다립니다.* 위에 스트리밍된 내용이 플랜입니다.` } },
+      { type: 'section', text: { type: 'mrkdwn', text: `${who}${intro}` } },
+      ...planChunks.map((chunk) => ({ type: 'section', text: { type: 'mrkdwn', text: chunk } })),
       {
         type: 'actions',
         block_id: `dlg_plan_${pid}`,

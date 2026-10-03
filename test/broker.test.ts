@@ -2324,3 +2324,41 @@ test('새 턴이 시작되면, 화면에서 사라진 열린 질문/플랜 카�
   s.conn.close()
   t.close()
 })
+
+test('플랜 승인 카드에 플랜 본문을 싣는다 (claude-web 이관: P1-13)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, { hook_event_name: 'PreToolUse', tool_name: 'ExitPlanMode', tool_input: { plan: '1. 스키마 변경\n2. 핸들러 작성' } })
+  const card = t.slack.posts.at(-1)!
+  assert.ok(JSON.stringify(card.blocks).includes('스키마 변경'), '플랜 본문이 카드에 실린다')
+  s.conn.close()
+  t.close()
+})
+
+test('플랜 본문이 길면(3000자 한도) 여러 section 으로 나눠 싣는다', async () => {
+  const { planApprovalBlocks } = await import('../src/panel.ts')
+  const long = 'x'.repeat(6000)
+  const { blocks } = planApprovalBlocks(1, undefined, long)
+  const sections = (blocks as Array<{ type: string; text?: { text: string } }>).filter((b) => b.type === 'section')
+  assert.ok(sections.length >= 3, `plan 본문이 여러 section 으로 나뉜다: ${sections.length}`)
+  for (const sec of sections) assert.ok(sec.text!.text.length <= 2900, 'Slack section 한도 안')
+  assert.equal(sections.map((sec) => sec.text!.text).join('').includes('x'.repeat(100)), true)
+})
+
+test('턴이 끝날 때 결과 없이 남은 도구는 "(중단됨)" 으로 닫히고, 이벤트 로그에도 남는다 (claude-web 이관: P1-13)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  appendFileSync(t.transcript, assistant({ type: 'tool_use', id: 'tu1', name: 'Bash', input: { command: 'sleep 99' } }))
+  await tick(150)
+  // Stop 이 와서 턴이 끝난다: tu1 은 결과 없이 남는다.
+  await hook(t.socketPath, 100, { hook_event_name: 'Stop' })
+  await until(() => t.broker.events.since(s.ack, 0).some((e) => e.type === 'tool_end' && e.id === 'tu1'), '남은 도구가 이벤트로 닫힌다')
+  const ev = t.broker.events.since(s.ack, 0).find((e) => e.type === 'tool_end' && e.id === 'tu1') as { ok: boolean; output: string }
+  assert.equal(ev.ok, false)
+  assert.equal(ev.output, '(중단됨)')
+  s.conn.close()
+  t.close()
+})

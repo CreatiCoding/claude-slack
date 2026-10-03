@@ -149,9 +149,16 @@ export class TurnStream {
     this.schedule()
   }
 
-  /** Flush what is pending and finalize the message. Idempotent. */
-  async end(): Promise<void> {
-    if (this.ended) return
+  /**
+   * Flush what is pending and finalize the message. Idempotent. Any tool call still running (its
+   * tool_result never arrived — the turn ended around it: Esc, a refresh, a late Stop) is closed out as
+   * "(중단됨)" rather than left showing as forever in progress; the ids closed this way are returned so the
+   * caller can log a matching event (REQ-F-017 style `tool_end`).
+   */
+  async end(): Promise<string[]> {
+    if (this.ended) return []
+    const abandoned = [...this.running]
+    for (const id of abandoned) this.taskEnd(id, '(중단됨)', true)
     this.ended = true
     if (this.timer) clearTimeout(this.timer)
     this.clearHeartbeat()
@@ -160,6 +167,7 @@ export class TurnStream {
       if (this.ts && !this.plain) await this.slack.stopStream(this.ts)
     })
     await this.queue
+    return abandoned
   }
 
   private armHeartbeat(): void {

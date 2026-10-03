@@ -1736,7 +1736,8 @@ export class Broker {
           this.markWaiting(session, 'question')
           await this.setStatus(session, 'suspended')
         } else if (event.tool_name === 'ExitPlanMode') {
-          const { text, blocks } = planApprovalBlocks(session.pid, this.mentionFor(session, 'decision'))
+          const plan = (event.tool_input as { plan?: string } | undefined)?.plan
+          const { text, blocks } = planApprovalBlocks(session.pid, this.mentionFor(session, 'decision'), typeof plan === 'string' ? plan : undefined)
           session.openDialogTs = await post(text, blocks)
           this.markWaiting(session, 'plan')
           await this.setStatus(session, 'suspended')
@@ -1826,7 +1827,8 @@ export class Broker {
     // transcript event must land in the turn that is finishing, not start a new one.
     const turn = session.turn
     if (turn) {
-      await turn.end()
+      const abandoned = await turn.end()
+      for (const id of abandoned) this.emitEvent(session.threadTs, { type: 'tool_end', id, ok: false, output: '(중단됨)' })
       session.turn = undefined
     }
     // "sent" after a reply-tool call is the model narrating the tool result, not an answer.
