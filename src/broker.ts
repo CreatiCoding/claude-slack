@@ -1277,6 +1277,7 @@ export class Broker {
         threadTs: s.threadTs,
         rootTs: s.rootTs,
         pid: s.pid,
+        ...(s.pane ? { pane: s.pane } : {}),
         recipient: s.recipient || this.defaultRecipient,
         ...(s.held?.length ? { held: s.held } : {}),
         ...(s.holdNoticeTs ? { holdNoticeTs: s.holdNoticeTs } : {}),
@@ -2421,6 +2422,14 @@ export class Broker {
     }
     this.logAt('INFO', 'revive', `reviving ${revive.length} session(s) that did not survive the restart`, { dormant: this.dormant.size })
     for (const e of revive) {
+      // The process can be alive and just slow to reattach (a loaded host, a pane mid-reconnect): launching a
+      // second Claude Code onto the same conversation then gives it two writers. If the window is still there,
+      // wait instead — the shim's own reconnect (or REQ-F-002's pid check) sorts it out without a second process.
+      if (e.pane && (await this.tmux.hasPane(e.pane))) {
+        this.logAt('WARN', 'revive', 'window still open; not reviving', { t: e.threadTs, pane: e.pane })
+        await this.slack.post({ threadTs: e.threadTs, text: '⏳ 세션 창이 아직 살아 있어 다시 열지 않고 기다립니다.' }).catch(() => {})
+        continue
+      }
       this.revive.forget(e.key)
       await this.slack.post({ threadTs: e.threadTs, text: '🔄 재시작으로 끊긴 세션을 대화 그대로 이어서 다시 엽니다.' }).catch(() => {})
       await this.launchSession({ cwd: e.cwd, prompt: '', resumeId: e.sessionId, user: e.recipient, threadTs: e.threadTs, rootTs: e.rootTs, extraArgs: this.settingsArgs(e) }).catch((err) =>

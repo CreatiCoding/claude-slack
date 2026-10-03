@@ -1987,3 +1987,38 @@ test('같은 실행 키인데 기존 pid 가 이미 죽었으면, 새 프로세�
   s2.conn.close()
   t.close()
 })
+
+test('되살리기 전에 그 세션의 tmux 창이 아직 있으면, 다시 띄우지 않고 기다린다 (claude-web 이관: P0-5)', async () => {
+  const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
+  const t = await setup({ revivePath })
+  const s = await shim(t.socketPath, { tmuxPane: '%51', sessionId: 'sess-slow', cwd: '/home/u/proj' })
+  t.broker.saveState()
+  s.conn.close() // 소켓 연결만 끊겼다. tmux 창(프로세스)은 실제로 살아 있다고 가정.
+  t.close()
+
+  const t2 = await setup({ revivePath, reviveAfterMs: 20 })
+  t2.tmux.alivePanes = new Set(['%51']) // 그 창은 아직 있다.
+  await t2.broker.reviveSessions()
+
+  assert.equal(t2.tmux.launches.length, 0, '다시 띄우지 않는다')
+  assert.ok(t2.slack.posts.some((p) => p.threadTs === s.ack && /세션 창이 아직 살아 있어/.test(p.text)), '기다린다고 알린다')
+  // 기록은 지우지 않았으니, 다음 되살리기 시도에서도 여전히 후보다.
+  const revive = JSON.parse(readFileSync(revivePath, 'utf8')) as Record<string, unknown>
+  assert.equal(Object.keys(revive).length, 1, '기록을 지우지 않는다')
+  t2.close()
+})
+
+test('되살리기: tmux 창이 이미 없으면 평소처럼 다시 띄운다', async () => {
+  const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
+  const t = await setup({ revivePath })
+  const s = await shim(t.socketPath, { tmuxPane: '%52', sessionId: 'sess-dead', cwd: '/home/u/proj' })
+  t.broker.saveState()
+  s.conn.close()
+  t.close()
+
+  const t2 = await setup({ revivePath, reviveAfterMs: 20 })
+  t2.tmux.alivePanes = new Set() // 창이 없다.
+  await t2.broker.reviveSessions()
+  assert.ok(t2.tmux.launches.length > 0, '다시 띄운다')
+  t2.close()
+})

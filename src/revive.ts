@@ -20,6 +20,10 @@ export interface ReviveEntry {
   rootTs?: string
   /** The process's pid when this was recorded; a thread is found by threadTs, but this is kept for lookups that only have the pid. */
   pid?: number
+  /** The tmux pane the process runs in, so a revival can check whether that process is still there before launching a second one. */
+  pane?: string
+  /** When the process started (epoch ms, `ps` precision), for the rare session with no pane to check instead. */
+  processStartedAt?: number
   /** Who the turn streams to, so a revived session answers the same person. */
   recipient: string
   /** Refreshed while the session lives, so it doubles as "when we last saw it". */

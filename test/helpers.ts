@@ -172,8 +172,10 @@ export class FakeTmux implements TmuxLike {
   async killPane(pane: string) {
     this.keys.push(`${pane}:kill`)
   }
-  async hasPane() {
-    return true
+  /** Which panes `hasPane` should say still exist; empty by default (most tests end a session's process for good). */
+  alivePanes = new Set<string>()
+  async hasPane(pane: string) {
+    return this.alivePanes.has(pane)
   }
 }
 
