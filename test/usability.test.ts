@@ -242,6 +242,27 @@ test('프롬프트가 키를 쥐고 있으면 허용 버튼을 다시 누르라 
   t.close()
 })
 
+test('프롬프트가 쥐고 있던 다이얼로그가 풀리기 전에 아예 사라지면(다른 경로로 이미 답해짐), 거짓 실패를 알리지 않고 조용히 그만둔다 (claude-web 이관: P1-12)', async () => {
+  const t = await setup({ dialogRetryMs: 2000, dialogRetryPollMs: 30 })
+  const s = await shim(t.socketPath, { tmuxPane: '%3' })
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  s.conn.send({ type: 'permission_request', requestId: 'abcde', toolName: 'Bash', description: 'run', inputPreview: 'rm x' })
+  await until(() => t.slack.posts.some((p) => /권한 요청/.test(p.text)), '카드')
+  const card = t.slack.posts.find((p) => /권한 요청/.test(p.text))!
+  t.tmux.screen = 'Do you want to proceed?\n❯ 1. Yes\n  2. No\n\n❯ 결과 나오면\n'
+  const b = button(card.blocks, 'perm_allow')
+  await t.broker.handleAction({ user: 'U1', actionId: b.actionId, value: b.value, messageTs: card.ts, channel: 'C1' })
+  await tick()
+  assert.match(t.slack.updates.at(-1)!.text, /자동으로 누릅니다/)
+  // The dialog disappears entirely (answered via the channel, or at the real terminal) before the prompt ever lets go.
+  t.tmux.screen = '⏺ 계속 진행합니다\n❯ \n'
+  await tick(2500) // past dialogRetryMs
+  assert.ok(!t.tmux.keys.some((k) => /%3:1$/.test(k)), '사라진 다이얼로그에 뒤늦게 숫자를 보내지 않는다')
+  assert.ok(!t.slack.texts().some((x) => /대신 누르지 못했습니다/.test(x)), '이미 끝난 일을 실패로 알리지 않는다')
+  s.conn.close()
+  t.close()
+})
+
 // ---------------------------------------------------------------- P0-6
 
 test('subagentReport 는 하네스 프레임을 걷어내고 보고서만 남긴다', () => {

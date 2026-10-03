@@ -312,6 +312,8 @@ const PROMPT_MIRROR_MAX = 600
 const MODE_SETTLE_POLL_MS = 100
 const MODE_SETTLE_MAX_MS = 1200
 const AUTO_ALLOW_CHECK_MS = 30_000
+const AUTO_ALLOW_PRESS_TRIES = 3
+const AUTO_ALLOW_PRESS_RETRY_MS = 1_000
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
 
@@ -2026,7 +2028,12 @@ export class Broker {
       session.turn = undefined
     }
     session.recipient = recipient || this.defaultRecipient
-    // A new turn means the person answered whatever was waited on.
+    // A new turn means the person answered whatever was waited on. A card still open for it (its terminal
+    // dialog may since have scrolled off or been answered at the real tmux window) is folded rather than
+    // left looking like nothing happened.
+    if (session.openDialogTs) {
+      this.slack.update(session.openDialogTs, '✅ 넘어감', [{ type: 'section', text: { type: 'mrkdwn', text: '✅ 넘어감 (새 턴이 시작됐습니다)' } }]).catch(() => {})
+    }
     this.clearWaiting(session)
     await this.setStatus(session, 'processing')
     session.turn = new TurnStream(this.quietSlack, { threadTs: session.threadTs, recipient: session.recipient, flushMs: this.cfg.flushMs, heartbeatMs: this.cfg.heartbeatMs, log: (m) => this.logAt('INFO', 'stream', m, this.tag(session)) })
@@ -2227,13 +2234,23 @@ export class Broker {
     // 전부 허용: a permission asked only in the terminal (no MCP request) is pressed "yes" here too.
     // Only a yes/no proceed dialog; a question or a plan still goes to the person.
     if (session.autoAllow && isProceedDialog(dialog)) {
-      const pressed = await this.dialogs.answerProceed(session.pane, 'auto')
+      // A single 'unfocused' (the prompt briefly holding the keyboard) must not fall straight through to a
+      // card — that asks a person for something 전부 허용 already promised to handle. Retried a few times
+      // first, 1,000 ms apart, before giving the terminal up as genuinely stuck.
+      let pressed: Awaited<ReturnType<typeof this.dialogs.answerProceed>> = 'unfocused'
+      for (let i = 0; i < AUTO_ALLOW_PRESS_TRIES; i++) {
+        pressed = await this.dialogs.answerProceed(session.pane, 'auto')
+        if (pressed === 'answered' || i === AUTO_ALLOW_PRESS_TRIES - 1) break
+        this.logAt('INFO', 'perm', `auto-allow press ${i + 1} failed (${pressed}); retrying`, this.tag(session))
+        await sleep(AUTO_ALLOW_PRESS_RETRY_MS)
+      }
       if (pressed === 'answered') {
         const what = [dialog.context, dialog.description, dialog.question].filter(Boolean).join('\n')
         this.logAt('INFO', 'perm', 'auto-allowed a terminal dialog', this.tag(session, { question: truncate(dialog.question, 80) }))
         await this.slack.post({ threadTs: session.threadTs, text: `⚡ 자동 허용 · 터미널 확인 창\n\`\`\`${truncate(what, 2500).replace(/```/g, "'''")}\`\`\`` })
         return true
       }
+      this.logAt('WARN', 'perm', `auto-allow could not press after ${AUTO_ALLOW_PRESS_TRIES} tries (${pressed}); asking instead`, this.tag(session, { question: truncate(dialog.question, 80) }))
     }
     session.stallShown = sig
     // The same dialog coming back again and again (an MCP server's Authenticate/Reconnect menu, say) is not
@@ -2853,6 +2870,15 @@ export class Broker {
       if (cancelled || session.ended || !session.pane) return
       try {
         const screen = await this.tmux.capture(session.pane)
+        // The dialog itself is just gone — answered another way (a channel reply, someone at the real
+        // terminal) while the prompt held focus. Pressing whatever is on screen now would answer the
+        // wrong thing, and the 60s "couldn't press for you" at the end of this would be a false alarm for
+        // something that already succeeded. Quietly stop instead.
+        if (!parseDialog(screen) && !parseKeyedDialog(screen)) {
+          session.dialogRetries?.delete(key)
+          this.logAt('INFO', 'dialog', 'dialog gone before the prompt let go; nothing to press (answered another way?)', this.tag(session, { key }))
+          return
+        }
         if (!promptHoldsFocus(screen)) {
           session.dialogRetries?.delete(key)
           const r = await attempt()

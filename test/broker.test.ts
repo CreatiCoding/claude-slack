@@ -2269,3 +2269,58 @@ test('번호 없는 창의 Esc 버튼은 `:esc`(작업 중단) 가 아니라 Esc
   s.conn.close()
   t.close()
 })
+
+test('전부 허용: 터미널 확인 창을 누르다 한 번 실패해도 바로 사람에게 묻지 않고 1초 간격으로 3번까지 다시 누른다 (claude-web 이관: P1-12)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%96' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '5.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  t.tmux.screen = [' Allow Bash?', ' ❯ 1. Yes', '   2. No'].join('\n')
+  let calls = 0
+  const dialogs = (t.broker as unknown as { dialogs: { answerProceed: (...a: unknown[]) => Promise<string> } }).dialogs
+  const real = dialogs.answerProceed.bind(dialogs)
+  dialogs.answerProceed = async (...a: unknown[]) => (calls++ < 2 ? 'unfocused' : real(...(a as [string, string])))
+  const t0 = Date.now()
+  await hook(t.socketPath, 100, { hook_event_name: 'Notification', notification_type: 'agent_needs_input', message: '확인' })
+  await until(() => t.slack.posts.some((p) => /자동 허용 · 터미널 확인 창/.test(p.text)), '세 번째 시도에서 성공해 자동 허용으로 끝난다', 6000)
+  assert.ok(Date.now() - t0 >= 1900, `1초 간격으로 두 번 기다린 뒤 세 번째를 쳤다: ${Date.now() - t0}ms`)
+  assert.equal(calls, 3)
+  s.conn.close()
+  t.close()
+})
+
+test('전부 허용: 세 번 다 실패하면 포기하고 이유를 로그에 남긴 뒤 평소처럼 카드로 묻는다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%97' })
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '5.1', threadTs: s.ack, channel: 'C1' })
+  await tick()
+  t.tmux.screen = [' Allow Bash?', ' ❯ 1. Yes', '   2. No'].join('\n')
+  const dialogs = (t.broker as unknown as { dialogs: { answerProceed: (...a: unknown[]) => Promise<string> } }).dialogs
+  let calls = 0
+  dialogs.answerProceed = async () => (calls++, 'unfocused')
+  await hook(t.socketPath, 100, { hook_event_name: 'Notification', notification_type: 'agent_needs_input', message: '확인' })
+  await tick(3200)
+  assert.equal(calls, 3, '세 번만 시도하고 더 누르지 않는다')
+  assert.ok(!t.slack.posts.some((p) => /자동 허용 · 터미널 확인 창/.test(p.text)))
+  assert.ok(t.slack.posts.some((p) => /선택을 기다립니다/.test(p.text)), '사람에게 카드로 묻는다')
+  s.conn.close()
+  t.close()
+})
+
+test('새 턴이 시작되면, 화면에서 사라진 열린 질문/플랜 카드도 접는다 (claude-web 이관: P1-12)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await hook(t.socketPath, 100, {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'AskUserQuestion',
+    tool_input: { questions: [{ question: '어느 쪽?', header: '방식', options: [{ label: 'A' }, { label: 'B' }] }] },
+  })
+  const card = t.slack.posts.at(-1)!
+  await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
+  // 카드에 답하지 않고 다른 경로로 새 턴이 시작된다(예: 터미널에서 직접 타이핑).
+  appendFileSync(t.transcript, assistant({ type: 'text', text: '다른 얘기를 시작합니다.' }))
+  await tick(150)
+  assert.ok(t.slack.updates.some((u) => u.ts === card.ts && /넘어감/.test(u.text)), '카드를 접는다')
+  s.conn.close()
+  t.close()
+})

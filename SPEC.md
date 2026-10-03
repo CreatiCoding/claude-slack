@@ -1286,7 +1286,7 @@ cache-control: no-store
   5. ELSE IF 대기 사유가 `question`｜`plan`(질문·플랜 카드가 열려 있음) AND 페인이 있음 THEN 다이얼로그를 닫는다(§4.3.9 류 `closeOpenDialog`: 화면에 번호 있는 다이얼로그(`parseDialog`)가 사라질 때까지 Esc 를 최대 5번, 150 ms 간격으로 보낸다. 카드가 있으면 `💬 메시지로 답함` 으로 접는다). 그 뒤 전달한다. 권한 요청(예/아니오) 대기는 여기 해당하지 않는다 — 거기서 Esc 는 거부가 된다.
   6. ELSE 전달한다(deliver).
   - 붙잡기: 붙잡은 메시지 목록 끝에 넣고, 그 메시지에 `hourglass_flowing_sand` 반응을 달고, INFO 로그(`held while a tool runs`: 실행 중 도구 ≥ 1, 아니면 `held while the turn runs`), 붙잡음 안내(§4.3.15)를 새로 올리거나 같은 메시지를 개수만 바꿔 고친다.
-  - deliver(전달 경로 `channel`｜`keys`, 기본 `channel`): ① `lastInjected = text`, `triggerTs = ts`. ② 새 턴을 연다(열린 턴은 먼저 닫는다. 수신자 = `user`. 대기 사유를 지운다. Slack 상태 `processing`). ③ 경로가 `keys` 이고 페인이 있으면 글을 붙여넣고 Enter(IF-070). 실패하면 WARN 로그 뒤 `inbound`(IF-065)로 보낸다. 경로가 `channel` 이면 `inbound` 로 보낸다. ④ INFO 로그 `delivered`｜`delivered by keys`. ⑤ `ts` ≠ 스레드 `ts` 이면 `hourglass_flowing_sand` 반응을 떼고 `eyes` 를 단다. 같으면 `triggerTs` 를 지운다. ⑥ 주입 확인 타이머를 건다(REQ-F-013).
+  - deliver(전달 경로 `channel`｜`keys`, 기본 `channel`): ① `lastInjected = text`, `triggerTs = ts`. ② 새 턴을 연다(열린 턴은 먼저 닫는다. 수신자 = `user`. 질문·플랜·다이얼로그 카드가 열려 있으면(`openDialogTs`) `✅ 넘어감 (새 턴이 시작됐습니다)` 으로 접는다 — 그 화면이 이미 사라졌을 수 있는데 카드만 안 답한 것처럼 남아 있으면 안 된다. 대기 사유를 지운다. Slack 상태 `processing`). ③ 경로가 `keys` 이고 페인이 있으면 글을 붙여넣고 Enter(IF-070). 실패하면 WARN 로그 뒤 `inbound`(IF-065)로 보낸다. 경로가 `channel` 이면 `inbound` 로 보낸다. ④ INFO 로그 `delivered`｜`delivered by keys`. ⑤ `ts` ≠ 스레드 `ts` 이면 `hourglass_flowing_sand` 반응을 떼고 `eyes` 를 단다. 같으면 `triggerTs` 를 지운다. ⑥ 주입 확인 타이머를 건다(REQ-F-013).
 - 출력: IF-065 `inbound` 또는 터미널 입력
 - 사후조건: 붙잡은 경우 DM-003 에 1건 추가, ST-003 `held`. 전달한 경우 세션 상태 `busy`
 - 예외·오류:
@@ -1296,7 +1296,7 @@ cache-control: no-store
   | 연결 없음 | ERR-052 | 메시지는 버려진다(재시도 없음) |
 - 경계값: 세션 상태가 `waiting`(권한·질문 대기)이면 턴이 열려 있어도 바로 전달한다. 빈 글도 전달한다
 - 동시성: 2단계의 기다림 중에 온 두 번째 메시지는 첫 메시지의 판정 뒤에 판정된다(각 호출이 자기 차례에 3~5단계를 실행한다). 붙잡은 메시지는 도착 순서를 유지한다
-- 수용 기준: AC-011, AC-128
+- 수용 기준: AC-011, AC-128, AC-134
 - 근거: `src/broker.ts` `inject`·`deliver`·`hold`·`beginTurn`·`closeOpenDialog`(ASM-002)
 - 추적: §4.3.4, DM-003, ST-003, IF-065, ERR-052
 
@@ -1666,13 +1666,13 @@ cache-control: no-store
   2. 인자가 4개 값이 아니면 `` 현재 전부 허용: `<on｜off>`. 사용법: `:auto on` (권한 요청을 브로커가 바로 허용) · `:auto off` `` 를 올린다.
   3. 권한 요청이 오면: 기록 카드를 올린다. 글 `⚡ 자동 허용 · <toolName> · <requestId>`, 블록 = section(`` ⚡ 자동 허용 · *<toolName>* · `<requestId>` `` + 설명이 있으면 ` · <truncate(description, 200)>`) + 권한 카드의 상세 블록(첫 블록·actions·context 를 뺀 것). INFO 로그 `auto-allowed`.
   4. REQ-F-024 를 `allow` 로 실행한다. 단, 터미널 다이얼로그에서는 `allow-session` 선택지를 먼저 찾고 없으면 `allow-once` 를 누른다. 카드는 기록 카드 그대로 두고, 꼬리말이 있으면 context 블록으로 덧붙인다.
-  5. 화면에서 찾은 진행 확인 다이얼로그(권한 요청 없이 터미널에만 뜬 것): 4단계와 같은 선택 규칙으로 누르고, 눌렀으면 `⚡ 자동 허용 · 터미널 확인 창\n` + 코드 블록(`truncate(맥락·설명·질문을 \n 으로 이은 것, 2500)`)을 올린다.
+  5. 화면에서 찾은 진행 확인 다이얼로그(권한 요청 없이 터미널에만 뜬 것): 4단계와 같은 선택 규칙으로 누른다. 결과가 `unfocused` 면 1,000 ms 간격으로 최대 3번까지 다시 누른다(실패할 때마다 INFO 로그). 셋 다 실패하면 WARN 로그 뒤 포기하고(터미널이 그만큼 길게 다른 입력을 받고 있다는 뜻이다) REQ-F-027 의 카드로 사람에게 묻는다. 눌렀으면(1~3번째 중 성공) `⚡ 자동 허용 · 터미널 확인 창\n` + 코드 블록(`truncate(맥락·설명·질문을 \n 으로 이은 것, 2500)`)을 올린다.
 - 출력: 기록 카드, IF-066
 - 사후조건: 요청이 허용된다. 세션의 `autoAllow` 는 재시작 기록에 저장된다(DM-008)
 - 예외·오류: REQ-F-024 와 같다
 - 경계값: `allow-always`(설정 파일에 남는 선택지)와 `other`(예: `Yes, allow all edits during this session (shift+tab)`)는 누르지 않는다(CON-015). 질문·플랜 다이얼로그(거부 선택지가 없는 것)는 누르지 않는다
 - 동시성: 요청마다 독립
-- 수용 기준: AC-026, AC-117, AC-124, AC-125, AC-126, AC-127
+- 수용 기준: AC-026, AC-117, AC-124, AC-125, AC-126, AC-127, AC-133
 - 근거: `src/broker.ts` `autoAllowPermission`·`setAutoAllow`·`cycleToMode`·`checkAutoAllowMode`·`surfaceDialog`, `src/dialog.ts` `answerProceed`(ASM-002)
 - 추적: CON-015, §4.3.8, ST-002, §5.3 GT-04
 
@@ -1758,8 +1758,9 @@ cache-control: no-store
 - 처리 규칙:
   1. 같은 세션·같은 키의 이전 재시도가 있으면 취소한다.
   2. 500 ms 마다 화면을 읽는다. 세션이 끝났거나 페인이 없으면 멈춘다.
-  3. 프롬프트가 키보드를 쥐고 있지 않으면(§4.3.7) 재시도를 지우고 시도 함수를 1회 실행해 INFO 로그 `retried once the prompt let go` 뒤 성공 처리에 결과를 넘긴다.
-  4. 시작한 지 60,000 ms 가 지났으면 재시도를 지우고 WARN 로그 뒤 포기 처리(누른 사람에게만 `⏳ 1분을 기다렸지만 터미널이 계속 프롬프트 입력을 받고 있어 확인 창을 대신 누르지 못했습니다. 응답이 끝난 뒤 다시 눌러 주세요.`, ERR-067).
+  3. 화면에 번호 다이얼로그도 키 다이얼로그도 없으면(둘 다 §4.3.6·§4.3.7 류로 사라짐 — 채널 답글이나 실제 터미널에서 다른 경로로 이미 답해진 것) 재시도를 지우고 INFO 로그 `dialog gone before the prompt let go; nothing to press` 뒤 조용히 끝낸다. 시도 함수를 부르지 않고, 포기 안내도 올리지 않는다 — 이미 끝난 일을 실패로 잘못 알리지 않기 위함이다.
+  4. 프롬프트가 키보드를 쥐고 있지 않으면(§4.3.7) 재시도를 지우고 시도 함수를 1회 실행해 INFO 로그 `retried once the prompt let go` 뒤 성공 처리에 결과를 넘긴다.
+  5. 시작한 지 60,000 ms 가 지났으면 재시도를 지우고 WARN 로그 뒤 포기 처리(누른 사람에게만 `⏳ 1분을 기다렸지만 터미널이 계속 프롬프트 입력을 받고 있어 확인 창을 대신 누르지 못했습니다. 응답이 끝난 뒤 다시 눌러 주세요.`, ERR-067).
 - 출력: 터미널 키 입력 또는 포기 안내
 - 사후조건: 재시도 없음
 - 예외·오류:
@@ -1769,7 +1770,7 @@ cache-control: no-store
   | 화면 읽기 예외 | 해당 없음 | WARN 로그, 다음 주기에 다시 본다 |
 - 경계값: 60,000 ms 시점의 검사에서 풀려 있으면 누른다(검사가 먼저, 포기 판정이 나중)
 - 동시성: 키가 다른 재시도 여러 개가 한 세션에서 함께 돌 수 있다
-- 수용 기준: AC-030
+- 수용 기준: AC-030, AC-132
 - 근거: `src/broker.ts` `retryWhenFocused`(ASM-002)
 - 추적: ERR-067, §4.3.7
 
@@ -5203,6 +5204,9 @@ Slack 오류 표:
 | AC-129 | REQ-F-027 | 질문 2개짜리 카드, 둘 다 아직 답 전. 화면이 매 답마다 다음 다이얼로그로, 마지막엔 "Submit answers" 가 있는 번호 화면으로 바뀐다 | 1번·2번 질문을 순서대로 버튼으로 답한다 | 각 답마다 그 번호+Enter. 마지막 답 뒤 "Submit answers" 선택지도 찾아 누른다 |
 | AC-130 | REQ-F-027 | 질문 카드 A 에 답한 뒤, 세션이 질문 카드 B 를 새로 올렸다(세션의 열린 카드 = B) | A 의 버튼을 누른다(화면은 마침 B 의 번호와 같은 번호를 쓴다) | 터미널에 키를 보내지 않는다. 누른 사람에게만 "다른 카드로 넘어갔습니다" 안내 |
 | AC-131 | REQ-F-029 | 키 다이얼로그: 커서가 "Open System Settings", 그 아래 "Try again" | "Try again" 버튼을 누른다 | `Down` + `Enter` 를 보낸다. 카드가 "⌨️ 답함" 으로 접힌다. 대기가 풀리고 상태 `processing` |
+| AC-132 | REQ-F-030 | 프롬프트가 쥐고 있던 다이얼로그가, 풀리기 전에 아예 사라진다(채널 답글로 이미 답해짐) | 재시도 타이머가 돈다 | 터미널에 아무 키도 보내지 않는다. 60초가 지나도 "대신 누르지 못했습니다" 를 알리지 않는다 |
+| AC-133 | REQ-F-026 | 전부 허용 켜짐. 터미널에 진행 확인 다이얼로그. 누르기가 두 번 `unfocused`, 세 번째에 성공 | 그 다이얼로그가 화면에 나타난다 | 1초 간격으로 세 번째까지 누르고(총 세 번 시도), 성공해 자동 허용으로 기록된다. 사람에게 카드를 올리지 않는다 |
+| AC-134 | REQ-F-011 | 질문 카드가 열려 있다(아직 답 전) | 터미널에서 직접 타이핑하는 등 다른 경로로 새 턴이 시작된다 | 카드가 "✅ 넘어감" 으로 접힌다 |
 
 ### 5.2 추적성 매트릭스
 
