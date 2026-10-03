@@ -13,8 +13,11 @@ export function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 }
 
-// A bare http(s) address becomes a link. Trailing . , ) ] ' " belong to the sentence, not the address.
-const URL_RE = /\bhttps?:\/\/[^\s<>"'`]+/g
+// A bare http(s) address becomes a link. Only ASCII joins it — `PR(https://…/pull/1)은` used to glom the
+// closing `)은` into the "address" because nothing in the old class stopped at the Korean character, and
+// the trailing-punctuation strip below only looks at the very last character (20). Trailing . , ) ] ' "
+// still belong to the sentence, not the address, once the match itself stops at the real end.
+const URL_RE = /\bhttps?:\/\/[\x21-\x5f\x61-\x7e]+/g
 export function autolink(escaped) {
   return escaped.replace(URL_RE, (m) => {
     // `&quot;` / `&#39;` are what quotes became after escaping.

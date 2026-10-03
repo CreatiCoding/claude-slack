@@ -63,7 +63,11 @@
 
 * { box-sizing: border-box; }
 /* What a bounce reveals is the sidebar colour, like the desktop app's frame. */
-html { background: var(--side); height: 100%; overscroll-behavior: none; }
+/* Only the vertical bounce is blocked (a pull-to-refresh on a phone, say). Blocking the horizontal one too
+   (20) also blocked a Mac trackpad's two-finger back/forward swipe; that one only matters on a touchscreen
+   anyway, so it is scoped to `(pointer: coarse)`. */
+html { background: var(--side); height: 100%; overscroll-behavior-y: none; }
+@media (pointer: coarse) { html { overscroll-behavior-x: none; } }
 body { margin: 0; height: 100%; color: var(--text); background: var(--side); font: var(--fs-m)/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Pretendard, system-ui, sans-serif; -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; }
 /* Korean: break between words, not inside them ("있어/요"); only a long path or URL breaks mid-way. */
 body, input, textarea, button { word-break: keep-all; overflow-wrap: anywhere; }
@@ -99,6 +103,9 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 /* Fixed height: a connection line that comes and goes must not push the list around. */
 .conn { height: 18px; font-size: var(--fs-s); line-height: 18px; color: var(--muted); padding: 0 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .conn.bad { color: var(--red); }
+/* 20: the same notice, mirrored into the topbar — the sidebar's own #conn is hidden on a phone's convo
+   screen and behind a collapsed sidebar, so a dropped connection there went unnoticed. */
+.topbar .conn { flex: none; padding: 0 8px; }
 .list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
 .sec-head { display: flex; align-items: center; gap: 8px; height: 28px; margin-top: 6px; padding: 0 12px; font-size: var(--fs-s); color: var(--muted); border-radius: 8px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .sec-head:hover { background: var(--hover); }
@@ -260,6 +267,9 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 
 /* ---------------------------------------------------------------- composer */
 .composer { flex: none; background: var(--bg); padding: 8px var(--gutter) calc(10px + env(safe-area-inset-bottom)); }
+/* 20: the on-screen keyboard already covers the home-indicator area, so its own safe-area padding would
+   otherwise leave a blank strip between the input and the keyboard. */
+html.kbd-open .composer { padding-bottom: 10px; }
 .composer > * { max-width: calc(var(--convo-max) - 2 * var(--gutter)); margin-left: auto; margin-right: auto; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
@@ -277,6 +287,10 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .chip.hot { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
 .input-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 6px; }
 .input-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
+/* 20: a repeated identical send is held back once — this is what says "같은 메시지예요" without words alone. */
+.input-box.shake { animation: shake .3s; }
+@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
+@media (prefers-reduced-motion: reduce) { .input-box.shake { animation: none; } }
 #input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-m); line-height: 1.5; padding: 6px 4px; max-height: 140px; }
 #input::placeholder { color: var(--muted); }
 .send { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; }

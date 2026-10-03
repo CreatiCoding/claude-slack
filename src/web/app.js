@@ -346,6 +346,17 @@ document.addEventListener('visibilitychange', () => {
   else if (current) catchUp(current)
 })
 addEventListener('online', () => connect())
+// The phone keyboard covers the home-indicator safe area itself, so the composer's own bottom padding for
+// it (`env(safe-area-inset-bottom)`) would otherwise leave a blank strip between the input and the keyboard
+// (20). `visualViewport` shrinking by more than 150px (a keyboard, not just a browser chrome sliver) zeroes it.
+if (visualViewport) {
+  let maxHeight = visualViewport.height // the keyboard-closed height; a rotation or the browser chrome
+  // showing/hiding also resizes this, so the baseline tracks the largest seen rather than only the first.
+  visualViewport.addEventListener('resize', () => {
+    maxHeight = Math.max(maxHeight, visualViewport.height)
+    document.documentElement.classList.toggle('kbd-open', maxHeight - visualViewport.height > 150)
+  })
+}
 /** The empty right pane: how to start the broker when it is off (only after 2.5s: a page just opened has heard nothing yet), and a QR to open this page on a phone. */
 function renderEmpty() {
   const off = !connected && lostAt && Date.now() - lostAt > 2500
@@ -390,10 +401,14 @@ async function drawQr() {
 document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && !qrTimer && $('qr-box').firstChild && drawQr())
 function renderConn() {
   renderEmpty()
-  const el = $('conn')
   const quiet = connected || (lostAt && Date.now() - lostAt < (restarting ? 30_000 : 8_000))
-  el.textContent = quiet ? '' : '연결이 끊겼어요 · 다시 붙는 중…'
-  el.classList.toggle('bad', !quiet)
+  // Mirrored into the topbar too (20): the sidebar's own #conn is hidden on a phone's convo screen and
+  // behind a collapsed sidebar on a PC, so a dropped connection there went unseen until a send failed.
+  for (const el of [$('conn'), $('conn-top')]) {
+    el.textContent = quiet ? '' : '연결이 끊겼어요 · 다시 붙는 중…'
+    el.classList.toggle('bad', !quiet)
+  }
+  $('conn-top').hidden = quiet // empty, it would still nibble width from the centered title otherwise
 }
 setInterval(() => !connected && renderConn(), 1000)
 
@@ -509,6 +524,8 @@ function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
   const el = document.createElement('div')
   el.className = 'sec-head' + (open ? ' open' : '') + (group ? ' group' : '')
   el.setAttribute('role', 'button')
+  el.tabIndex = 0 // 20: a section head collapses/expands, so it needs to be reachable by Tab too
+  el.setAttribute('aria-expanded', String(open))
   el.innerHTML = `<span class="tw">${icon('chevron')}</span><span class="gname"></span><span class="n">${n}</span>${group || sectionMenu ? `<button class="gmore" type="button" aria-label="${group ? '그룹 메뉴' : '메뉴'}">${icon('more')}</button>` : ''}`
   el.querySelector('.gname').textContent = label
   el.addEventListener('click', (e) => {
@@ -516,6 +533,9 @@ function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
     folded[key] = open
     store.set('folded', folded)
     renderList()
+  })
+  el.addEventListener('keydown', (e) => {
+    if ((e.key === 'Enter' || e.key === ' ') && !e.target.closest('.gmore')) (e.preventDefault(), el.click())
   })
   if (sectionMenu) {
     const menu = (at) => openMenu(at, sectionMenu)
@@ -1307,18 +1327,21 @@ function toolEl(row) {
   const el = document.createElement('div')
   el.className = 'item tool'
   const [cls, label] = toolStatus(row)
-  el.innerHTML = `<div class="head"><span class="st ${cls}">${label}</span><span class="label"></span></div>`
+  el.innerHTML = `<div class="head" role="button" tabindex="0" aria-expanded="false"><span class="st ${cls}">${label}</span><span class="label"></span></div>`
   el.querySelector('.label').innerHTML = icon(toolIcon(row.ev.name)) + linkify(takeEmoji(row.ev.title).rest)
   if (row.end?.images?.length) el.insertAdjacentHTML('beforeend', imagesHtml(row.end.images))
-  el.querySelector('.head').addEventListener('click', (e) => {
+  const head = el.querySelector('.head')
+  head.addEventListener('click', (e) => {
     if (e.target.closest('a')) return // a link in the row opens the link, not the row
     let d = el.querySelector('.detail')
-    if (d) return void (d.hidden = !d.hidden)
+    if (d) { d.hidden = !d.hidden; head.setAttribute('aria-expanded', String(!d.hidden)); return }
     d = document.createElement('div')
     d.className = 'detail'
     el.append(d)
     fillTool(row, d) // drawn the first time it is opened, so a long conversation stays light
+    head.setAttribute('aria-expanded', 'true')
   })
+  head.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.target.closest('a') || (e.preventDefault(), head.click())))
   return el
 }
 function updateTool(row) {
@@ -1798,20 +1821,23 @@ function renderActivity() {
     box.dataset.key = key
     typed = ''
     box.innerHTML = running
-      ? `<div class="ahead" role="button">${icon('chevron')}<span class="txt"></span><span class="secs"></span></div>`
+      ? `<div class="ahead" role="button" tabindex="0" aria-expanded="false">${icon('chevron')}<span class="txt"></span><span class="secs"></span></div>`
       : live
         ? `<div class="ahead">${icon('edit')}<span class="txt">쓰는 중…</span><span class="secs"></span></div><div class="tail md"></div><div class="think-sub" hidden>${icon('spark')}<span>생각 중</span> <span class="think-secs"></span></div>`
         : `<div class="ahead">${icon('spark')}<span class="txt">생각 중…</span><span class="secs"></span></div>`
     if (running) {
       box.querySelector('.txt').textContent = `도구 실행 중 · ${takeEmoji(running.ev.title).rest}`
-      box.querySelector('.ahead').addEventListener('click', () => {
+      const ahead = box.querySelector('.ahead')
+      ahead.addEventListener('click', () => {
         let now = box.querySelector('.now')
-        if (now) return void now.remove()
+        if (now) return void (now.remove(), ahead.setAttribute('aria-expanded', 'false'))
         now = document.createElement('div')
         now.className = 'now'
         now.innerHTML = codeBoxHtml(linkify(running.ev.detail || takeEmoji(running.ev.title).rest))
         box.append(now)
+        ahead.setAttribute('aria-expanded', 'true')
       })
+      ahead.addEventListener('keydown', (e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), ahead.click()))
     }
   }
   box.hidden = false
@@ -1886,7 +1912,11 @@ setInterval(() => current && renderActivity(), 1000)
 // ------------------------------------------------------------------ composer: chips, waiting note, held
 function renderWaitingNote() {
   let n = 0
-  for (const row of view.msgs.values()) if (!row.deleted && hasActions(row.ev.blocks) && !row.ev.ephemeral) n++
+  // Cards above can out-survive the session actually waiting (one answered through Slack, say, while
+  // the page had not caught up yet) — the note should only show while the session itself is really
+  // waiting on a person, not just "some card up there still looks unanswered" (20).
+  const s = current && sessionOf(current)
+  if (s?.state === 'waiting') for (const row of view.msgs.values()) if (!row.deleted && hasActions(row.ev.blocks) && !row.ev.ephemeral) n++
   const el = $('waiting-note')
   el.hidden = !n
   if (n) el.innerHTML = `${icon('ring')}위 카드 ${n}개가 응답을 기다려요`
@@ -2129,6 +2159,7 @@ function saveDraft() {
 }
 function loadDraft() {
   input.value = drafts[current] ?? ''
+  histIndex = null // a different session's history, starting fresh
   autosize()
 }
 function autosize() {
@@ -2137,18 +2168,30 @@ function autosize() {
   $('btn-send').disabled = addingPictures || (!input.value.trim() && !(current && pending.get(current)?.length))
 }
 input.addEventListener('input', () => {
+  histIndex = null // a real keystroke (programmatic value-setting below fires no 'input' event) leaves history browsing
+  repeatArmed = null // edited since the "같은 메시지" warning: no longer the same send
   autosize()
   saveDraft()
 })
+/** Position while walking ↑/↓ through this session's sent-message history; `null` = not walking it. */
+let histIndex = null
 input.addEventListener('keydown', (e) => {
-  // ↑ in an empty field brings back the last message sent in this session.
-  if (e.key === 'ArrowUp' && !input.value && current && !e.isComposing) {
-    const last = store.get('lastSent:' + current, '')
-    if (last) {
-      e.preventDefault()
-      input.value = last
-      autosize()
+  // ↑/↓ walk this session's own sent messages, one at a time, oldest-first on the way back (20; it used
+  // to recall only the single last one). Only once the field is empty, or already mid-walk — otherwise a
+  // real edit in progress should not be clobbered by the arrow key moving the caret.
+  if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && current && !e.isComposing && (histIndex !== null || !input.value)) {
+    const hist = store.get('history:' + current, [])
+    if (!hist.length) return
+    if (e.key === 'ArrowUp') {
+      if (histIndex !== null && histIndex >= hist.length - 1) return
+      histIndex = histIndex === null ? 0 : histIndex + 1
+    } else {
+      if (histIndex === null) return
+      histIndex = histIndex === 0 ? null : histIndex - 1
     }
+    e.preventDefault()
+    input.value = histIndex === null ? '' : hist[hist.length - 1 - histIndex]
+    autosize()
     return
   }
   if (e.key !== 'Enter' || e.isComposing || e.keyCode === 229) return
@@ -2181,19 +2224,37 @@ function dropOptimisticBubble() {
   optimistic.el.remove()
   optimistic = null
 }
+/** The thread a repeated identical send was just allowed through for — consumed by the next send (20). */
+let repeatArmed = null
+function shakeComposer() {
+  const box = input.closest('.input-box')
+  box?.classList.remove('shake')
+  void box?.offsetWidth // restart the animation if it's already mid-shake
+  box?.classList.add('shake')
+}
 async function sendNow() {
   const s = current && sessionOf(current)
   const text = input.value.trim()
   const pics = pending.get(current) ?? []
   if (!text && !pics.length) return
   if (!s) return toast('이미 종료된 세션이에요.', 'err')
+  const hist = store.get('history:' + current, [])
+  // The same text, no pictures, right after itself: probably a double-tap, not two separate messages (20).
+  if (!pics.length && hist.at(-1) === text && repeatArmed !== current) {
+    repeatArmed = current
+    shakeComposer()
+    toast('직전 메시지와 같은 메시지예요 · 한 번 더 누르면 보내요')
+    return
+  }
+  repeatArmed = null
   const keep = input.value
   input.value = ''
   pending.delete(current)
   renderPending()
   autosize()
   saveDraft()
-  if (text) store.set('lastSent:' + current, text)
+  histIndex = null
+  if (text && hist.at(-1) !== text) store.set('history:' + current, [...hist, text].slice(-50))
   showOptimisticBubble(text, pics.length)
   if (!(await sendText(s, text, pics))) {
     dropOptimisticBubble()
@@ -2223,6 +2284,39 @@ function closeMenu() {
   menuState?.menu.remove()
   menuState = null
 }
+/**
+ * A bottom sheet (20): starting a touch within 24px of its own top edge (where a drag handle would be —
+ * elsewhere is left alone so scrolling a long menu or a textarea inside still works) and dragging down
+ * past 80px closes it; less than that snaps back.
+ */
+function wireSheetDrag(el, close) {
+  let y0 = null
+  el.addEventListener(
+    'touchstart',
+    (e) => {
+      if (e.touches.length !== 1 || e.touches[0].clientY - el.getBoundingClientRect().top > 24) return
+      y0 = e.touches[0].clientY
+    },
+    { passive: true },
+  )
+  el.addEventListener(
+    'touchmove',
+    (e) => {
+      if (y0 == null) return
+      const dy = e.touches[0].clientY - y0
+      el.style.transform = dy > 0 ? `translateY(${dy}px)` : ''
+    },
+    { passive: true },
+  )
+  el.addEventListener('touchend', (e) => {
+    if (y0 == null) return
+    const dy = (e.changedTouches[0]?.clientY ?? y0) - y0
+    el.style.transform = ''
+    y0 = null
+    if (dy > 80) close()
+  })
+}
+
 /** A menu at a point (PC) or as a bottom sheet (phone, or no point). Items: {label, icon, run, danger, on, end, sub}, 'sep', {head}. */
 function openMenu(at, items, { title } = {}) {
   closeMenu()
@@ -2286,6 +2380,7 @@ function openMenu(at, items, { title } = {}) {
   }
   scrim.addEventListener('click', closeMenu)
   scrim.addEventListener('contextmenu', (e) => (e.preventDefault(), closeMenu()))
+  if (sheet) wireSheetDrag(menu, closeMenu)
   document.body.append(scrim, menu)
   menuState = { scrim, menu }
   draw(items)
@@ -2382,6 +2477,7 @@ async function refreshSession(s) {
   scrim.addEventListener('click', close)
   el.querySelector('[data-x="later"]').addEventListener('click', () => (close(), command(s, 'refresh later')))
   el.querySelector('[data-x="now"]').addEventListener('click', () => (close(), command(s, 'refresh now')))
+  wireSheetDrag(el, close)
   document.body.append(scrim, el)
   el.querySelector('[data-x="later"]').focus()
 }
@@ -2543,6 +2639,7 @@ async function editDefaultPrompt() {
       toast(err.message, 'err')
     }
   })
+  wireSheetDrag(el, close)
   document.body.append(scrim, el)
   el.querySelector('textarea').focus()
 }
@@ -2644,6 +2741,7 @@ function newSession() {
     scrim.className = 'scrim dim'
     el.classList.add('menu', 'sheet')
     scrim.addEventListener('click', closeNewSession)
+    wireSheetDrag(el, closeNewSession)
     document.body.append(scrim, el)
     newForm = { close: () => (scrim.remove(), el.remove()) }
   } else {

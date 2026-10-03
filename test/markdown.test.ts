@@ -37,3 +37,14 @@ test('들여쓴 블럭(목록 안): 코드 줄에서도 그만큼 걷어 낸다'
 test('닫는 울타리는 연 것과 같은 개수 이상이어야 한다', () => {
   assert.deepEqual(codes(md('````\na\n```\nb\n````')), ['a\n```\nb'])
 })
+
+test('맨 URL 은 한글 등 비 ASCII 로 안 잇는다 (20)', () => {
+  const html = md('PR(https://github.com/a/b/pull/1)은 병합됐어요.')
+  assert.match(html, /<a href="https:\/\/github\.com\/a\/b\/pull\/1" target="_blank" rel="noopener noreferrer">https:\/\/github\.com\/a\/b\/pull\/1<\/a>\)은/)
+})
+
+test('linkify 도 같은 기준으로 비 ASCII 를 안 잇는다', async () => {
+  const { linkify } = (await import('../src/web/markdown.js' as string)) as { linkify: (t: string) => string }
+  const html = linkify('문서는 https://a.com/x)를 보세요')
+  assert.match(html, /<a href="https:\/\/a\.com\/x" target="_blank" rel="noopener noreferrer">https:\/\/a\.com\/x<\/a>\)를/)
+})
