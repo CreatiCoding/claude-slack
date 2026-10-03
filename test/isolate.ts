@@ -29,6 +29,7 @@ process.env.CLAUDE_SLACK_EVENTS_DIR ??= join(dir, 'events')
 process.env.CLAUDE_SLACK_WEB_IMAGES_DIR ??= join(dir, 'web-images')
 process.env.CLAUDE_SLACK_LINKS ??= join(dir, 'thread-links.json')
 process.env.CLAUDE_SLACK_TITLES ??= join(dir, 'titles.json')
+process.env.CLAUDE_SLACK_STATUS_DIR ??= join(dir, 'status')
 process.env.CLAUDE_SLACK_IMAGES_DIR ??= join(dir, 'images')
 process.env.CLAUDE_SLACK_LOG_DIR ??= join(dir, 'logs')
 // A test must never talk to the live broker's socket, nor to the tmux session it drives.

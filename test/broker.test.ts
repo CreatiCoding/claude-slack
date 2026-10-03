@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { appendFileSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { Broker, type BrokerConfig } from '../src/broker.ts'
 import { connect, listen, type Conn } from '../src/ipc.ts'
 import { slashCommandName, SLASH_COMMANDS, type SlackApi, type StreamChunk } from '../src/slack.ts'
@@ -2575,4 +2575,48 @@ test('안전한 재시작: 데몬이면 예약하고, 모든 세션이 두 번 �
   } finally {
     delete process.env.CLAUDE_SLACK_DAEMON
   }
+})
+
+test('세션별 --settings 전달: statusLine 파일을 써 두면 띄울 때 --settings 로 넘긴다 (claude-web 이관: P4-31)', async () => {
+  const settingsPath = join(tmpdir(), `cs-statusline-${Math.random().toString(36).slice(2)}.json`)
+  try {
+    const t = await setup({ statusLineSettingsPath: settingsPath })
+    assert.ok(existsSync(settingsPath), '시작할 때 settings 파일을 써 둔다')
+    const written = JSON.parse(readFileSync(settingsPath, 'utf8'))
+    assert.equal(written.statusLine.type, 'command')
+    assert.match(written.statusLine.command, /statusline\.ts/)
+
+    await t.broker.launchSession({ cwd: '/home/u/proj', prompt: '', user: 'U1' })
+    const launch = t.tmux.launches.at(-1)!
+    const i = launch.command.indexOf('--settings')
+    assert.ok(i >= 0, '--settings 가 명령에 들어간다')
+    assert.equal(launch.command[i + 1], settingsPath)
+    t.close()
+  } finally {
+    rmSync(settingsPath, { force: true })
+  }
+})
+
+test('세션별 --settings 전달: 글로벌 설정이 아니므로 settingsPath 가 빈 문자열이면 아무것도 쓰지 않고 --settings 도 안 붙인다', async () => {
+  const t = await setup() // helpers.ts 는 테스트 기본값으로 statusLineSettingsPath: '' 를 준다
+  await t.broker.launchSession({ cwd: '/home/u/proj', prompt: '', user: 'U1' })
+  const launch = t.tmux.launches.at(-1)!
+  assert.equal(launch.command.includes('--settings'), false)
+  t.close()
+})
+
+test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근접 여부를 보여준다 (claude-web 이관: P4-31)', async () => {
+  const statusDir = join(tmpdir(), `cs-status-ctx-${Math.random().toString(36).slice(2)}`)
+  mkdirSync(statusDir, { recursive: true })
+  const t = await setup({ statusDir })
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const session = (t.broker as unknown as { registry: { live: Array<{ key: string }> } }).registry.live[0]!
+  writeFileSync(join(statusDir, `${session.key}.json`), JSON.stringify({ at: Date.now(), model: 'Opus', costUsd: 1.23, exceeds200k: true }))
+  await t.broker.handleSlackMessage({ user: 'U1', text: ':context', ts: '9.1', threadTs: s.ack, channel: 'C1' })
+  const last = t.slack.posts.at(-1)!.text
+  assert.match(last, /Opus/)
+  assert.match(last, /\$1\.23/)
+  assert.match(last, /예/)
+  s.conn.close()
+  t.close()
 })

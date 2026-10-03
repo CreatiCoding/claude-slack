@@ -3212,6 +3212,26 @@ cache-control: no-store
 - 근거: `src/channel.ts`, `src/broker.ts` `resolveReadSession`·`findReadableSession`, `src/transcript.ts` `readSessionText`(ASM-002)
 - 추적: IF-085, IF-086, REQ-F-074, REQ-F-047
 
+### REQ-F-091 세션마다 `--settings` 로 statusLine 을 등록해 비용·모델을 읽는다(`:context`)
+- 의무: SHOULD
+- 액터: 브로커(기동 시), Claude Code(매 렌더마다 statusLine 명령 실행), 사람(`:context`)
+- 트리거: 브로커 기동(설정 파일 쓰기), `launchSession`(그 파일을 `--settings` 로 넘기기), `:context` 명령
+- 전제조건: 해당 없음. `statusLineSettingsPath` 가 빈 문자열이면(테스트) 이 모두를 건너뛴다
+- 입력: `:context` — 인자 없음
+- 처리 규칙:
+  1. 기동 시 `{"statusLine":{"type":"command","command":"<node> <scripts/statusline.ts 절대경로>"}}` 를 기본 `~/.claude-slack/statusline-settings.json` 에 쓴다. 사람의 전역 `~/.claude/settings.json` 은 건드리지 않는다 — 이 파일은 `launchSession` 이 매번 넘기는 `--settings` 인자로만 그 실행에 적용된다.
+  2. 쓰기 실패는 WARN 로그만 남기고 계속한다. 그 뒤로는 `--settings` 를 넘기지 않는다(statusLine 없이 평소처럼 뜬다).
+  3. `scripts/statusline.ts`: Claude Code 가 stdin 으로 주는 JSON(`model.display_name`, `cost.total_cost_usd`, `cost.total_duration_ms`, `exceeds_200k_tokens`)을 받아, 띄울 때 심어 둔 `CLAUDE_SLACK_SESSION` 으로 `~/.claude-slack/status/<키>.json` 에 `{at, model, costUsd, durationMs, exceeds200k}` 를 쓰고, stdout 에 `<모델> · $<비용> · 200k+`(해당 값이 있는 것만) 를 표준 statusLine 글로 낸다. 쓰기 실패는 statusLine 출력 자체를 막지 않는다(최선만 시도).
+  4. `:context`: 그 세션 키로 저장된 값을 읽어 모델·누적 비용·200k 이상 여부·몇 초 전 값인지를 답한다. 아직 없으면(막 띄웠다) 안내문
+- 출력: `:context` 의 답글(모델·비용·200k 여부·경과 시간 4줄)
+- 사후조건: `~/.claude-slack/status/<키>.json` 에 최신 값이 남는다(세션 종료 시 지우지 않는다 — 다음 번 같은 키가 또 쓰이는 일이 없어 쌓여도 해가 없다)
+- 예외·오류: statusLine 자체가 한 번도 안 불려도(오래된 Claude Code, 설정 미적용) `:context` 는 "아직 상태 줄을 읽지 못했습니다" 로 답한다
+- 경계값: `cost.total_cost_usd` 가 없으면 "알 수 없음". stdin 이 JSON 이 아니면(빈 값 등) statusLine 은 `claude` 만 찍고 상태 파일을 쓰지 않는다
+- 동시성: 세션마다 다른 키로 다른 파일 — 섞이지 않는다
+- 수용 기준: AC-145
+- 근거: 요청 "statusLine 기반 context/rate-limit 읽기, 세션별 --settings 전달"(P4-31). `src/status.ts`, `scripts/statusline.ts`, `src/broker.ts` `ensureStatusLineSettings`
+- 추적: REQ-F-001(기동 단계), §4.3.8(허용 문자열 — statusLine 은 그 계열이 아니라 해당 없음)
+
 ### 3.3 데이터 요구사항 (DM-nnn)
 
 저장 매체는 로컬 파일과 브로커 프로세스의 메모리다(CON-010). 관계형 저장소가 없으므로 아래 템플릿의 "자료형"은 JSON 자료형이고, "관계"의 FK 는 값으로 가리키는 참조이며 참조 무결성 강제는 없다. "인덱스"는 메모리 안의 조회 표를 뜻한다. 기본 경로의 `~/.claude-slack` 은 `<상태 폴더>`로 줄여 쓴다.
@@ -5409,6 +5429,8 @@ Slack 오류 표:
 | REQ-F-090 | 요청 "다른 세션을 읽는 도구 read_session" | AC-143 | `channel.ts`, `broker.ts`, `transcript.ts` |
 | AC-144 | REQ-R-008 | 데몬 실행(`CLAUDE_SLACK_DAEMON=1`), 바쁜 세션 1개(`turn` 있음) | 재시작을 예약한 뒤 20 ms 간격으로 확인하는 가짜 시계를 돌린다 | 바쁜 동안 종료 0회(`waitingOn` 에 그 세션의 폴더 이름). Stop 훅으로 쉬게 된 뒤 두 번째 확인에서 `saveState()` 와 `process.exit(0)` 이 호출된다. 데몬이 아니면 예약 자체가 "데몬이 관리하는 실행이 아니라서 예약할 수 없습니다" 로 거절된다 |
 | REQ-R-008 | 요청 "쉬면 안전하게 재시작" | AC-144 | `broker.ts`, `admin.ts`, `scripts/broker-daemon.sh`, `index.ts` |
+| AC-145 | REQ-F-091 | `statusLineSettingsPath` 가 임시 파일 경로 | 세션을 띄운 뒤 그 경로로 상태 파일을 채우고 `:context` 를 보낸다 | 기동 때 그 경로에 `{"statusLine":{"type":"command",…}}` 를 쓴다. 띄울 때 명령에 `--settings <그 경로>` 가 들어간다. `:context` 답에 모델·비용(`$1.23`)·"200k 이상: 예"가 담긴다. `statusLineSettingsPath` 가 `''` 면 아무것도 쓰지 않고 `--settings` 도 안 붙인다 |
+| REQ-F-091 | 요청 "statusLine 기반 context/rate-limit 읽기, 세션별 --settings 전달"(P4-31) | AC-145 | `status.ts`, `scripts/statusline.ts`, `broker.ts` |
 | REQ-P-001 | 원문 `changed`(250 ms), ASM-005 | AC-088 | `broker.ts`, `admin.ts` |
 | REQ-P-002 | 원문 `DEFAULT_FLUSH_MS` | AC-089 | `stream.ts` |
 | REQ-P-003 | 원문 `PAGE`, `PAGE_BYTES` | AC-090 | `events.ts` |

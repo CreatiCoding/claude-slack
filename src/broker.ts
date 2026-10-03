@@ -1,4 +1,5 @@
 import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
 import type { Conn } from './ipc.ts'
 import { WAITING_LABEL, type HeldMessage, type NotifyMode, type Session, type ViewMode, type WaitingReason } from './session.ts'
@@ -25,6 +26,8 @@ import { answeredBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refres
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
 import { TitleStore } from './titles.ts'
+import { StatusStore, DEFAULT_STATUS_DIR } from './status.ts'
+import { stableNodePath } from './node-path.ts'
 import { ThreadLinks } from './thread-links.ts'
 import { countUserMessages, deleteRecentSession, listRecentSessions, readFirstMessage, type RecentSession } from './sessions-list.ts'
 import { countArchives, deleteArchive, listArchives, renameArchive, type SessionArchive } from './archive.ts'
@@ -148,6 +151,10 @@ export interface BrokerConfig {
   /** Where the pinned rows are kept. Tests use a temp file. */
   pinsPath?: string
   titlesPath?: string
+  /** Where `scripts/statusline.ts` writes each session's last statusLine read (default ~/.claude-slack/status). */
+  statusDir?: string
+  /** The generated `--settings` file registering that statusLine command (default ~/.claude-slack/statusline-settings.json). Set to '' in tests to skip writing one. */
+  statusLineSettingsPath?: string
   /** Where the web app's session events are kept (one file per thread). */
   eventsDir?: string
   /** Where pictures shown in the web app are kept. */
@@ -378,7 +385,7 @@ const HELP = [
   '• `/compact` `/model opus` `/review` 처럼 `/`로 시작하면 Claude Code 명령으로 터미널에 그대로 들어갑니다. `!npm test` 처럼 `!`는 bash 모드. Slack이 `/`를 가로채면 `:/명령`.',
   '• 세션 제어: `:esc` 중단 · `:screen` 화면(`:screen raw` 전체) · `:status` 상태 · `:answer 2` 번호 응답 · `:key Down Enter` 키 입력 · `:type 텍스트` 타이핑 · `:canvas` 기록을 캔버스로 · `:refresh` 세션 다시 열기(스킬·플러그인 반영) · `:kill` Slack에서 띄운 세션 종료',
   '• 도구가 도는 중에 보낸 메시지는 붙잡았다가 도구가 끝나면 전달합니다. 바로 보내려면 안내의 *지금 보내기* 또는 `:now`.',
-  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달 · `:retract` 방금 보낸 메시지 철회',
+  '• `:notify decisions|on|off` 멘션 알림 · `:view summary|normal|verbose` 보기 · `:rename 이름` · `:btw 질문` 옆길 질문 · `:tell <세션> 메시지` 다른 세션에 전달 · `:retract` 방금 보낸 메시지 철회 · `:context` 비용·모델·200k 근접 여부',
   '• 권한 요청은 버튼으로, 또는 `yes abcde` / `no abcde` 로 답합니다. `:auto on` 이면 브로커가 모든 권한 요청을 바로 허용하고 무엇을 허용했는지 스레드에 남깁니다(`:auto off` 로 끔).',
 ].join('\n')
 
@@ -491,6 +498,8 @@ export class Broker {
     this.dialogs = new DialogDriver(tmux, (m) => this.logAt('INFO', 'dialog', m))
     this.pinStore = new PinStore(cfg.pinsPath)
     this.titles = new TitleStore(cfg.titlesPath)
+    this.status = new StatusStore(cfg.statusDir)
+    this.statusLineSettingsPath = this.ensureStatusLineSettings(cfg.statusLineSettingsPath)
     this.purges = new PurgeService(slack, { archiveDir: cfg.archiveDir, gapMs: cfg.purgeGapMs, pendingFile: cfg.pendingPurgesPath, log: (m) => this.logAt('INFO', 'purge', m) })
     this.offsets = new OffsetStore(cfg.offsetsPath)
     this.revive = new ReviveStore(cfg.revivePath)
@@ -1064,6 +1073,9 @@ export class Broker {
 
   private pinStore: PinStore
   private titles: TitleStore
+  private status: StatusStore
+  /** The `--settings` file registered on every launch, or undefined if none could be written (statusLine just stays off). */
+  private statusLineSettingsPath?: string
   private orphanScan?: { at: number; items: Orphan[] }
 
   /**
@@ -2745,6 +2757,27 @@ export class Broker {
     return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
   }
 
+  /**
+   * Writes a small `--settings` file registering `scripts/statusline.ts` as the statusLine command, so a
+   * broker-launched session reports its cost/model back to `StatusStore` (P4-31) without touching the
+   * person's own global `~/.claude/settings.json` — a session started by hand outside claude-slack is
+   * untouched. `path === ''` (tests) skips writing one; launches then get no `--settings` flag at all.
+   */
+  private ensureStatusLineSettings(path?: string): string | undefined {
+    if (path === '') return undefined
+    const dest = path ?? join(homedir(), '.claude-slack', 'statusline-settings.json')
+    try {
+      const scriptPath = fileURLToPath(new URL('../scripts/statusline.ts', import.meta.url))
+      const node = stableNodePath()
+      mkdirSync(join(dest, '..'), { recursive: true })
+      writeFileSync(dest, JSON.stringify({ statusLine: { type: 'command', command: `${node} ${scriptPath}` } }))
+      return dest
+    } catch (err) {
+      this.logAt('WARN', 'broker', `could not write the statusLine settings file: ${describeError(err)}`)
+      return undefined
+    }
+  }
+
   private async reopenForRefresh(session: Session, carried: HeldMessage[]): Promise<void> {
     session.refreshing = false
     const threadTs = session.threadTs
@@ -3717,7 +3750,13 @@ export class Broker {
           ...(this.cfg.socketPath ? { CLAUDE_SLACK_SOCKET: this.cfg.socketPath } : {}),
           ...(process.env.CLAUDE_SLACK_NO_CHANNEL ? { CLAUDE_SLACK_NO_CHANNEL: '1' } : {}),
         },
-        command: [this.cfg.launcher, ...(o.resumeId ? ['--resume', o.resumeId] : []), ...(o.extraArgs ?? []), ...(this.webDefaultPrompt().trim() ? ['--append-system-prompt', this.webDefaultPrompt().trim()] : [])],
+        command: [
+          this.cfg.launcher,
+          ...(o.resumeId ? ['--resume', o.resumeId] : []),
+          ...(o.extraArgs ?? []),
+          ...(this.webDefaultPrompt().trim() ? ['--append-system-prompt', this.webDefaultPrompt().trim()] : []),
+          ...(this.statusLineSettingsPath ? ['--settings', this.statusLineSettingsPath] : []),
+        ],
         name: `cs-${sessionKeyForLaunch}`,
       })
     } catch (err) {
@@ -3962,6 +4001,19 @@ export class Broker {
         // The answer sits in a panel that keeps the keyboard until Esc; close it so the next message is not typed into it.
         await this.tmux.sendKeys(c.pane, ['Escape'])
         await c.post(fresh ? '```' + truncate(fresh.replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했습니다. 화면을 확인하세요.')
+      },
+    },
+
+    /** What the last statusLine render reported — cost, model, how close to the 200k-token mark (P4-31). */
+    context: {
+      user: true,
+      run: async (c) => {
+        const s = this.status.get(c.session.key)
+        if (!s) return void (await c.post('아직 상태 줄을 읽지 못했습니다. 메시지를 한 번 보낸 뒤 다시 시도하세요.'))
+        const age = Math.round((Date.now() - s.at) / 1000)
+        const cost = typeof s.costUsd === 'number' ? `$${s.costUsd.toFixed(2)}` : '알 수 없음'
+        const lines = [`모델: ${s.model ?? '알 수 없음'}`, `누적 비용: ${cost}`, `200k 토큰 이상: ${s.exceeds200k ? '예' : '아니오'}`, `${age}초 전 상태`]
+        await c.post(lines.join('\n'))
       },
     },
 
