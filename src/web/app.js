@@ -2754,7 +2754,9 @@ async function shrinkPicture(f) {
   ctx.fillRect(0, 0, c.width, c.height)
   ctx.drawImage(bmp, 0, 0, c.width, c.height)
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85))
-  const small = blob && blob.size < f.size ? blob : f
+  // The shrunk copy is sent even when it is larger, for an over-long original or a GIF (73); otherwise the smaller one.
+  const mustShrink = Math.max(bmp.width, bmp.height) > 1568 || f.type === 'image/gif'
+  const small = blob && (mustShrink || blob.size < f.size) ? blob : f
   // The bubble's copy (57): long side 360 px, JPEG 0.7.
   const tk = Math.min(1, 360 / Math.max(bmp.width, bmp.height))
   const t = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(bmp.width * tk)), height: Math.max(1, Math.round(bmp.height * tk)) })
