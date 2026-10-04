@@ -11,7 +11,7 @@
     "start": "node --env-file=.env src/index.ts",
     "dev": "node --watch --env-file=.env src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --import ./test/isolate.ts --test --test-force-exit --test-timeout=15000 test/",
+    "test": "node --import ./test/isolate.ts --test --test-force-exit --test-timeout=15000 \"test/**/*.test.ts\"",
     "logs": "node scripts/logs.ts",
     "install-hooks": "node scripts/install-hooks.ts",
     "uninstall-hooks": "node scripts/install-hooks.ts --remove"
