@@ -2709,6 +2709,18 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-104 PR (50)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. PR 호스트: `github.com` 과 `CLAUDE_SLACK_GITHUB_HOSTS`(쉼표 목록)에 적은 호스트. 기본값에는 다른 호스트를 넣지 않는다.
+  2. 상태: `OPEN`·`DRAFT`(열린 초안, `isDraft`)·`MERGED`·`CLOSED`·`MISSING`(gh 가 답하지 않음·조회 실패). 열린 것(초안 포함)은 90 s 뒤 다시 묻는다. 머지·닫힌 것은 기억한다.
+  3. 칩 라벨 `PR #n`, 여럿이면 `▾ N`.
+- 미구현(다음 라운드): 폰에서 PR 을 화면 안 창으로 여는 것(`gh pr view`·`gh pr diff` 블록 렌더), 세션 폴더 origin 호스트 자동 인식(지금은 설정값만), 웹 칩의 DRAFT·MISSING 색.
+- 수용 기준: AC-174
+- 근거: `src/links.ts` `prHosts`·`linksIn`·`prState`·`prInfo`
+- 추적: REQ-F-097
+
 ### REQ-F-103 알림 센터 (49)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5588,6 +5600,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-174 | REQ-F-104 | 설정한 호스트의 PR 이 링크로 잡히고, 초안은 DRAFT, gh 가 답하지 않으면 MISSING | `test/links.test.ts` PR 묶음(50) | 위 규칙대로 나온다 |
 | AC-173 | REQ-F-103 | 같은 키는 한 번만, 30개까지, 재시작 뒤에도 남음, 세 개 + N개 더, 폰·PC 폭에서 맨 위에 보임 | `test/web.test.ts` 알림 센터(49), `scripts/qa-web.ts` 49 묶음 | 위 규칙대로 나온다 |
 | AC-172 | REQ-F-102 | 잘못 보냄 정정 문구·80자, 휴지통 거절 순서, 확인 경로가 다르면 거절, 800 ms 뒤 옮김 | `test/trash.test.ts` 거절 순서 묶음, `test/web.test.ts` 잘못 보냄 | 위 규칙대로 나온다 |
 | AC-171 | REQ-F-101 | 끝난 세션의 대화가 지난 기록에 남고, 같은 스레드는 한 번만, 100개를 넘으면 가장 오래된 것부터 지워진다 | `test/web.test.ts` 지난 기록(47) 묶음 | 위 규칙대로 나온다 |

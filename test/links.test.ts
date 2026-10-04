@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { linksIn, repos } from '../src/links.ts'
+import { linksIn, prHosts, prState, repos } from '../src/links.ts'
 
 test('대화에 나온 PR·Slack 스레드 주소를 처음 나온 순서로 한 번씩', () => {
   const texts = ['PR https://github.com/a/b/pull/12 올렸어요.', '이것도 https://github.com/a/b/pull/13, 그리고 https://github.com/a/b/pull/12', '<https://creco.slack.com/archives/C01ABC/p1790681234661739|스레드>']
@@ -97,4 +97,16 @@ setTimeout(() => console.log(JSON.stringify({ url: 'https://github.com/a/b/pull/
   const got = await Promise.all([branchPr(dir, gh), branchPr(dir, gh), branchPr(dir, gh)])
   assert.ok(got.every((g) => g?.number === 3))
   assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 1)
+})
+
+test('PR 링크(50): 호스트는 github.com 과 설정값, 상태는 초안·없음까지', () => {
+  assert.deepEqual(prHosts(''), ['github.com'])
+  assert.deepEqual(prHosts('ghe.example.internal, github.com'), ['github.com', 'ghe.example.internal'])
+  const texts = ['see https://ghe.example.internal/a/b/pull/12 and https://github.com/x/y/pull/3']
+  assert.deepEqual(linksIn(texts, 'pr', ['github.com']), ['https://github.com/x/y/pull/3'])
+  assert.deepEqual(linksIn(texts, 'pr', ['github.com', 'ghe.example.internal']), ['https://ghe.example.internal/a/b/pull/12', 'https://github.com/x/y/pull/3'])
+  assert.equal(prState({ state: 'OPEN', isDraft: true }), 'DRAFT')
+  assert.equal(prState({ state: 'OPEN', isDraft: false }), 'OPEN')
+  assert.equal(prState({ state: 'MERGED' }), 'MERGED')
+  assert.equal(prState({ state: undefined }), 'MISSING')
 })
