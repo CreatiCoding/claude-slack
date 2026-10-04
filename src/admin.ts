@@ -53,6 +53,8 @@ export interface AdminApi {
   webSendThread?(thread: string, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webTrashInfo?(pid: number): { ok: boolean; note: string; folder?: string; repos?: Array<{ path: string; uncommitted: number; unpushed: number }> }
+  webNotices?(): unknown[]
+  webNoticeDismiss?(id?: string): { ok: boolean; note: string }
   webTrash?(pid: number, expectPath?: string): Promise<{ ok: boolean; note: string }>
   webFork?(pid: number): Promise<{ ok: boolean; note: string; thread?: string }>
   webUnhold?(pid: number, ts: string): Promise<{ ok: boolean; note: string; text?: string }>
@@ -392,9 +394,17 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     // Groups: the whole (small) thing, but only when it differs from what this page has.
     let groupsSent = api.webGroups ? JSON.stringify(api.webGroups()) : ''
     if (groupsSent) write('groups', JSON.parse(groupsSent))
+    // The notification center (49): the whole (small) list, sent again when it changes.
+    let noticesSent = api.webNotices ? JSON.stringify(api.webNotices()) : ''
+    if (noticesSent) write('notices', JSON.parse(noticesSent))
     const offChange = api.onChange(() => {
       const delta = sessionsDelta(sent, api.webSessions!())
       if (delta) write('sessions_delta', delta)
+      const n = api.webNotices ? JSON.stringify(api.webNotices()) : ''
+      if (n !== noticesSent) {
+        noticesSent = n
+        write('notices', JSON.parse(n))
+      }
       const g = api.webGroups ? JSON.stringify(api.webGroups()) : ''
       if (g !== groupsSent) {
         groupsSent = g
@@ -496,6 +506,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
+  }
+  // The notification center (49): clear one (by id) or all.
+  if (req.method === 'POST' && url.pathname === '/api/notices/dismiss' && api.webNoticeDismiss) {
+    const body = await readJson(req)
+    return send(res, 200, api.webNoticeDismiss(typeof body.id === 'string' ? body.id : undefined))
   }
   // By thread, for a row with no pid yet (starting) or none any more (waking, dormant): see webSendThread (40).
   const sendThread = /^\/api\/thread\/([^/]+)\/send$/.exec(url.pathname)

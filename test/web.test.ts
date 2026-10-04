@@ -490,3 +490,21 @@ test('지난 기록(47): 끝난 세션의 대화가 지난 기록으로 남고, 
   s.conn.close()
   t.close()
 })
+
+test('알림 센터(49): 같은 키는 한 번만 올리고, 최근 30개까지, 하나를 지우거나 모두 지운다', async () => {
+  const t = await setup()
+  const add = (t.broker as unknown as { addNotice: (n: object, key?: string) => void }).addNotice.bind(t.broker)
+  add({ thread: '1.0', title: '세션', text: '🔔 확인이 필요해요', tone: 'info' })
+  add({ thread: '1.0', title: '세션', text: '백그라운드 작업이 끝났어요', tone: 'ok' }, 'task-1|completed')
+  add({ thread: '1.0', title: '세션', text: '백그라운드 작업이 끝났어요', tone: 'ok' }, 'task-1|completed')
+  const list = t.broker.webNotices() as Array<{ id: string; text: string }>
+  assert.equal(list.length, 2, '같은 키는 두 번 올리지 않는다')
+  assert.equal(list[0]!.text, '백그라운드 작업이 끝났어요', '새 것이 위')
+  for (let i = 0; i < 40; i++) add({ thread: '1.0', title: 'x', text: `n${i}`, tone: 'info' })
+  assert.equal((t.broker.webNotices() as unknown[]).length, 30, '최근 30개까지')
+  t.broker.webNoticeDismiss(list[0]!.id)
+  assert.ok(!(t.broker.webNotices() as Array<{ id: string }>).some((x) => x.id === list[0]!.id))
+  t.broker.webNoticeDismiss()
+  assert.equal((t.broker.webNotices() as unknown[]).length, 0, '모두 지운다')
+  t.close()
+})

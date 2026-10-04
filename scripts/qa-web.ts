@@ -80,6 +80,8 @@ for (let i = 0; i < 1600; i++) {
 }
 changed()
 
+// 49: the notification center's list (the page shows it; a tap or drag clears it).
+let noticeList: Array<{ id: string; thread: string; title: string; text: string; tone: string; at: number }> = []
 const api: AdminApi = {
   async adminState(): Promise<AdminState> {
     return {
@@ -97,6 +99,8 @@ const api: AdminApi = {
     return { ok: true, note: '이름을 바꿨습니다.' }
   },
   webSessions: () => sessions,
+  webNotices: () => noticeList,
+  webNoticeDismiss: (id) => ({ ok: true, note: '알림을 지웠어요' }),
   webOptions: () => ({ models: [{ label: 'Opus', value: 'opus' }, { label: 'Sonnet', value: 'sonnet' }], efforts: ['low', 'high'], modes: [{ label: 'manual', value: 'default' }, { label: 'auto', value: 'auto' }] }),
   async webSendThread(thread, text, images) {
     const s = sessions.find((x) => x.thread === thread)
@@ -989,6 +993,20 @@ for (const [label, size, phone] of [
   }
   sessions = sessions.map((x) => (x.thread === A ? { ...x, resting: undefined } : x))
   changed()
+}
+
+// 49: a notice shows at the top, on both widths (only for this block: it sits over the header's buttons).
+{
+  noticeList = [{ id: 'n-qa-1', thread: A, title: '세션', text: '🔔 확인이 필요해요', tone: 'info', at: 1 }]
+  for (const phone of [false, true]) {
+    const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 820 } })
+    const page = await ctx.newPage()
+    await page.goto(base + '/')
+    await page.waitForSelector('.notice-card', { timeout: 5000 }).catch(() => {})
+    check(`49: ${phone ? '폰' : 'PC'} 알림 카드가 맨 위에 보인다`, (await page.locator('.notice-card').count()) === 1)
+    await ctx.close()
+  }
+  noticeList = []
 }
 
 await browser.close()

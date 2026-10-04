@@ -297,6 +297,15 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .size-card p { margin: 6px 0; }
 .size-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .badge.resting { color: var(--muted); background: var(--soft); }
+.notices { position: fixed; top: 60px; right: 12px; width: min(340px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 8px; z-index: 40; }
+.notice-card { display: flex; align-items: center; background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: 10px; box-shadow: var(--shadow); touch-action: pan-y; }
+.notice-card.ok { border-left-color: var(--green); }
+.notice-card.fail { border-left-color: var(--red); }
+.notice-card.info { border-left-color: var(--yellow); }
+.nc-body { flex: 1; text-align: left; background: none; border: 0; padding: 8px 10px; color: var(--text); font: inherit; display: flex; flex-direction: column; min-width: 0; }
+.nc-body span { color: var(--muted); font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nc-x { background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px 10px; cursor: pointer; }
+.nc-more { align-self: flex-end; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--muted); font: inherit; cursor: pointer; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

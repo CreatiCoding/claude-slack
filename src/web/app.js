@@ -52,6 +52,7 @@ $('jump').firstElementChild.innerHTML = `${icon('chevron', 'down')}새 메시지
 let sessions = []
 let groups = store.get('groups-cache', { groups: [], loose: [] })
 let recent = []
+let notices = []
 let archives = []
 let options = { models: [], efforts: [], modes: [] }
 /** thread → { events: [], last: 0, loading } */
@@ -333,6 +334,10 @@ function connect() {
     groups = JSON.parse(e.data)
     store.set('groups-cache', groups)
     renderList()
+  })
+  on('notices', (e) => {
+    notices = JSON.parse(e.data)
+    renderNotices()
   })
   // After the first full list, only the sessions that changed, with the order as thread keys. One that cannot be
   // read leaves this page out of step with what the server thinks it has: start over (a new stream sends it all).
@@ -2917,6 +2922,52 @@ $('btn-more').addEventListener('click', (e) => {
 })
 const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => confirm('이어서 하기 목록을 비울까요?\n맥의 대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).') && groupOp({ op: 'clearRecent' }).then(loadSideLists) })
 const clearArchivesItem = () => ({ label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => confirm('지난 기록을 모두 지울까요? 실행 중인 세션의 기록은 남겨요.') && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) })
+// ------------------------------------------------------------------ notification center (49)
+// The newest three show at the top right (PC) or top (phone), then "N개 더". A tap opens the session and clears
+// the notice; a drag to the left of 80 px, or the close button, clears it without opening anything.
+function renderNotices() {
+  let box = document.getElementById('notices')
+  if (!box) {
+    box = document.createElement('div')
+    box.id = 'notices'
+    box.className = 'notices'
+    box.setAttribute('aria-live', 'polite')
+    document.body.append(box)
+  }
+  box.hidden = !notices.length
+  box.innerHTML = ''
+  const shownNotices = showAllNotices ? notices : notices.slice(0, 3)
+  for (const n of shownNotices) {
+    const el = document.createElement('div')
+    el.className = `notice-card ${n.tone}`
+    el.innerHTML = `<button type="button" class="nc-body"><b>${esc(n.title)}</b><span>${esc(n.text)}</span></button><button type="button" class="nc-x" aria-label="지우기">×</button>`
+    el.querySelector('.nc-body').addEventListener('click', () => {
+      api('/api/notices/dismiss', { id: n.id }).catch(() => {})
+      open(n.thread)
+    })
+    el.querySelector('.nc-x').addEventListener('click', () => api('/api/notices/dismiss', { id: n.id }).catch(() => {}))
+    let x0 = null
+    el.addEventListener('pointerdown', (e) => (x0 = e.clientX))
+    el.addEventListener('pointerup', (e) => {
+      if (x0 !== null && x0 - e.clientX > 80) api('/api/notices/dismiss', { id: n.id }).catch(() => {})
+      x0 = null
+    })
+    box.append(el)
+  }
+  if (notices.length > 3 && !showAllNotices) {
+    const more = document.createElement('button')
+    more.type = 'button'
+    more.className = 'nc-more'
+    more.textContent = `${notices.length - 3}개 더`
+    more.addEventListener('click', () => {
+      showAllNotices = true
+      renderNotices()
+    })
+    box.append(more)
+  }
+}
+let showAllNotices = false
+
 // ------------------------------------------------------------------ new session
 // A PC gets it as the right-hand pane (not a sheet), a phone as a sheet from the bottom.
 let newForm = null

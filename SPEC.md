@@ -2709,6 +2709,20 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-103 알림 센터 (49)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. 항목: `{id, thread, title, text, tone: ok|fail|info, at}`. 맨 앞에 넣고 30개까지 유지한다. 파일(`notices.json`, `CLAUDE_SLACK_NOTICES`)로 저장해 재시작 뒤에도 남는다.
+  2. 같은 키(`<백그라운드 작업 id>|<상태>`)는 한 번만 올린다.
+  3. 출처: reply 의 `notify: true` → `🔔 확인이 필요해요`(info). 백그라운드 작업 끝남 → 요약 또는 `백그라운드 작업이 끝났어요 (<상태>)`, 성공 ok·실패 fail.
+  4. SSE `notices` 로 모든 페이지에 보낸다(바뀔 때만). `POST /api/notices/dismiss` `{id?}`: id 가 있으면 그것만, 없으면 전부.
+  5. 웹: 맨 위 세 개를 보이고 `N개 더`. 누르면 그 세션으로 가며 알림을 지운다. ×나 왼쪽으로 80 px 밀면 지운다(열지 않는다). PC 는 오른쪽 위(헤더 아래), 폰은 위에 쌓는다.
+- 미구현(다음 라운드): 첨부 텍스트 파일(400 KB 이하)의 내용 싣기·펼치기·전체 복사, 첨부 읽기 실패 알림(`첨부 파일을 읽지 못했어요: <경로>`). 행 수준별 색은 세 가지로 구현.
+- 수용 기준: AC-173
+- 근거: `src/notices.ts` `NoticeStore`, `src/broker.ts` `addNotice`·`webNoticeDismiss`·`notifyBackgroundTasks`·reply 처리, `src/admin.ts` SSE·dismiss, `src/web/app.js` `renderNotices`
+- 추적: REQ-F-097(SSE)
+
 ### REQ-F-102 종료·철회·휴지통 (48)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5574,6 +5588,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-173 | REQ-F-103 | 같은 키는 한 번만, 30개까지, 재시작 뒤에도 남음, 세 개 + N개 더, 폰·PC 폭에서 맨 위에 보임 | `test/web.test.ts` 알림 센터(49), `scripts/qa-web.ts` 49 묶음 | 위 규칙대로 나온다 |
 | AC-172 | REQ-F-102 | 잘못 보냄 정정 문구·80자, 휴지통 거절 순서, 확인 경로가 다르면 거절, 800 ms 뒤 옮김 | `test/trash.test.ts` 거절 순서 묶음, `test/web.test.ts` 잘못 보냄 | 위 규칙대로 나온다 |
 | AC-171 | REQ-F-101 | 끝난 세션의 대화가 지난 기록에 남고, 같은 스레드는 한 번만, 100개를 넘으면 가장 오래된 것부터 지워진다 | `test/web.test.ts` 지난 기록(47) 묶음 | 위 규칙대로 나온다 |
 | AC-170 | REQ-F-100 | 복제는 이름·그룹·이벤트 종류·알림 문구가 맞고, 가벼운 복제는 20KB 를 넘으면 묻고, 앞부분만이면 잘라 넘기며 원본은 휴면이 된다 | `test/web.test.ts` 복제 묶음, `test/broker.test.ts` 46 묶음, `scripts/qa-web.ts` | 위 규칙대로 나온다 |

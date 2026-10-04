@@ -200,6 +200,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
   const socketPath = join(tmpdir(), `cs-${id}.sock`)
   const archiveDir = join(tmpdir(), `cs-archive-${id}`)
   const offsetsPath = join(tmpdir(), `cs-offsets-${id}.json`)
+  const noticesPath = join(tmpdir(), `cs-notices-${id}.json`)
   const revivePath = join(tmpdir(), `cs-live-${id}.json`)
   const slack = new FakeSlack()
   const tmux = new FakeTmux()
@@ -215,6 +216,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       // Never the real ones: a test run must not leave state the machine's own
       // broker would act on, such as reviving a session that never existed.
       offsetsPath,
+      noticesPath,
       revivePath,
       // Every test's FakeSlack numbers threads from 1.000, so a shared event folder would mix their logs.
       eventsDir: join(tmpdir(), `cs-events-${id}`),

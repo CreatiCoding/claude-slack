@@ -38,6 +38,7 @@ import { moveToTrash, repoStates, trashRefusal, type RepoState } from './trash.t
 import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
+import { NoticeStore, type Notice } from './notices.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
@@ -185,6 +186,8 @@ export interface BrokerConfig {
   defaultPromptPath?: string
   /** Where "폴더 버리고 종료" moves a folder (default ~/.Trash). */
   trashDir?: string
+  /** The notification center's file (49); tests point it at a temporary one. */
+  noticesPath?: string
   /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
   homeDir?: string
   /** The GitHub account whose marketplaces count as the user's own (default: asked of gh once). */
@@ -467,6 +470,8 @@ export class Broker {
   private recentWebSends = new RecentKeys(WEB_SEND_DEDUPE_MS)
   /** The one-line result of the page's last button press, for its toast (42). */
   private lastWebNote?: string
+  /** The notification center (49). */
+  private notices: NoticeStore
   /** The thread a page action just opened (a light copy), handed back with its result (46). */
   private lastWebThread?: string
   /** Sessions that just ended, newest last, for the list's ended section (43). */
@@ -565,6 +570,7 @@ export class Broker {
     this.events = new EventLog(cfg.eventsDir)
     this.images = new ImageStore(cfg.webImagesDir)
     this.groupStore = new GroupStore(cfg.groupsPath)
+    this.notices = new NoticeStore(cfg.noticesPath)
     this.quietSlack = this.installMirror(slack)
     this.tmux = tmux
     this.confirmDialogs = confirmDialogs
@@ -1102,6 +1108,23 @@ export class Broker {
   }
 
   /** End the session and move its folder to the Trash (never deleted). */
+  /** A notice for the page's notification center (49). Same key twice is not added twice. */
+  private addNotice(n: Omit<Notice, 'id' | 'at'>, key?: string): void {
+    if (this.notices.add(n, key)) this.changed()
+  }
+
+  /** The notification center, newest first (49). */
+  webNotices(): Notice[] {
+    return this.notices.list()
+  }
+
+  /** Clear one notice, or all (49). */
+  webNoticeDismiss(id?: string): { ok: boolean; note: string } {
+    this.notices.remove(id)
+    this.changed()
+    return { ok: true, note: id ? '알림을 지웠어요' : '알림을 모두 지웠어요' }
+  }
+
   /** Why this session's folder may not be moved to the Trash (48), or nothing. */
   private trashRefusalFor(session: Session): string | undefined {
     return trashRefusal(session.cwd, {
@@ -1805,6 +1828,7 @@ export class Broker {
       session.lastReplyText = msg.text.trim()
       this.logAt('INFO', 'reply', 'reply tool', this.tag(session, { chars: msg.text.length, files: msg.files?.length ?? 0, notify: !!msg.notify }))
       // `notify` is the model asking for a push, as Remote Control's "notify me when the tests finish".
+      if (msg.notify) this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: '🔔 확인이 필요해요', tone: 'info' })
       const who = msg.notify && (session.notify ?? 'decisions') !== 'off' ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const text = who ? who + msg.text : msg.text
       const images = (msg.files ?? []).map((f) => this.images.putFile(session.threadTs, f)).filter((x): x is WebImage => !!x)
@@ -2928,6 +2952,7 @@ export class Broker {
       const failed = n.status !== 'completed' || /exit code [1-9]|failed|error/i.test(n.summary ?? '')
       const label = truncate((n.summary ?? n.taskId ?? n.toolUseId ?? '').split('\n')[0]!, 200)
       const who = failed && this.mentionFor(session, 'all') ? `<@${this.mentionFor(session, 'all')}> ` : ''
+      this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: n.summary ? truncate(n.summary.split('\n')[0]!, 200) : `백그라운드 작업이 끝났어요 (${n.status})`, tone: failed ? 'fail' : 'ok' }, `${key}|${n.status}`)
       await this.slack.post({ threadTs: session.threadTs, text: `${who}${failed ? '⚠️' : '✅'} 백그라운드 작업 ${failed ? '실패' : '완료'}: ${label}` }).catch(() => {})
     }
   }
