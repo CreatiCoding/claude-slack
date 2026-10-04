@@ -973,8 +973,83 @@ addEventListener('popstate', (e) => {
   else closeConvo()
 })
 
+// The gauges above the composer (44). Tokens read as 1M, 200K, 1K. Each gauge: a ring, its value, and an
+// explanation that a hover or focus shows on PC (a tap on the phone shows it as one toast line).
+const tokens = (n) => (n >= 1e6 ? `${Math.round(n / 1e5) / 10}M` : `${Math.max(1, Math.round(n / 1000))}K`)
+const GAUGE_RING = 16
+const fine = matchMedia('(pointer: fine)')
+function gaugeHtml(g) {
+  const dash = 2 * Math.PI * GAUGE_RING
+  const shown = g.ratio === null ? 0 : Math.min(1, g.ratio)
+  const cls = g.ratio === null ? '' : g.ratio >= g.bad ? ' bad' : g.ratio >= g.warn ? ' warn' : ''
+  return `<button type="button" class="gauge${cls}" data-gauge="${g.key}" aria-label="${g.name} ${g.value}"><svg viewBox="0 0 40 40" aria-hidden="true"><circle class="bg" cx="20" cy="20" r="${GAUGE_RING}"/><circle class="fg" cx="20" cy="20" r="${GAUGE_RING}" stroke-dasharray="${dash}" stroke-dashoffset="${dash * (1 - shown)}"/></svg><span>${g.value}</span><span class="tip"><span>${g.name}</span><b>${g.big}</b><span class="bar"><i style="width:${Math.round(shown * 100)}%"></i></span><span>${g.rows.map(([k, v]) => `${k} ${v}`).join(' · ')}</span><small>${g.hint}</small></span></button>`
+}
+/** The gauges for the open session (44). Hidden when there is nothing to show. */
+function gaugesFor(s) {
+  const out = []
+  const ctxPct = s.context ? parseInt(s.context, 10) : NaN
+  const size = s.contextWindow?.size ?? 200_000
+  out.push({ key: 'ctx', name: '컨텍스트', value: Number.isFinite(ctxPct) ? `${ctxPct}% / ${tokens(size)}` : `– / ${tokens(size)}`, ratio: Number.isFinite(ctxPct) ? ctxPct / 100 : null, warn: 0.6, bad: 0.8, big: Number.isFinite(ctxPct) ? `${ctxPct}%` : '–', rows: [['사용', s.contextWindow ? tokens(s.contextWindow.used) : '–'], ['창', tokens(size)]], hint: '컨텍스트가 차면 가벼운 복제를 생각해 보세요' })
+  if (s.usage?.fiveHour !== undefined) out.push({ key: '5h', name: '5시간', value: `${s.usage.fiveHour}%`, ratio: s.usage.fiveHour / 100, warn: 0.7, bad: 0.9, big: `${s.usage.fiveHour}%`, rows: [], hint: '이 계정의 5시간 사용량' })
+  if (s.usage?.sevenDay !== undefined) out.push({ key: '7d', name: '주간', value: `${s.usage.sevenDay}%`, ratio: s.usage.sevenDay / 100, warn: 0.7, bad: 0.9, big: `${s.usage.sevenDay}%`, rows: [], hint: '이 계정의 주간 사용량' })
+  if (s.transcriptMb !== undefined) out.push({ key: 'log', name: '기록', value: `${s.transcriptMb}MB`, ratio: s.transcriptMb / 100, warn: 0.5, bad: 1, big: `${s.transcriptMb}MB`, rows: [], hint: '대화 기록 크기. 50MB 를 넘으면 가벼운 복제를 권해요' })
+  if (s.sessionMd) out.push({ key: 'md', name: 'SESSION.md', value: `${Math.round(s.sessionMd.bytes / 1000)}KB`, ratio: s.sessionMd.bytes / s.sessionMd.max, warn: 0.75, bad: 1, big: `${Math.round(s.sessionMd.bytes / 1000)}KB`, rows: [], hint: '세션 메모 크기. 20KB 를 넘으면 줄여서 넘겨요' })
+  return out
+}
+function renderGauges(s) {
+  const box = $('gauges')
+  const list = s && !s.ended ? gaugesFor(s) : []
+  box.hidden = !list.length
+  box.innerHTML = list.map(gaugeHtml).join('')
+  for (const b of box.querySelectorAll('.gauge')) {
+    b.addEventListener('click', () => {
+      if (fine.matches) return
+      const g = list.find((x) => x.key === b.dataset.gauge)
+      toast(`${g.name} ${g.value}${g.hint ? ' · ' + g.hint : ''}`)
+    })
+  }
+  renderSizeBanner(s)
+}
+/** Over 50 MB: a banner with the light copy. Over 100 MB the composer is locked (44). */
+function renderSizeBanner(s) {
+  const banner = $('size-banner')
+  const mb = s?.transcriptMb ?? 0
+  const locked = mb >= 100
+  const input = $('input')
+  input.disabled = locked
+  input.placeholder = locked ? '대화 기록이 너무 커서 입력을 막았어요 · 가벼운 복제로 이어가요' : ''
+  banner.hidden = !(mb >= 50)
+  if (mb >= 50) {
+    banner.innerHTML = locked
+      ? `<span>대화 기록이 ${Math.round(mb)}MB 로 너무 커서 입력을 막았어요 · 가벼운 복제만 할 수 있어요</span><button type="button" class="ghost" data-act="lightfork">가벼운 복제</button>`
+      : `<span>대화 기록이 ${Math.round(mb)}MB 로 너무 길어졌어요 · 가벼운 복제로 이어가요</span><button type="button" class="ghost" data-act="lightfork">가벼운 복제</button>`
+    banner.querySelector('[data-act]').addEventListener('click', () => s && sendText(s, ':lightfork'))
+    // Over 50 MB, once per session: a window that asks, remembered on this device (last 200 sessions) (44).
+    const seen = store.get('size-seen', [])
+    if (!locked && !seen.includes(s.thread)) {
+      store.set('size-seen', [s.thread, ...seen].slice(0, 200))
+      showSizeWindow(s, Math.round(mb), false)
+    }
+    if (locked && !document.querySelector('.size-window')) showSizeWindow(s, Math.round(mb), true)
+  } else document.querySelector('.size-window')?.remove()
+}
+/** The window for a long conversation (44). Over 100 MB it cannot be closed: a light copy is the only way on. */
+function showSizeWindow(s, mb, locked) {
+  document.querySelector('.size-window')?.remove()
+  const win = document.createElement('div')
+  win.className = 'size-window'
+  win.innerHTML = `<div class="size-card" role="dialog" aria-modal="true"><p><b>대화 기록이 ${mb}MB 예요</b></p><p>${locked ? '입력을 막았어요. 가벼운 복제로 이어가 주세요.' : '너무 길면 답이 느려져요. 가벼운 복제로 이어가면 좋아요.'}</p><div class="size-actions"><button type="button" class="primary" data-act="lightfork">가벼운 복제</button>${locked ? '' : '<button type="button" class="ghost" data-act="close">나중에</button>'}</div></div>`
+  win.querySelector('[data-act="lightfork"]').addEventListener('click', () => {
+    win.remove()
+    sendText(s, ':lightfork').catch(() => {})
+  })
+  win.querySelector('[data-act="close"]')?.addEventListener('click', () => win.remove())
+  document.body.append(win)
+}
+
 function renderHeader() {
   const s = current && sessionOf(current)
+  renderGauges(s)
   const title = $('title')
   title.textContent = s ? nameOf(s) : current ? '종료된 세션' : 'Claude'
   title.disabled = !s

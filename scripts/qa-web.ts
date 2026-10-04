@@ -936,6 +936,45 @@ for (const [label, size, phone] of [
   await ctx.close()
 }
 
+// 44: the gauges above the composer, and the 50 MB window shown once for the session.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  sessions = sessions.map((x) => (x.thread === A ? { ...x, context: '72%', contextWindow: { size: 200000, used: 144000 }, usage: { fiveHour: 40, sevenDay: 75 }, transcriptMb: 60, sessionMd: { bytes: 5000, max: 20000 } } : x))
+  changed()
+  await page.goto(base + '/#' + A)
+  await page.waitForSelector('#gauges:not([hidden]) .gauge')
+  const count = await page.locator('#gauges .gauge').count()
+  check('44: 입력칸 위 게이지 줄(컨텍스트·5시간·주간·기록·SESSION.md)', count === 5, String(count))
+  check('44: 컨텍스트 게이지 값은 "72% / 200K"', ((await page.locator('#gauges .gauge').first().textContent()) ?? '').includes('72% / 200K'))
+  check('44: 50MB 넘으면 주황 띠와 가벼운 복제', (await page.locator('#size-banner').isVisible()) && ((await page.locator('#size-banner').textContent()) ?? '').includes('가벼운 복제'))
+  await page.waitForSelector('.size-window', { timeout: 3000 }).catch(() => {})
+  check('44: 50MB 창은 세션마다 한 번', (await page.locator('.size-window').count()) === 1)
+  await page.locator('.size-window [data-act="close"]').click()
+  await page.reload()
+  await page.waitForSelector('#gauges .gauge')
+  await page.waitForTimeout(400)
+  check('44: 본 세션에는 다시 띄우지 않는다', (await page.locator('.size-window').count()) === 0)
+  check('44: 게이지마다 설명 상자(제목·큰 값·막대·흐린 안내)', (await page.locator('#gauges .gauge .tip').first().textContent()) ?? '' ? ((await page.locator('#gauges .gauge .tip').first().textContent()) ?? '').includes('컨텍스트') : false)
+  // Phone width: the same gauges, no page overflow sideways, and a tap shows the explanation as one line.
+  const phone2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const pp = await phone2.newPage()
+  await pp.goto(base + '/#' + A)
+  await pp.waitForSelector('#gauges .gauge')
+  const overflow = await pp.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)
+  check('44: 폰 폭에서 게이지 줄이 가로로 넘치지 않는다', !overflow)
+  await pp.waitForSelector('.size-window [data-act="close"]', { timeout: 3000 }).catch(() => {})
+  await pp.locator('.size-window [data-act="close"]').tap().catch(() => {})
+  // A permission card of another session may be on top: the tap is sent to the gauge directly.
+  await pp.locator('#gauges .gauge').first().dispatchEvent('click')
+  await pp.waitForTimeout(200)
+  check('44: 폰은 누르면 한 줄 토스트', (await pp.locator('.toast').count()) > 0)
+  await phone2.close()
+  sessions = sessions.map((x) => (x.thread === A ? { ...x, context: undefined, contextWindow: undefined, usage: undefined, transcriptMb: undefined, sessionMd: undefined } : x))
+  changed()
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 localServer.close()

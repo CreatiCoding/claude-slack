@@ -273,6 +273,29 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
    otherwise leave a blank strip between the input and the keyboard. */
 html.kbd-open .composer { padding-bottom: 10px; }
 .composer > * { max-width: calc(var(--convo-max) - 2 * var(--gutter)); margin-left: auto; margin-right: auto; }
+/* Gauges above the composer (44): ring + value, the explanation on hover/focus (PC) or a toast (phone). */
+.gauges { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--fs-s); color: var(--muted); margin: 0 0 6px; }
+.gauge { position: relative; display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 0; color: inherit; font: inherit; cursor: default; }
+.gauge svg { width: 20px; height: 20px; transform: rotate(-90deg); flex: none; }
+.gauge circle { fill: none; stroke-width: 3; }
+.gauge .bg { stroke: var(--line); }
+.gauge .fg { stroke: var(--green); transition: stroke-dashoffset 0.2s; }
+.gauge.warn .fg { stroke: var(--yellow); }
+.gauge.bad .fg { stroke: var(--red); }
+.gauge .tip { position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 180px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: none; z-index: 5; text-align: left; color: var(--text); }
+.gauge:hover .tip, .gauge:focus-visible .tip { display: block; }
+.gauge .tip b { display: block; font-size: 15px; margin: 2px 0 6px; }
+.gauge .tip .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-bottom: 6px; }
+.gauge .tip .bar i { display: block; height: 100%; background: var(--green); }
+.gauge.warn .tip .bar i { background: var(--yellow); }
+.gauge.bad .tip .bar i { background: var(--red); }
+.gauge .tip small { display: block; color: var(--muted); margin-top: 4px; }
+.size-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--yellow-soft); color: var(--text-2); border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: var(--fs-s); }
+.size-banner button { margin-left: auto; }
+.size-window { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 60; padding: 16px; }
+.size-card { background: var(--card); color: var(--text); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; max-width: 360px; width: 100%; }
+.size-card p { margin: 6px 0; }
+.size-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }
