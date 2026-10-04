@@ -18,6 +18,12 @@ interface StatusLineInput {
   workspace?: { current_dir?: string }
   cost?: { total_cost_usd?: number; total_duration_ms?: number }
   exceeds_200k_tokens?: boolean
+  context_window?: {
+    context_window_size?: number
+    used_percentage?: number
+    current_usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number }
+  }
+  rate_limits?: { five_hour?: { used_percentage?: number; resets_at?: number }; seven_day?: { used_percentage?: number; resets_at?: number } }
 }
 
 async function readStdin(): Promise<string> {
@@ -46,6 +52,16 @@ if (key) {
         costUsd: input.cost?.total_cost_usd,
         durationMs: input.cost?.total_duration_ms,
         exceeds200k: input.exceeds_200k_tokens,
+        // The context window and the plan's usage (43): the page's gauges read these.
+        contextPercent: input.context_window?.used_percentage,
+        contextSize: input.context_window?.context_window_size,
+        contextUsed: input.context_window?.current_usage
+          ? Math.round(((input.context_window.current_usage.input_tokens ?? 0) + (input.context_window.current_usage.cache_creation_input_tokens ?? 0) + (input.context_window.current_usage.cache_read_input_tokens ?? 0)) / 1000) * 1000
+          : undefined,
+        rateLimits: input.rate_limits && {
+          fiveHour: input.rate_limits.five_hour && { used: input.rate_limits.five_hour.used_percentage, resetsAt: input.rate_limits.five_hour.resets_at },
+          sevenDay: input.rate_limits.seven_day && { used: input.rate_limits.seven_day.used_percentage, resetsAt: input.rate_limits.seven_day.resets_at },
+        },
       }),
     )
   } catch {

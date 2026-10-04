@@ -2709,6 +2709,25 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-097 세션 목록에 싣는 값: 끝난 세션, 뜨는 중, 상태 줄 값, 사용량 (43)
+- 의무: MUST
+- 액터: 브로커
+- 트리거: 목록 조회(SSE `sessions` 갱신)
+- 처리 규칙:
+  1. 끝난 세션: 살아 있던 행이 목록에서 사라지면 `state:'ended'` 로 최근 10개까지 목록 끝에 싣는다(새 것이 앞). 같은 스레드가 다시 살아나면 빠진다.
+  2. 뜨는 중: 시작을 요청한 대화(`pendingLaunches`)는 hello 전에도 `state:'starting'`, `pid: 0`, `canKeys: false` 행으로 싣는다.
+  3. `context`: 상태 줄의 `context_window.used_percentage` 가 있으면 `<정수>%`, 없으면 터미널에서 읽은 `contextLabel`.
+  4. `contextWindow`: `{size, used}`, `used = round((input+cache_creation+cache_read)/1000)*1000`.
+  5. `usage`: `{fiveHour, sevenDay}` 사용률(상태 줄의 `rate_limits`). 모든 세션에 같은 값이고 가장 최근 파일의 값을 5,000 ms 캐시로 쓴다. `resets_at*1000 ≤ now` 면 0%.
+  6. `transcriptMb`: 30,000 ms 마다 잰다. 값은 `round(bytes/1e5)/10`.
+  7. `sessionMd`: `<cwd>/SESSION.md` 가 있으면 `{bytes, max: 20000}`. 없으면 뺀다.
+  8. `running`: 이번 턴에 도는 도구 제목. `quietMs`: 턴 중 마지막 활동 뒤 90,000 ms 가 넘었을 때만.
+  9. 상태 줄 스크립트(`scripts/statusline.ts`)는 위 값의 원천(`contextPercent`·`contextSize`·`contextUsed`·`rateLimits`)을 상태 파일에 쓴다.
+- 출력: `WebSession` 의 새 필드
+- 수용 기준: AC-167
+- 근거: `src/broker.ts` `webSessions`·`listFacts`·`startingRow`, `src/status.ts` `StatusStore.usage`, `scripts/statusline.ts`
+- 추적: REQ-F-011, REQ-F-036
+
 ### REQ-F-096 모델·effort·권한 모드: 같은 값은 치지 않고, 전부 허용은 모드 목록에, 결과는 토스트로, 새로고침이 모드를 이어간다 (42)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -4708,7 +4727,7 @@ Markdown → Slack mrkdwn `toMrkdwn(md)`:
 | `type <글>` | 예 | 아니오 | `send-keys -l <글>`(Enter 없음). 응답 없음 |
 | `canvas` | 예 | 아니오 | REQ-F-049 |
 | `refresh [now｜later｜cancel]` | 예 | 예 | REQ-F-036, REQ-F-037 |
-| `kill` | 예 | 아니오 | Slack 에서 시작한 세션이 아니면 `` `:kill` 은 Slack에서 띄운 세션에만 씁니다. ``. 아니면 페인을 닫는다 |
+| `kill` | 예 | 아니오 | 페인을 닫는다. 출처와 무관하게 된다(43; 전에는 Slack 에서 띄운 세션에만 됐다) |
 | `model <값>`, `effort <값>` | 아니오 | 아니오 | REQ-F-040 |
 | `mode <값>` | 아니오 | 아니오 | REQ-F-040 |
 | `exit` | 아니오 | 아니오 | `/exit` 를 치고 `→ /exit` |
@@ -5482,6 +5501,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-167 | REQ-F-097 | 끝난 세션은 ended 로 목록에 남고, 뜨는 중인 대화는 starting 으로 보인다. 사용량은 가장 최근 상태 파일을 쓰고 지난 초기화 창은 0% | `test/web.test.ts` 의 목록 값(43) 묶음 | 위 규칙대로 나온다 |
 | AC-166 | REQ-F-096 | 같은 모델을 다시 고르면 터미널에 아무것도 가지 않는다. 웹 버튼으로 전부 허용을 켜고 다른 모드를 고르면 꺼진다. 응답 note 는 `권한 모드를 바꿨어요` | `test/broker.test.ts` 의 42 묶음, 기존 새로고침 인수 테스트 갱신(`--permission-mode auto`) | 위 규칙대로 나온다 |
 | AC-165 | REQ-F-095 | 번호 다이얼로그가 떠 있을 때 웹 글은 Esc 로 닫고 전달된다. 권한 진행 창(yes/no)에는 Esc 를 누르지 않는다 | `test/broker.test.ts` 의 41 묶음 | 위 규칙대로 나온다 |
 | AC-164 | REQ-F-094 | 살아 있지 않은 세션의 행(뜨는 중·다시 여는 중·휴면)에서 보내고, 같은 글을 1.5초 안에 두 번 보내고, 그림 한 장이 빈 값이면 | `test/web.test.ts` 의 웹 보내기 묶음(40), `scripts/qa-web.ts` | 위 규칙대로 나온다 |

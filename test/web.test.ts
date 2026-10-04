@@ -5,7 +5,7 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { appendFileSync, mkdtempSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setup, shim, hook, tick, until, assistant, toolResult } from './helpers.ts'
@@ -446,4 +446,32 @@ test('웹 보내기(40): 그림 한 장이라도 못 쓰면 메시지 전체를 
   assert.equal(r.note, '이미지 크기가 맞지 않아요: empty.png')
   s.conn.close()
   t.close()
+})
+
+test('목록 값(43): 끝난 세션은 끝 쪽에 최근 10개까지, 뜨는 중인 대화는 hello 전에도 starting 행으로 보인다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const live = (t.broker as unknown as { registry: { live: Array<{ ended?: boolean; threadTs: string }> } }).registry.live[0]!
+  const thread = live.threadTs
+  assert.ok(t.broker.webSessions().some((r) => r.thread === thread && r.state !== 'ended'), '살아 있을 때는 목록에 있다')
+  live.ended = true
+  const rows = t.broker.webSessions()
+  assert.ok(rows.some((r) => r.thread === thread && r.state === 'ended'), '끝난 세션이 ended 로 남는다')
+  live.ended = false
+  const pending = (t.broker as unknown as { pendingLaunches: Map<string, { threadTs: string; cwd: string }> }).pendingLaunches
+  pending.set('7777.0001', { threadTs: '7777.0001', cwd: '/tmp' })
+  const starting = t.broker.webSessions().find((r) => r.thread === '7777.0001')
+  assert.equal(starting?.state, 'starting', '요청한 순간부터 starting 행')
+  s.conn.close()
+  t.close()
+})
+
+test('목록 값(43): 사용량은 가장 최근 상태 파일의 값을 쓰고, 이미 초기화된 창은 0%', async () => {
+  const { StatusStore } = await import('../src/status.ts')
+  const dir = mkdtempSync(join(tmpdir(), 'cs-usage-'))
+  const store = new StatusStore(dir)
+  assert.equal(store.usage(1_000), undefined, '파일이 없으면 값도 없다')
+  writeFileSync(join(dir, 'a.json'), JSON.stringify({ at: 1, rateLimits: { fiveHour: { used: 40, resetsAt: 9_999_999_999 }, sevenDay: { used: 12, resetsAt: 1 } } }))
+  assert.deepEqual(store.usage(2_000_000), { fiveHour: 40, sevenDay: 0 }, '초기화 시각이 지난 주간 창은 0%')
+  rmSync(dir, { recursive: true, force: true })
 })

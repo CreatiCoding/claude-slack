@@ -85,7 +85,7 @@ test('terminal session: root message, injection, streamed turn, commands, end', 
   await t.broker.handleSlackMessage({ user: 'U1', text: ':screen', ts: '9.4', threadTs: s.ack, channel: 'C1' })
   assert.match(t.slack.texts().at(-1)!, /^```> hello/)
   await t.broker.handleSlackMessage({ user: 'U1', text: ':kill', ts: '9.5', threadTs: s.ack, channel: 'C1' })
-  assert.ok(!t.tmux.keys.includes('%3:kill'), 'kill refused for terminal sessions')
+  assert.ok(t.tmux.keys.includes('%3:kill'), ':kill 은 터미널 세션에도 된다 (43)')
 
   // Slack's native stop button is easy to hit by accident, so it explains `:esc` instead of interrupting.
   const escBefore = t.tmux.keys.filter((k) => k === '%3:Escape').length

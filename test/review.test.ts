@@ -244,7 +244,8 @@ test('2-8 예약한 새로고침은 브로커를 재시작해도 남는다; 2-9 
   await until(() => t3.broker.webSessions().some((r) => r.thread === th && r.state !== 'ended'), '늦게 붙음')
   s3.conn.close()
   await until(() => !t3.broker.webSessions().some((r) => r.thread === th && r.state !== 'ended'), '끝남')
-  assert.ok(!t3.broker.webSessions().some((r) => r.thread === th), JSON.stringify(t3.broker.webSessions()))
+  // The session that ended is listed as ended (43), never as alive.
+  assert.ok(!t3.broker.webSessions().some((r) => r.thread === th && r.state !== 'ended'), JSON.stringify(t3.broker.webSessions()))
   t3.close()
 })
 

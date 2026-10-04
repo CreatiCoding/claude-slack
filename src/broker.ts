@@ -88,6 +88,20 @@ export interface WebSession {
   preview?: string
   /** The newest message in the thread (this broker run), and whether the person said it. */
   last?: { text: string; mine: boolean }
+  /** The status line's context use, as a percentage text (43). Falls back to the terminal's reading. */
+  context?: string
+  /** The context window and what it holds: `used` is rounded to 1,000 tokens (43). */
+  contextWindow?: { size: number; used: number }
+  /** The plan's usage in percent, five-hour and weekly (43). */
+  usage?: { fiveHour?: number; sevenDay?: number }
+  /** The transcript's size in MB, one decimal (43). */
+  transcriptMb?: number
+  /** SESSION.md in the session folder, when there is one (43). */
+  sessionMd?: { bytes: number; max: number }
+  /** The tools running in this turn, by title (43). */
+  running?: string[]
+  /** Quiet for over 90 s in a turn (43). */
+  quietMs?: number
 }
 
 export interface AdminState {
@@ -346,10 +360,19 @@ const READ_SESSION_MAX_CHARS_CAP = 200_000
 const WEB_IMAGES_MAX = 8
 /** Claude Code's own permission modes (the ones `--permission-mode` takes). */
 const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto']
+/** How many just-ended sessions the list keeps (43). */
+const RECENT_ENDED_MAX = 10
+/** A turn quiet this long shows as 'no new output' (43, §4.3.3). */
+const QUIET_MS = 90_000
 const WEB_IMAGES_BASE64_MAX = 3_145_728
 const WEB_IMAGE_BYTES_MAX = 10 * 1024 * 1024
 const DIALOG_CLOSE_TRIES = 5
 const DIALOG_CLOSE_SETTLE_MS = 150
+
+/** A launch that was requested and has not said hello yet: a list row with no pid (43). */
+function startingRow(p: PendingLaunch): WebSession {
+  return { pid: 0, thread: p.threadTs, cwd: p.cwd, state: 'starting', startedAt: Date.now(), held: 0, canKeys: false, autoAllow: false, lastSeq: 0, lastAt: Date.now() }
+}
 
 interface PendingLaunch {
   threadTs: string
@@ -423,6 +446,10 @@ export class Broker {
   private recentWebSends = new RecentKeys(WEB_SEND_DEDUPE_MS)
   /** The one-line result of the page's last button press, for its toast (42). */
   private lastWebNote?: string
+  /** Sessions that just ended, newest last, for the list's ended section (43). */
+  private recentEnded = new Map<string, WebSession>()
+  /** Per-transcript size reads, every 30 s (43). */
+  private transcriptSizes = new Map<string, { at: number; mb: number }>()
   private pendingLaunches = new Map<string, PendingLaunch>()
   private pendingPermissions = new Map<string, { msgTs: string; pid: number; requestId: string; toolName: string; at: number; timer?: ReturnType<typeof setTimeout>; reminded?: number; text?: string; blocks?: unknown[] }>()
   /** Block types this workspace rejected, so they are not sent (and refused) again every time. */
@@ -753,7 +780,10 @@ export class Broker {
   private refreshFailed = new Map<string, number>()
   webSessions(): WebSession[] {
     const rows = this.liveRows()
-    for (const r of rows) this.lastRows.set(r.thread, r)
+    for (const r of rows) {
+      this.lastRows.set(r.thread, r)
+      this.recentEnded.delete(r.thread)
+    }
     const shown = new Set(rows.map((r) => r.thread))
     const kept: WebSession[] = []
     for (const [thread, row] of this.lastRows) {
@@ -761,9 +791,54 @@ export class Broker {
       const failedAt = this.refreshFailed.get(thread)
       if (this.waking.has(thread) || this.pendingLaunches.has(thread)) kept.push({ ...row, state: 'starting', waiting: undefined, permission: undefined, held: 0 })
       else if (failedAt && Date.now() - failedAt < 10 * 60_000) kept.push({ ...row, state: 'ended', waiting: undefined, permission: undefined })
-      else this.lastRows.delete(thread)
+      else {
+        // It just ended: kept for the list's ended section, the latest 10 (43).
+        this.lastRows.delete(thread)
+        this.recentEnded.delete(thread)
+        this.recentEnded.set(thread, { ...row, state: 'ended', waiting: undefined, permission: undefined, held: 0, canKeys: false })
+        while (this.recentEnded.size > RECENT_ENDED_MAX) this.recentEnded.delete(this.recentEnded.keys().next().value!)
+      }
     }
-    return [...rows, ...kept]
+    // A launch that was only requested shows at once, before its session says hello (43).
+    for (const p of this.pendingLaunches.values()) {
+      if (shown.has(p.threadTs) || this.lastRows.has(p.threadTs)) continue
+      kept.push(startingRow(p))
+    }
+    return [...rows, ...kept, ...[...this.recentEnded.values()].reverse()]
+  }
+
+  /** What the list shows beside a live session, read from the status line, the transcript and the folder (43). */
+  private listFacts(s: Session): Partial<WebSession> {
+    const out: Partial<WebSession> = {}
+    const st = this.status.get(s.key)
+    if (st?.contextPercent !== undefined) out.context = `${Math.round(st.contextPercent)}%`
+    else if (s.contextLabel) out.context = s.contextLabel
+    if (st?.contextSize !== undefined && st.contextUsed !== undefined) out.contextWindow = { size: st.contextSize, used: st.contextUsed }
+    const usage = this.status.usage()
+    if (usage) out.usage = { fiveHour: usage.fiveHour, sevenDay: usage.sevenDay }
+    if (s.transcriptPath) {
+      const now = Date.now()
+      let size = this.transcriptSizes.get(s.transcriptPath)
+      if (!size || now - size.at >= 30_000) {
+        try {
+          size = { at: now, mb: Math.round(statSync(s.transcriptPath).size / 1e5) / 10 }
+          this.transcriptSizes.set(s.transcriptPath, size)
+        } catch {
+          // Not there (yet): the size is left out.
+        }
+      }
+      if (size) out.transcriptMb = size.mb
+    }
+    try {
+      const st = statSync(join(s.cwd, 'SESSION.md'))
+      out.sessionMd = { bytes: st.size, max: 20_000 }
+    } catch {
+      // No SESSION.md: left out.
+    }
+    const running = s.turn?.inFlight ?? []
+    if (running.length) out.running = [...running]
+    if (s.turn && s.stallSince && Date.now() - s.stallSince > QUIET_MS) out.quietMs = Date.now() - s.stallSince
+    return out
   }
 
   private liveRows(): WebSession[] {
@@ -781,6 +856,7 @@ export class Broker {
         effort: s.effort,
         permissionMode: s.permissionMode,
         contextLabel: s.contextLabel,
+        ...this.listFacts(s),
         startedAt: s.startedAt,
         held: s.held?.length ?? 0,
         canKeys: !!s.pane,
@@ -4497,7 +4573,6 @@ export class Broker {
     kill: {
       user: true,
       run: async (c) => {
-        if (c.session.origin !== 'slack') return void (await c.post('`:kill` 은 Slack에서 띄운 세션에만 씁니다.'))
         await this.tmux.killPane(c.pane)
       },
     },
