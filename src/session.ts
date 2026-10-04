@@ -79,7 +79,6 @@ export interface Session {
   /** The timer that reads the background list again while work runs (11). */
   bgTimer?: ReturnType<typeof setTimeout>
   /** The PR review loop is running (75): a Skill call for it, until its round says clean or abort. */
-  reviewLoop?: boolean
   /** The dialog already surfaced for this screen, so it is not posted twice. */
   stallShown?: string
   /** The "still working" notice for this turn, edited in place instead of reposted. */

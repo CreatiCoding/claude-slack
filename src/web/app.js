@@ -620,7 +620,6 @@ function badgeHtml(s) {
   if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
   // Priority (75): waiting on a person > PR review loop > coding > working > background > idle.
   if (s.state === 'waiting') return `<span class="badge waiting">${esc(s.waiting || STATE.waiting)}</span>`
-  if (s.reviewLoop) return `<span class="badge busy">PR 리뷰 루프</span>`
   if (s.state === 'busy' && s.coding) return `<span class="badge busy">코딩 중</span>`
   if (s.state === 'busy') return `<span class="badge busy">${esc(STATE.busy)}</span>`
   if (s.background?.length) return `<span class="badge busy">백그라운드</span>`
