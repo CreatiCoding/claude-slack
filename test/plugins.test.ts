@@ -9,7 +9,7 @@ function plugins() {
   const dir = mkdtempSync(join(tmpdir(), 'plug-'))
   writeFileSync(
     join(dir, 'known_marketplaces.json'),
-    JSON.stringify({ 'cdt-skills': { source: { source: 'github', repo: 'CreatiCoding/cdt-skills' } }, official: { source: { source: 'github', repo: 'anthropics/official' } }, solo: { source: { source: 'git', url: 'git@github.com:creaticoding/solo.git' } } }),
+    JSON.stringify({ 'cdt-skills': { source: { source: 'github', repo: 'alice/cdt-skills' } }, official: { source: { source: 'github', repo: 'anthropics/official' } }, solo: { source: { source: 'git', url: 'git@github.com:creaticoding/solo.git' } } }),
   )
   const v = (market: string, plugin: string, version: string) => mkdirSync(join(dir, 'cache', market, plugin, version), { recursive: true })
   return { dir, v }
@@ -29,11 +29,11 @@ test('세션이 쓰는 버전 = 프로세스 시작 전에 있던 가장 새 버
   const started = Date.now()
   await sleep(30)
   v('cdt-skills', 'cdt-commit', '0.5.0') // only a sub-plugin changed
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'CreatiCoding', processStart: started }), [{ market: 'cdt-skills', version: '0.4.2', latest: '최신' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'alice', processStart: started }), [{ market: 'cdt-skills', version: '0.4.2', latest: '최신' }])
   v('cdt-skills', 'cdt-skills', '0.5.0')
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'CreatiCoding', processStart: started }), [{ market: 'cdt-skills', version: '0.4.2', latest: '0.5.0' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'alice', processStart: started }), [{ market: 'cdt-skills', version: '0.4.2', latest: '0.5.0' }])
   // A new process started after the update runs it: nothing to add.
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'CreatiCoding', processStart: Date.now() + 1000 }), [{ market: 'cdt-skills', version: '0.5.0' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'alice', processStart: Date.now() + 1000 }), [{ market: 'cdt-skills', version: '0.5.0' }])
 })
 
 test('대화에 Claude Code 가 쓴 "Base directory for this skill" 만 증거로 본다(명령 출력 속 경로는 무시)', async () => {
@@ -60,7 +60,7 @@ test('브로커: 목록에 세션이 쓰는 플러그인 버전과 "새로고침
   const started = Date.now()
   await sleep(30)
   v('cdt-skills', 'cdt-skills', '0.5.0')
-  const t = await setup({ pluginsDir: dir, githubUser: 'CreatiCoding', processFacts: async () => ({ startedAt: started, shells: 0 }) })
+  const t = await setup({ pluginsDir: dir, githubUser: 'alice', processFacts: async () => ({ startedAt: started, shells: 0 }) })
   const s = await shim(t.socketPath, {})
   t.broker.webSessions()
   await until(() => !!t.broker.webSessions()[0]?.plugins, '버전을 알아낸다')
@@ -74,12 +74,12 @@ test('4-1 gh 가 로그인한 모든 호스트의 계정을 본다(사내 GHE �
   const { chmodSync } = await import('node:fs')
   const dir = mkdtempSync(join(tmpdir(), 'gh-'))
   const gh = join(dir, 'gh')
-  writeFileSync(gh, `#!/bin/sh\necho "github.com" >&2\necho "  ✓ Logged in to github.com account CreatiCoding (keyring)" >&2\necho "github.toss.bz" >&2\necho "  ✓ Logged in to github.toss.bz account seokho-jeong (keyring)" >&2\nexit 1\n`)
+  writeFileSync(gh, `#!/bin/sh\necho "github.com" >&2\necho "  ✓ Logged in to github.com account alice (keyring)" >&2\necho "github.example.com" >&2\necho "  ✓ Logged in to github.example.com account alice-ghe (keyring)" >&2\nexit 1\n`)
   chmodSync(gh, 0o755)
-  assert.deepEqual(await githubAccounts(gh), ['CreatiCoding', 'seokho-jeong'])
+  assert.deepEqual(await githubAccounts(gh), ['alice', 'alice-ghe'])
   // A GHE marketplace (address path has the GHE account) counts as mine.
-  writeFileSync(join(dir, 'known_marketplaces.json'), JSON.stringify({ tossy: { source: { source: 'git', url: 'https://github.toss.bz/seokho-jeong/tossy.git' } } }))
-  assert.deepEqual(userMarkets(dir, 'seokho-jeong'), ['tossy'])
+  writeFileSync(join(dir, 'known_marketplaces.json'), JSON.stringify({ 'example-market': { source: { source: 'git', url: 'https://github.example.com/alice-ghe/example-market.git' } } }))
+  assert.deepEqual(userMarkets(dir, 'alice-ghe'), ['example-market'])
 })
 
 test('4-1 스킬 줄은 읽은 위치에서 이어 읽는다', async () => {
