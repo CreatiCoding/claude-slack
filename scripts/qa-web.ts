@@ -1060,6 +1060,24 @@ for (const [label, size, phone] of [
   await ctx.close()
 }
 
+// Final look (4차 70): PC and phone, light and dark, a conversation open. Saved outside the repository.
+{
+  const shotDir = mkdtempSync(join(tmpdir(), 'qa-shots-'))
+  for (const [name, vp, mobile] of [['pc', { width: 1280, height: 800 }, false], ['phone', { width: 390, height: 844 }, true]] as const) {
+    for (const scheme of ['light', 'dark'] as const) {
+      const ctx = await browser.newContext({ viewport: vp, isMobile: mobile, hasTouch: mobile, colorScheme: scheme })
+      const page = await ctx.newPage()
+      await page.goto(base + '/#' + A)
+      await page.waitForSelector('.item', { timeout: 5000 }).catch(() => {})
+      await page.waitForTimeout(600)
+      const file = join(shotDir, `${name}-${scheme}.png`)
+      await page.screenshot({ path: file })
+      console.log(`SHOT ${file}`)
+      await ctx.close()
+    }
+  }
+}
+
 await browser.close()
 server.close()
 localServer.close()
