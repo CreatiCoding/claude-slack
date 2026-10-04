@@ -144,7 +144,14 @@ body { margin: 0; height: 100%; color: var(--text); background: var(--side); fon
 /* Korean: break between words, not inside them ("있어/요"); only a long path or URL breaks mid-way. */
 body, input, textarea, button { word-break: keep-all; overflow-wrap: anywhere; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
-button:not(:disabled), [role="button"], a, summary { cursor: pointer; }
+/* Pointer cursors (68): the controls, on a mouse device; a disabled button keeps the default cursor, except send. */
+@media (pointer: fine) {
+  button:not(:disabled), a, summary, label[for], [role="button"], [role="menuitem"], [role="tab"], [role="option"], [role="checkbox"], [role="switch"] { cursor: pointer; }
+  button:disabled:not(.send) { cursor: not-allowed; }
+  .img, .img * { cursor: zoom-in; }
+}
+/* A press with the mouse leaves no ring; the keyboard (Tab) keeps the browser ring (68). */
+:focus:not(:focus-visible) { outline: none; }
 a { color: var(--accent); }
 [hidden] { display: none !important; }
 .ic { display: inline-block; flex: none; width: 16px; height: 16px; vertical-align: -0.15em; }
@@ -492,7 +499,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .scrim.dim { background: var(--scrim); }
 .menu { position: fixed; z-index: var(--z-menu); min-width: 180px; max-width: min(66vw, 320px); max-height: 60vh; overflow-y: auto; scrollbar-width: none; background: var(--bg); border-radius: var(--r-20); box-shadow: var(--sh-menu); padding: 10px 20px; }
 .menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 0; border-radius: var(--r-8); text-align: left; color: var(--text); font-size: var(--fs-m); line-height: 22.5px; }
-.menu .mi:hover, .menu .mi:focus-visible { background: var(--hover); outline: none; }
+.menu .mi:focus-visible { background: var(--hover); outline: none; }
+@media (hover: hover) and (pointer: fine) { .menu .mi:hover { background: var(--hover); } }
 .menu .mi .ic { color: var(--muted); }
 .menu .mi.danger, .menu .mi.danger .ic { color: var(--red); }
 .menu .mi .end { margin-left: auto; color: var(--muted); font-size: var(--fs-s); display: inline-flex; align-items: center; gap: 4px; }
