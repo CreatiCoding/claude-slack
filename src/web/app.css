@@ -510,6 +510,10 @@ html.kbd-open .composer { padding-bottom: 10px; }
 /* Phone: the same menu, as a sheet from the bottom. On a PC, a sheet sits in the middle at 640px. */
 .menu.sheet { left: 10px; right: 10px; bottom: 10px; top: auto; max-width: none; width: calc(100% - 20px); border-radius: var(--r-28); padding: 0 8px calc(16px + env(safe-area-inset-bottom)); }
 .menu.sheet .mi { min-height: 44px; }
+/* Opening: the sheet comes up from below (67); closing is not animated yet. Reduced motion turns it off. */
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
+.menu.sheet { animation: sheet-up .28s cubic-bezier(.2, .9, .3, 1); }
+@media (prefers-reduced-motion: reduce) { .menu.sheet { animation: none; } }
 /* The sheet's grab handle (67): 48×4 in a 16px row, centred. */
 .menu.sheet::before { content: ''; display: block; width: 48px; height: 4px; margin: 6px auto 6px; border-radius: 2px; background: #e5e8eb; }
 @media (prefers-color-scheme: dark) { .menu.sheet::before { background: #3c3c47; } }
