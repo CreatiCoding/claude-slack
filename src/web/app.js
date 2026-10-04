@@ -573,16 +573,14 @@ async function loadSideLists() {
 }
 
 // ------------------------------------------------------------------ time
+// Relative time (56): 방금 · N분 전 · N시간 전 (under a day) · 어제 (under two) · M/D after that.
 function ago(ms) {
   const s = Math.max(0, (Date.now() - ms) / 1000)
   if (s < 60) return '방금'
   if (s < 3600) return `${Math.floor(s / 60)}분 전`
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`
+  if (s < 172800) return '어제'
   const d = new Date(ms)
-  const today = new Date()
-  const days = Math.floor((new Date(today.toDateString()) - new Date(d.toDateString())) / 86400000)
-  if (days === 0) return `${Math.floor(s / 3600)}시간 전`
-  if (days === 1) return '어제'
-  if (days < 7) return `${days}일 전`
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 const hhmm = (at) => new Date(at).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
@@ -591,10 +589,13 @@ const hhmm = (at) => new Date(at).toLocaleTimeString('ko-KR', { hour: 'numeric',
 const STATE = { starting: '뜨는 중', idle: '대기', busy: '작업 중', waiting: '응답 대기', ended: '종료됨' }
 const nameOf = (s) => s.title || (s.cwd || '').split('/').pop() || s.cwd || '세션'
 const folderOf = (cwd) => (cwd || '').replace(/^\/Users\/[^/]+/, '~')
+// How long a session has waited on a person (55): seconds, minutes, then hours and minutes.
 function waitedFor(s) {
   if (!s.waitingSince) return s.waiting || STATE.waiting
-  const m = Math.floor((Date.now() - s.waitingSince) / 60000)
-  return m < 1 ? `${s.waiting || '응답 대기'}` : `${m}분째 기다리는 중`
+  const sec = Math.max(0, Math.floor((Date.now() - s.waitingSince) / 1000))
+  if (sec < 60) return `${sec}초째`
+  if (sec < 3600) return `${Math.floor(sec / 60)}분째`
+  return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분째 기다리는 중`
 }
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
@@ -1045,7 +1046,8 @@ function renderSizeBanner(s) {
   const locked = mb >= 100
   const input = $('input')
   input.disabled = locked
-  input.placeholder = locked ? '대화 기록이 너무 커서 입력을 막았어요 · 가벼운 복제로 이어가요' : ''
+  // The composer's hint (57): busy says the message waits for the end; a PC also shows the keys.
+  input.placeholder = locked ? '대화 기록이 너무 커서 입력을 막았어요 · 가벼운 복제로 이어가요' : composerHint(s)
   banner.hidden = !(mb >= 50)
   if (mb >= 50) {
     banner.innerHTML = locked
@@ -1060,6 +1062,12 @@ function renderSizeBanner(s) {
     }
     if (locked && !document.querySelector('.size-window')) showSizeWindow(s, Math.round(mb), true)
   } else document.querySelector('.size-window')?.remove()
+}
+/** The composer's placeholder (57): the send hint, the state, and on a PC the keys. */
+function composerHint(s) {
+  const busy = s && (s.state === 'busy' || s.state === 'waiting')
+  const head = busy ? '작업 중 · 끝나면 전달해요' : '메시지 보내기'
+  return hasMouse ? `${head} (Enter 보내기 · Shift+Enter 줄바꿈)` : head
 }
 /** The window for a long conversation (44). Over 100 MB it cannot be closed: a light copy is the only way on. */
 function showSizeWindow(s, mb, locked) {
@@ -2247,10 +2255,11 @@ function renderComposerBits() {
   linkChip('link', 'Slack 스레드', links?.threads, links ? undefined : withToken('/go/thread?ts=' + encodeURIComponent(s.thread)))
   if (s.held) chip('play', `지금 보내기 (${s.held})`, () => command(s, 'sendnow'), { hot: true })
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', hasMouse ? '중단 · Esc' : '중단', () => command(s, 'esc'))
-  if (s.canKeys) chip('screen', '화면', () => showScreen(s))
+  // Order (57): paste, skills, /btw, then the ones only this app has (화면, /compact, /context, /clear).
+  if (navigator.clipboard?.read) chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('spark', '스킬', (e) => pickSkill(s, e.currentTarget))
-  chip('image', '이미지 붙여넣기', pasteFromClipboard)
   chip('chat', '/btw', () => prefill(':btw '))
+  if (s.canKeys) chip('screen', '화면', () => showScreen(s))
   chip('clipboard', '/compact', () => sendText(s, '/compact'))
   chip('search', '/context', () => sendText(s, '/context'))
   chip('refresh', '/clear', () => confirm('대화를 비울까요? (/clear)') && sendText(s, '/clear'))
@@ -2333,6 +2342,12 @@ $('btn-attach').hidden = false
 const picker = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple: true, hidden: true })
 document.body.append(picker)
 $('btn-attach').addEventListener('click', () => picker.click())
+// Eight pictures at most per message: the button is off once they are full (57).
+function syncAttachButton() {
+  const full = (pending.get(current) ?? []).length >= PIC_MAX
+  $('btn-attach').disabled = full
+  $('btn-attach').title = full ? '이미지는 한 번에 8장까지 보낼 수 있어요' : '사진 첨부'
+}
 picker.addEventListener('change', () => {
   addPictures([...picker.files])
   picker.value = ''
@@ -2402,9 +2417,9 @@ async function addPictures(files) {
  *  unless the original is already small (a GIF keeps its frames). */
 async function shrinkPicture(f) {
   const dataOf = (blob) => new Promise((res, rej) => Object.assign(new FileReader(), { onload: (e) => res(e.target.result), onerror: rej }).readAsDataURL(blob))
-  if (f.size <= 300_000 || f.type === 'image/gif') return { name: f.name, type: f.type, data: await dataOf(f), url: URL.createObjectURL(f) }
+  // Every picture goes through the shrink (57): no exception for small files or for GIFs.
   const bmp = await createImageBitmap(f)
-  const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height))
+  const scale = Math.min(1, 1568 / Math.max(bmp.width, bmp.height)) // the long side, always (57)
   const c = Object.assign(document.createElement('canvas'), { width: Math.round(bmp.width * scale), height: Math.round(bmp.height * scale) })
   const ctx = c.getContext('2d')
   ctx.fillStyle = '#fff'
@@ -2415,6 +2430,7 @@ async function shrinkPicture(f) {
   return { name: f.name, type: small.type, data: await dataOf(small), url: URL.createObjectURL(small) }
 }
 function renderPending() {
+  syncAttachButton()
   let box = $('pending')
   if (!box) {
     box = Object.assign(document.createElement('div'), { id: 'pending', className: 'pending' })
@@ -3060,7 +3076,7 @@ function newSession() {
   el.className = 'newsess'
   el.innerHTML = `
     <div class="ns-head"><h2>새 세션</h2><button class="icon-btn ns-close" type="button" aria-label="닫기">${icon('close')}</button></div>
-    <textarea class="ns-prompt" rows="4" placeholder="무엇을 할까요? (비워 두고 시작해도 돼요)"></textarea>
+    <textarea class="ns-prompt" rows="4" placeholder="무엇을 할까요? (Enter 시작 · Shift+Enter 줄바꿈 · 비워도 돼요)"></textarea>
     <label class="ns-label">폴더</label>
     <div class="ns-path"><button class="icon-btn ns-up" type="button" aria-label="상위 폴더">${icon('up')}</button><input class="search ns-cwd" spellcheck="false" autocomplete="off"></div>
     <div class="ns-dirs" role="listbox" aria-label="하위 폴더"></div>

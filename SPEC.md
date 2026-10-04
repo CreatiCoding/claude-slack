@@ -2709,6 +2709,21 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-110 화면 항목 일부: 입력칸·시간 표기·대기 시간·사진 (55·56·57, 일부)
+- 의무: MUST
+- 액터: 웹
+- 처리 규칙:
+  1. 입력칸 안내: `메시지 보내기`, 작업 중이면 `작업 중 · 끝나면 전달해요`, PC 는 끝에 `(Enter 보내기 · Shift+Enter 줄바꿈)`. 새 세션 입력 안내 `무엇을 할까요? (Enter 시작 · Shift+Enter 줄바꿈 · 비워도 돼요)`.
+  2. 칩 순서: 이미지 붙여넣기(클립보드 읽기가 될 때만) → 스킬 → /btw → 화면(PC·폰 모두, 살아 있는 세션) → /compact → /context → /clear.
+  3. 사진 첨부 버튼 라벨 `사진 첨부`. 여덟 장이면 비활성.
+  4. 사진은 늘 긴 변 1,568 px 로 줄인다(작은 파일·GIF 예외 없음).
+  5. 지난 시간: `방금`(<1분) · `N분 전` · `N시간 전`(하루 안) · `어제`(이틀 안) · `M/D`.
+  6. 기다린 시간: `N초째` · `N분째` · `H시간 M분째 기다리는 중`.
+- 미구현(다음 라운드): 55 의 대부분(대화 행 칩·끝난 세션 칩과 문구, 긴 글 접기 `전체 보기 · N줄 더`, 말풍선 폭·시각 표기, 권한 카드 안내·상세, 코드 블록 diff 색, 빈 대화 문구는 현재 코드에 없음), 56 의 대부분(폰 행 3줄·밀기·꾹 누르기, 세션 메뉴 순서 정리, 정렬 규칙, 구역 머리 문구), 57 의 나머지(보낸 것 취소 칩, ↑↓ 기록의 대화 기록 출처, 첨부 썸네일 360 px, 새 세션 폴더 자동 완성, ⌘K 줄 설명), AGENTS.md 칩.
+- 수용 기준: AC-180
+- 근거: `src/web/app.js` `composerHint`·`chip` 순서·`syncAttachButton`·`shrinkPicture`·`ago`·`waitedFor`
+- 추적: REQ-F-109
+
 ### REQ-F-109 문구·수치·기기 보관·능력 알림·복구 (58·59·60)
 - 의무: MUST
 - 액터: 브로커, 웹, 관리 페이지
@@ -5665,6 +5680,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-180 | REQ-F-110 | 입력칸 안내·칩 순서·사진 8장 비활성·긴 변 1,568·지난 시간·대기 시간 표기 | `scripts/qa-web.ts`(230/230), 코드 확인 | 위 규칙대로 나온다 |
 | AC-179 | REQ-F-109 | 웹 문구가 해요체, 1,500 ms 저장, 분당 120 화면 오류 상한, hello.caps 로 QR 안내, /recovery 가 열린다, dedupe 는 나중에 뜬 쪽을 남긴다 | `test/web-metrics.test.ts`(상한), `test/usability.test.ts`(문구), 나머지는 코드 확인 | 위 규칙대로 나온다 |
 | AC-178 | REQ-F-108 | 그룹 이름 40자, 접힘이 그룹 파일에 남음, 기본 프롬프트는 없으면 기본값·공백 저장은 기본값 | `test/web.test.ts` 그룹·기본 프롬프트(54), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-177 | REQ-F-107 | 열린 턴과 바쁜 시간이 규칙대로 계산되고, 분위수는 floor(q·n), 웹 창이 PC·폰에서 열린다 | `test/stats.test.ts`, `scripts/qa-web.ts` 53 묶음 | 위 규칙대로 나온다 |
