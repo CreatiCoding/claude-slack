@@ -488,6 +488,8 @@ test('지난 기록(47): 끝난 세션의 대화가 지난 기록으로 남고, 
   const archived = (await import('../src/archive.ts')).findArchiveByThread(live.threadTs, (t.broker as unknown as { cfg: { archiveDir: string } }).cfg.archiveDir)
   assert.ok(archived, '끝난 세션의 대화가 지난 기록으로 남는다')
   assert.ok(archived!.archive.messages.some((m) => m.text === '첫 질문입니다'))
+  // Not only the words: each event is kept whole, with its kind (47).
+  assert.ok(archived!.archive.messages.some((m) => m.event?.type === 'user' && m.event?.text === '첫 질문입니다'))
   s.conn.close()
   t.close()
 })

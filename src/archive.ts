@@ -8,6 +8,8 @@ export interface ArchivedMessage {
   bot: boolean
   text: string
   blocks?: unknown[]
+  /** The whole event (47): tools, cards, notices too, so the past record reads as the conversation did. */
+  event?: Record<string, unknown>
 }
 
 export interface SessionArchive {

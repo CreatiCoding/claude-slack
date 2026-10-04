@@ -5216,9 +5216,12 @@ export class Broker {
   private archiveEnded(session: Session): void {
     const dir = this.cfg.archiveDir
     const messages: ArchivedMessage[] = []
+    // Every kind of event is kept (47), not only what people and Claude said: a tool, a card or a notice is part of the record.
     for (const e of this.events.since(session.threadTs, 0)) {
-      if (e.type === 'user') messages.push({ ts: e.ts, user: e.via, bot: false, text: e.text })
-      else if (e.type === 'text') messages.push({ ts: String(e.at), bot: true, text: e.text })
+      const { seq: _seq, at, ...body } = e
+      const text = 'text' in body && typeof body.text === 'string' ? body.text : 'output' in body && typeof body.output === 'string' ? body.output : 'title' in body ? String(body.title) : ''
+      const user = e.type === 'user' ? e.via : undefined
+      messages.push({ ts: e.type === 'user' || e.type === 'msg' ? (e.ts as string) : String(at), user, bot: e.type !== 'user', text, event: body as Record<string, unknown> })
     }
     if (!messages.length || findArchiveByThread(session.threadTs, dir)) return
     try {
