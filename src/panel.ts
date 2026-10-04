@@ -19,7 +19,7 @@ export const PERMISSION_MODES: Array<{ value: string; label: string }> = [
   { value: 'plan', label: 'plan · 계획만 세우고 실행 안 함' },
   { value: 'auto', label: 'auto · 거의 모두 자동 승인' },
   // Not a Claude Code mode: the broker answers the permission requests itself (42, 전부 허용).
-  { value: 'autoAllow', label: '전부 허용 · 권한 요청을 브로커가 허용' },
+  { value: 'autoAllow', label: '전부 허용' },
 ]
 
 /** Slack's per-actions-block element limit, minus room for the multi-select confirm button. */

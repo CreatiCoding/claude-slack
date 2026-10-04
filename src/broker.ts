@@ -2522,7 +2522,7 @@ export class Broker {
         if (denial) await this.reportDenial(session, ev.toolUseId, denial.reason)
         if (session.silentTools?.delete(ev.toolUseId)) break
         const images = (ev.images ?? []).map((im) => this.images.put(session.threadTs, Buffer.from(im.data, 'base64'), im.mediaType)).filter((x): x is WebImage => !!x)
-        this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 20_000), ...(images.length ? { images } : {}) })
+        this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 4_000), ...(images.length ? { images } : {}) })
         turn.taskEnd(ev.toolUseId, ev.output, ev.isError)
         // The moment Claude Code itself would hand over a queued message.
         await this.releaseHeldIfIdle(session, 'tool result')

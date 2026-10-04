@@ -2939,12 +2939,13 @@ function sessionItems(s) {
     { label: '열기', icon: 'chat', run: () => open(s.thread) },
     { label: '이름 변경', icon: 'edit', run: () => renameSession(s) },
     {
-      label: '설정 (모델·권한)',
+      label: '설정',
       icon: 'tool',
       sub: () => [
         { label: '모델', icon: 'bot', end: s.model || '', sub: () => opt(options.models, s.model, 'model') },
         { label: 'effort', icon: 'spark', end: s.effort || '', sub: () => opt(options.efforts, s.effort, 'effort') },
-        { label: '권한 모드', icon: 'lock', end: s.permissionMode || '', sub: () => opt(options.modes, s.permissionMode, 'mode') },
+        { label: '권한 모드', icon: 'lock', end: s.permissionMode || '', sub: () => opt(options.modes, s.autoAllow ? 'autoAllow' : s.permissionMode, 'mode') },
+        { label: s.autoAllow ? '전부 허용 끄기' : '전부 허용 켜기', icon: 'bolt', on: s.autoAllow, run: () => toggleAuto(s) },
         'sep',
         { label: '상태 새로 읽기', icon: 'refresh', run: () => command(s, 'status') },
       ],
@@ -2963,7 +2964,6 @@ function sessionItems(s) {
         { label: '새 그룹…', icon: 'plus', run: () => newGroup(s.thread) },
       ],
     },
-    { label: s.autoAllow ? '전부 허용 끄기' : '전부 허용 켜기', icon: 'bolt', on: s.autoAllow, run: () => toggleAuto(s) },
     'sep',
     { label: '종료', icon: 'ended', danger: true, run: () => confirm(`"${nameOf(s)}" 세션을 종료할까요?`) && command(s, 'exit') },
     { label: '폴더 버리고 종료', icon: 'folder', danger: true, run: () => trashFolder(s) },
