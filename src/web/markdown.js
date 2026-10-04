@@ -186,7 +186,7 @@ function blocks(text, opts) {
           break
         }
         const task = /^\[( |x|X)\]\s+(.*)$/.exec(m[3])
-        const body = task ? `<span class="task ${task[1] === ' ' ? '' : 'done'}">${task[1] === ' ' ? '☐' : '☑'}</span> ${inline(esc(task[2]), opts)}` : inline(esc(m[3]), opts)
+        const body = task ? `<span class="task ${task[1] === ' ' ? '' : 'done'}">${icon(task[1] === ' ' ? 'box' : 'boxChecked')}</span> ${inline(esc(task[2]), opts)}` : inline(esc(m[3]), opts)
         items.push((m[1].length >= 2 ? '<span class="indent"></span>' : '') + body)
         i++
       }

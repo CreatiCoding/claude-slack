@@ -9,6 +9,8 @@ const P = {
   refresh: '<path d="M13 8a5 5 0 11-1.5-3.6"/><path d="M13 2.5v3h-3"/>',
   bolt: '<path d="M9 1.5L3.5 9H8l-1 5.5L12.5 7H8z"/>',
   check: '<path d="M3 8.5l3 3 7-7"/>',
+  box: '<rect x="3" y="3" width="10" height="10" rx="2"/>',
+  boxChecked: '<rect x="3" y="3" width="10" height="10" rx="2"/><path d="M5.5 8.2l1.8 1.8 3.2-3.4"/>',
   alert: '<path d="M8 2l6.5 11.5h-13z"/><path d="M8 6.5v3M8 11.5v.01"/>',
   lock: '<rect x="3" y="7" width="10" height="7" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>',
   keyboard: '<rect x="1.5" y="4" width="13" height="8" rx="1.5"/><path d="M4 7h.01M6.5 7h.01M9 7h.01M11.5 7h.01M5 9.5h6"/>',
