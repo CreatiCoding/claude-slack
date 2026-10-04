@@ -1454,7 +1454,7 @@ scroller.addEventListener('touchend', () => (kbdDragY = null))
 function timeEl(at) {
   const d = document.createElement('div')
   d.className = 'time'
-  d.textContent = hhmm(at)
+  d.textContent = stamp(at)
   d.title = new Date(at).toLocaleString('ko-KR')
   return d
 }
@@ -1514,6 +1514,7 @@ function drawConvo(evs, { live = false } = {}) {
     view.start = Math.max(0, view.rows.length - WINDOW)
   }
   flush(before)
+  olderHint()
   renderTodos()
   renderWaitingNote()
   renderActivity()
@@ -1723,6 +1724,14 @@ function dismissChoices(ts) {
 }
 
 /** Scrolled to the top: draw the previous 150 rows above, keeping what is on screen where it is. */
+// “앞의 대화 N줄 · 위로 올리면 더 보여요” above the first drawn row while older rows wait (72).
+function olderHint() {
+  let el = $('log').querySelector(':scope > .older-hint')
+  const left = view ? view.start : 0
+  if (!left) return el?.remove()
+  if (!el) $('log').prepend((el = Object.assign(document.createElement('div'), { className: 'older-hint' })))
+  el.textContent = `앞의 대화 ${left}줄 · 위로 올리면 더 보여요`
+}
 function showOlder() {
   const from = Math.max(0, view.start - WINDOW)
   const frag = document.createDocumentFragment()
@@ -1734,6 +1743,7 @@ function showOlder() {
   const h = scroller.scrollHeight
   $('log').prepend(frag)
   scroller.scrollTop += scroller.scrollHeight - h
+  olderHint()
 }
 
 function draw(row) {
@@ -1897,7 +1907,7 @@ function imagesHtml(images) {
       const h = im.h || 240
       // The bubble shows the small copy when there is one (57); the full picture opens on a press.
       const src = im.thumb || im.data || ''
-      return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 480)}px)" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}" data-key="${esc(`${current}:${im.id}`)}"`} decoding="async"></button>`
+      return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 560, Math.round(420 * w / h))}px)" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}" data-key="${esc(`${current}:${im.id}`)}"`} decoding="async"></button>`
     })
     .join('')}</div>`
 }
@@ -1955,7 +1965,7 @@ function openViewer(src) {
   let lastTap = 0
   const draw = () => (img.style.transform = `translate(${x}px, ${y}px) scale(${scale})`)
   const zoomAt = (cx, cy, next) => {
-    next = Math.max(1, Math.min(8, next))
+    next = Math.max(1, Math.min(6, next))
     const r = box.getBoundingClientRect()
     const px = cx - r.width / 2 - x
     const py = cy - r.height / 2 - y
@@ -2108,8 +2118,8 @@ function openHtmlViewer(html, name) {
     box.querySelector('.hp-zoom').textContent = Math.round(zoom * 100) + '%'
   }
   draw()
-  box.querySelector('.hp-minus').addEventListener('click', () => ((zoom = Math.max(0.3, zoom - 0.1)), draw()))
-  box.querySelector('.hp-plus').addEventListener('click', () => ((zoom = Math.min(3, zoom + 0.1)), draw()))
+  box.querySelector('.hp-minus').addEventListener('click', () => ((zoom = Math.max(0.5, zoom - 0.25)), draw()))
+  box.querySelector('.hp-plus').addEventListener('click', () => ((zoom = Math.min(3, zoom + 0.25)), draw()))
   const close = () => (box.remove(), removeEventListener('keydown', onKey))
   const onKey = (e) => e.key === 'Escape' && close()
   addEventListener('keydown', onKey)
@@ -2125,7 +2135,9 @@ const diffCounts = (inner) => {
   const del = lines.filter((l) => /^-(?!-- )/.test(l)).length
   return `<span class="dc">+${add} −${del}</span>`
 }
-const codeBoxHtml = (inner) => `<div class="codebox">${/^(@@ |\+\+\+ |--- )/m.test(inner) ? diffCounts(inner) : ''}<pre><code>${diffInner(inner)}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
+// Read output (`   12<TAB>text`): the line number gets its own column (72).
+const readNumbers = (html) => (html.split('\n').filter((l) => /^\s*\d+\t/.test(l)).length >= 2 ? html.split('\n').map((l) => l.replace(/^(\s*\d+)\t/, '<span class="ln">$1</span>')).join('\n') : html)
+const codeBoxHtml = (inner) => `<div class="codebox">${/^(@@ |\+\+\+ |--- )/m.test(inner) ? diffCounts(inner) : ''}<pre><code>${readNumbers(diffInner(inner))}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
 
 function noticeEl(ic, text, { markdown = false } = {}) {
   const el = document.createElement('div')
