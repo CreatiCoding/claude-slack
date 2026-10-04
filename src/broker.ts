@@ -4348,12 +4348,15 @@ export class Broker {
     }
     if (mode === 'cut') content = cutUtf8(content, LIGHTFORK_FILE_MAX)
     const pointer = `[이전 대화에서 이어감 — 원래 스레드: ${s.threadTs}, 필요하면 read_session 도구로 전체 맥락을 더 읽을 수 있습니다]\n\n${truncate(content, LIGHTFORK_MAX_CHARS)}`
-    const newThreadTs = await this.launchSession({ cwd: s.cwd, prompt: pointer, user, extraArgs: this.settingsArgs(s), title: s.manualTitle ?? s.title })
+    // The copy keeps the name without the rest suffix, and the original is named "<name> (휴면)" (46).
+    const baseName = (s.manualTitle ?? s.title ?? basename(s.cwd)).replace(/ \((휴면|이어서)\)$/, '')
+    const newThreadTs = await this.launchSession({ cwd: s.cwd, prompt: pointer, user, extraArgs: this.settingsArgs(s), title: baseName })
     if (!newThreadTs) return void (await c.post('❌ 가벼운 복제로 새 세션을 열지 못했어요. 세션을 띄우지 못했어요'))
     s.handedOffTo = newThreadTs
     this.copyGroup(s.threadTs, newThreadTs)
     // The original rests (45); a locked one (100 MB) is ended, since it cannot take input any more.
     s.resting = true
+    s.manualTitle = `${baseName} (휴면)`
     if (s.sizeBlocked && s.pane) await this.tmux.typeLine(s.pane, '/exit')
     this.lastWebThread = newThreadTs
     this.changed()
