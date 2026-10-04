@@ -647,7 +647,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .qr-note { font-size: var(--fs-s); color: var(--muted); }
 .crash { position: absolute; inset: 0; z-index: 30; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; background: var(--bg); color: var(--text); padding: 24px; text-align: center; }
 .main { position: relative; }
-body > .crash { position: fixed; font: 15px/1.5 -apple-system, system-ui, sans-serif; }
+body > .crash { position: fixed; font: var(--fs-m)/1.5 -apple-system, system-ui, sans-serif; }
+.crash p { margin: 0; }
 
 /* PR state icons: open green, merged purple, closed red */
 .menu .mi.pr-open .ic { color: #2f9a4f; }

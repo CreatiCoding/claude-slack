@@ -69,7 +69,7 @@
     var box = document.createElement('div')
     box.id = 'boot-crash'
     box.className = 'crash'
-    box.innerHTML = '<p>화면을 열지 못했어요. (오류 ' + code + ')</p><p><button type="button" onclick="location.reload()">다시 열기</button> <button type="button" onclick="location.hash=\'\';location.reload()">세션 목록으로</button></p>'
+    box.innerHTML = '<p>화면을 열지 못했어요. (오류 ' + code + ')</p><p><button type="button" class="btn primary" onclick="location.reload()">다시 열기</button> <button type="button" class="btn" onclick="location.hash=\'\';location.reload()">세션 목록으로</button></p>'
     document.body.appendChild(box)
   }
 </script>
