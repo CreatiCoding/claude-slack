@@ -293,6 +293,7 @@ const REATTACH_POLL_MS = 200
 /** Older than this and the machine has been off long enough that reopening is noise, not recovery. */
 const REVIVE_MAX_AGE_MS = 12 * 60 * 60 * 1000
 /** A dozen sessions waking at once would be a surprise; the newest are the ones in use. */
+const BACKGROUND_RECHECK_MS = 30_000
 const REVIVE_MAX = 5
 /** Live sessions have their clock refreshed about once a minute, so anything this far behind the newest was already gone at shutdown. */
 const ALIVE_AT_SHUTDOWN_MS = 3 * 60 * 1000
@@ -2421,10 +2422,7 @@ export class Broker {
       for (const id of abandoned) this.emitEvent(session.threadTs, { type: 'tool_end', id, ok: false, output: '(중단됨)' })
       session.turn = undefined
       // Work the turn started may still run: the list says 백그라운드 then (75).
-      this.backgroundTasks(session).then((tasks) => {
-        session.bgTitles = tasks.map((t) => t.label)
-        this.changed()
-      }, () => {})
+      this.watchBackground(session)
     }
     // "sent" after a reply-tool call is the model narrating the tool result, not an answer.
     const echo = repliedThisTurn && isToolEcho(finalText)
@@ -3161,6 +3159,25 @@ export class Broker {
 
   private bgTrackers = new Map<string, BackgroundTracker>()
   /** Background work this session's process started and has not finished (by key+pid: a refresh keeps the key). */
+  /**
+   * The background list (75, 11): read again every 30 s while work is still running, and cleared the moment it is
+   * over. It used to be read once at the turn's end, so a finished task stayed listed until the next turn.
+   */
+  private watchBackground(session: Session): void {
+    if (session.bgTimer) clearTimeout(session.bgTimer)
+    session.bgTimer = undefined
+    this.backgroundTasks(session).then(
+      (tasks) => {
+        const titles = tasks.map((t) => t.label)
+        const changed = titles.length !== (session.bgTitles?.length ?? 0)
+        session.bgTitles = titles.length ? titles : undefined
+        if (changed) this.changed()
+        if (titles.length && !session.ended) session.bgTimer = setTimeout(() => this.watchBackground(session), BACKGROUND_RECHECK_MS)
+      },
+      () => {},
+    )
+  }
+
   async backgroundTasks(session: Session): Promise<BackgroundTask[]> {
     if (!session.transcriptPath) return []
     const k = `${session.key}:${session.pid}:${session.transcriptPath}`
@@ -5249,6 +5266,8 @@ export class Broker {
     if (session.ended) return
     session.ended = true
     session.reviewLoop = undefined // the loop ends with the session (75)
+    if (session.bgTimer) clearTimeout(session.bgTimer)
+    session.bgTitles = undefined
     this.archiveEnded(session)
     this.logAt('INFO', 'session', `ended: ${why}`, this.tag(session, { held: session.held?.length ?? 0 }))
     this.clearStall(session)
