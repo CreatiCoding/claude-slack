@@ -588,6 +588,8 @@ function waitedFor(s) {
   return m < 1 ? `${s.waiting || '응답 대기'}` : `${m}분째 기다리는 중`
 }
 function badgeHtml(s) {
+  // Put to rest and not working: a grey 휴면 badge (45).
+  if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
   const text = s.state === 'waiting' ? (isPhone() ? s.waiting || STATE.waiting : waitedFor(s)) : STATE[s.state] || s.state
   return `<span class="badge ${s.state}">${esc(text)}</span>`
 }
@@ -2664,6 +2666,7 @@ function sessionItems(s) {
       ],
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
+    { label: s.resting ? '휴면 풀기' : '휴면으로 두기', icon: 'dot', run: () => command(s, s.resting ? 'rest off' : 'rest on') },
     { label: '새로고침', icon: 'refresh', run: () => refreshSession(s) },
     {
       label: `그룹: ${groups.groups.find((g) => g.items.includes(s.thread))?.name ?? '없음'}`,

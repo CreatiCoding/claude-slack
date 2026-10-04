@@ -296,6 +296,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .size-card { background: var(--card); color: var(--text); border-radius: 14px; box-shadow: var(--shadow); padding: 18px 20px; max-width: 360px; width: 100%; }
 .size-card p { margin: 6px 0; }
 .size-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+.badge.resting { color: var(--muted); background: var(--soft); }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

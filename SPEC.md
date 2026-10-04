@@ -2709,6 +2709,20 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-099 휴면 (45)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 트리거: 명령 `rest on|off`(웹 세션 메뉴 `휴면으로 두기`/`휴면 풀기`, 패널의 `💤 휴면으로 두기`/`▶️ 휴면 풀기`)
+- 처리 규칙:
+  1. `rest on` 은 세션의 `resting` 을 켜고, `rest off` 는 끈다. 응답 note 는 `휴면으로 뒀어요` / `휴면을 풀었어요`.
+  2. 휴면은 세션을 멈추지 않는다. 표시만 바꾼다: `resting` 이고 상태가 `busy` 가 아니면 회색 `휴면` 배지를 단다(목록 점도 회색).
+  3. 글이 세션에 전달되면(`deliver`) 풀린다. 터미널에서 입력하면(`UserPromptSubmit` 훅) 풀린다.
+  4. 휴면은 재시작 기록(`revive.ts` `resting`)에 남고 `restoreFromRecord` 에서 되살린다.
+- 출력: `WebSession.resting`, 패널 버튼
+- 수용 기준: AC-169
+- 근거: `src/broker.ts` 명령 `rest`·`deliver`·`trackStatus`·`liveRows`, `src/panel.ts` 넘침 메뉴, `src/web/app.js` `badgeHtml`·`sessionItems`
+- 추적: REQ-F-097, REQ-F-102(복제의 원본 휴면)
+
 ### REQ-F-098 사용량 게이지와 긴 대화 한도 (44)
 - 의무: MUST
 - 액터: 웹
@@ -5519,6 +5533,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-169 | REQ-F-099 | 휴면을 켜면 회색 배지, 글이 가면 풀린다, 터미널 입력도 풀린다. 재시작 기록에 남는다 | `test/broker.test.ts` 의 45 묶음, `scripts/qa-web.ts` 45 묶음(PC·폰) | 위 규칙대로 나온다 |
 | AC-168 | REQ-F-098 | 게이지 다섯 개의 값과 색, 50MB 띠와 창(세션마다 한 번), PC 설명 상자, 폰 토스트, 폰 폭에서 가로 넘침 없음 | `scripts/qa-web.ts` 의 44 묶음 | 위 규칙대로 나온다 |
 | AC-167 | REQ-F-097 | 끝난 세션은 ended 로 목록에 남고, 뜨는 중인 대화는 starting 으로 보인다. 사용량은 가장 최근 상태 파일을 쓰고 지난 초기화 창은 0% | `test/web.test.ts` 의 목록 값(43) 묶음 | 위 규칙대로 나온다 |
 | AC-166 | REQ-F-096 | 같은 모델을 다시 고르면 터미널에 아무것도 가지 않는다. 웹 버튼으로 전부 허용을 켜고 다른 모드를 고르면 꺼진다. 응답 note 는 `권한 모드를 바꿨어요` | `test/broker.test.ts` 의 42 묶음, 기존 새로고침 인수 테스트 갱신(`--permission-mode auto`) | 위 규칙대로 나온다 |

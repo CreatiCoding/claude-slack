@@ -59,6 +59,8 @@ function imagesDir(): string {
 /** What the admin page renders. Plain data, no Slack or tmux objects. */
 /** One row of the web app's session list. */
 export interface WebSession {
+  /** Put to rest (45): grey in the list, woken by a message or a terminal prompt. */
+  resting?: boolean
   pid: number
   thread: string
   cwd: string
@@ -861,6 +863,7 @@ export class Broker {
         held: s.held?.length ?? 0,
         canKeys: !!s.pane,
         autoAllow: !!s.autoAllow,
+        ...(s.resting ? { resting: true } : {}),
         ...(s.refreshAfter ? { refreshAfter: true } : {}),
         ...(this.pluginsFor(s) ? { plugins: this.pluginsFor(s) } : {}),
         lastSeq: this.events.last(s.threadTs),
@@ -1517,6 +1520,7 @@ export class Broker {
         ...(s.refreshAfter ? { refreshAfter: s.refreshAfter } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
         ...(s.permissionMode ? { permissionMode: s.permissionMode } : {}),
+        ...(s.resting ? { resting: true } : {}),
       })
     }
     this.offsets.flush()
@@ -1686,6 +1690,7 @@ export class Broker {
     session.view = rec.view ?? session.view
     session.autoAllow = rec.autoAllow ?? session.autoAllow
     session.permissionMode ??= rec.permissionMode
+    session.resting = rec.resting || undefined
     session.manualTitle = rec.manualTitle ?? session.manualTitle
     session.model ??= rec.model
     session.launchModel ??= rec.launchModel
@@ -3778,6 +3783,8 @@ export class Broker {
 
   /** Push a message into the session now, and watch that it actually starts a turn. */
   private async deliver(session: Session, text: string, user: string, ts: string, via: 'channel' | 'keys' = 'channel'): Promise<void> {
+    // A message reaching it wakes it (45).
+    if (session.resting) session.resting = undefined
     session.lastInjected = text
     session.triggerTs = ts
     // A synthetic delivery (계속해, :tell, the retraction notice itself) carries the thread's own ts;
@@ -4535,6 +4542,17 @@ export class Broker {
 
     type: { user: true, run: async (c) => void (await this.tmux.sendKeys(c.pane, ['-l', c.arg])) },
 
+    /** Put to rest, or wake (45): `rest on` · `rest off`. Only the page and the panel send it. */
+    rest: {
+      run: async (c) => {
+        const on = c.arg.trim() !== 'off'
+        c.session.resting = on || undefined
+        this.changed()
+        this.lastWebNote = on ? '휴면으로 뒀어요' : '휴면을 풀었어요'
+        await c.ack(this.lastWebNote)
+      },
+    },
+
     canvas: {
       user: true,
       run: async (c) => {
@@ -4799,12 +4817,18 @@ export class Broker {
       effort: session.effort,
       permissionMode: session.permissionMode,
       autoAllow: !!session.autoAllow,
+      resting: !!session.resting,
       state: session.ended ? 'ended' : session.state,
     }
   }
 
   private trackStatus(session: Session, event: HookEvent): void {
     let changed = false
+    // A prompt typed in the terminal wakes a session that was put to rest (45).
+    if (event.hook_event_name === 'UserPromptSubmit' && session.resting) {
+      session.resting = undefined
+      changed = true
+    }
     const mode = event.permission_mode
     if (typeof mode === 'string' && mode !== session.permissionMode) {
       session.permissionMode = mode

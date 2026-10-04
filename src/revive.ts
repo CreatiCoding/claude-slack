@@ -46,6 +46,8 @@ export interface ReviveEntry {
   effort?: string
   /** Permission mode at the time (42): a refresh or a revive carries it over. */
   permissionMode?: string
+  /** Put to rest by the person (45). */
+  resting?: boolean
 }
 
 export class ReviveStore {

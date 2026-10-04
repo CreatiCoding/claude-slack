@@ -2794,3 +2794,17 @@ test('42: 권한 모드 전부 허용은 웹 버튼으로 켜고, 다른 모드�
   s.conn.close()
   t.close()
 })
+
+test('45: 휴면은 켜고 끌 수 있고, 글이 가거나 터미널에서 입력하면 풀린다 (claude-web 이관: 45)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:rest on' })
+  assert.equal(t.broker.webSessions()[0]!.resting, true)
+  await t.broker.webSend(100, '깨워 줘')
+  assert.equal(t.broker.webSessions()[0]!.resting, undefined, '글이 가면 풀린다')
+  await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:rest on' })
+  await hook(t.socketPath, 100, { hook_event_name: 'UserPromptSubmit', prompt: '터미널에서 입력' })
+  assert.equal(t.broker.webSessions()[0]!.resting, undefined, '터미널 입력도 풀린다')
+  s.conn.close()
+  t.close()
+})

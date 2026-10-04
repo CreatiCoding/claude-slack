@@ -975,6 +975,22 @@ for (const [label, size, phone] of [
   await ctx.close()
 }
 
+// 45: a session put to rest shows a grey 휴면 badge (PC and phone widths).
+{
+  sessions = sessions.map((x) => (x.thread === A ? { ...x, resting: true } : x))
+  changed()
+  for (const phone of [false, true]) {
+    const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 820 } })
+    const page = await ctx.newPage()
+    await page.goto(base + '/#' + A)
+    await page.waitForSelector('.badge.resting', { timeout: 5000 }).catch(() => {})
+    check(`45: ${phone ? '폰' : 'PC'} 휴면 세션에 회색 휴면 배지`, (await page.locator('.badge.resting').count()) >= 1)
+    await ctx.close()
+  }
+  sessions = sessions.map((x) => (x.thread === A ? { ...x, resting: undefined } : x))
+  changed()
+}
+
 await browser.close()
 server.close()
 localServer.close()

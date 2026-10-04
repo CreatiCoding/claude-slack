@@ -52,6 +52,8 @@ export interface PanelState {
   permissionMode?: string
   /** 전부 허용 is on (42): the mode radio shows its own choice. */
   autoAllow?: boolean
+  /** Put to rest (45): the overflow offers waking it. */
+  resting?: boolean
   state: SessionState
   purgeScope?: PurgeScope
 }
@@ -114,6 +116,7 @@ export function controlPanel(s: PanelState): { text: string; blocks: unknown[] }
               opt('🖥 터미널 화면 보기', v('screen')),
               opt('🔄 세션 새로고침 (스킬·플러그인 반영)', v('confirm refresh')),
               opt('📦 컨텍스트 압축 (/compact)', v('confirm compact')),
+              opt(s.resting ? '▶️ 휴면 풀기' : '💤 휴면으로 두기', v(s.resting ? 'rest off' : 'rest on')),
               opt('⚫ 세션 종료', v('confirm exit')),
               opt('🗑 종료하고 Slack에서 지우기', v('confirm purge')),
             ],

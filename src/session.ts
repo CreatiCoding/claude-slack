@@ -25,6 +25,8 @@ export interface Session {
   refreshChecking?: boolean
   /** The "백그라운드 작업이 끝나면 새로고침" line was already posted for the current wait (42). */
   refreshWaitNoted?: boolean
+  /** Put to rest by the person (45): shown grey; a message or a terminal prompt wakes it. */
+  resting?: boolean
   /** Background work that a refresh cut off, told to the relaunched session first. */
   interrupted?: Array<{ kind: string; label: string }>
   /** How often each dialog was surfaced lately, so one that keeps coming back is explained once instead of carded forever. */
