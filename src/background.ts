@@ -181,10 +181,23 @@ export class BackgroundTracker {
 
 /** Shells (bash, zsh, sh started with -c) that are children of `pid`, from `ps -A -o ppid=,command=`. Claude Code runs commands in $SHELL, zsh on a Mac. */
 export function countShells(ps: string, pid: number): number {
+  // Rows are `pid ppid command`; the shells counted are the children of `pid`.
   return ps
     .split('\n')
-    .map((l) => /^\s*(\d+)\s+(.*)$/.exec(l))
-    .filter((m) => m && Number(m[1]) === pid && /^(\S*\/)?(ba|z)?sh -c /.test(m[2]!)).length
+    .map((l) => /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l))
+    .filter((m) => m && Number(m[2]) === pid && /^(\S*\/)?(ba|z)?sh -c /.test(m[3]!)).length
+}
+
+/**
+ * The Claude process itself (75): the session's pid is sometimes the channel shim, a child of Claude. A row whose
+ * command is not Claude's is replaced by its parent, so shells are counted under Claude and not under tmux.
+ */
+export function claudeRoot(ps: string, pid: number): number {
+  for (const l of ps.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l)
+    if (m && Number(m[1]) === pid) return /claude/i.test(m[3]!) ? pid : Number(m[2])
+  }
+  return pid
 }
 
 /**
@@ -194,9 +207,9 @@ export function countShells(ps: string, pid: number): number {
 export function processFacts(pid: number, ps = 'ps'): Promise<{ startedAt?: number; shells?: number }> {
   const env = { ...process.env, LC_ALL: 'C', LANG: 'C' }
   const run = (args: string[]) => new Promise<string>((resolve) => execFile(ps, args, { timeout: 5000, env }, (err, out) => resolve(err ? '' : out)))
-  return Promise.all([run(['-o', 'lstart=', '-p', String(pid)]), run(['-A', '-o', 'ppid=,command='])]).then(([lstart, all]) => {
+  return Promise.all([run(['-o', 'lstart=', '-p', String(pid)]), run(['-A', '-o', 'pid=,ppid=,command='])]).then(([lstart, all]) => {
     const startedAt = Date.parse(lstart.trim()) || undefined
-    return { ...(startedAt ? { startedAt } : {}), ...(all ? { shells: countShells(all, pid) } : {}) }
+    return { ...(startedAt ? { startedAt } : {}), ...(all ? { shells: countShells(all, claudeRoot(all, pid)) } : {}) }
   })
 }
 

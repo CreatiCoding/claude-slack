@@ -96,7 +96,7 @@ test('3-1 도구 사용이 없는 짧은 파일을 한 번 읽은 뒤 이어 쓴
 
 test('3-2 zsh 로 도는 셸도 센다(-c 로 뜬 셸 자식 모두)', async () => {
   const { countShells } = await import('../src/background.ts')
-  const ps = ['  100 /bin/zsh -c -l source ~/.zshrc && npm run dev', '  100 /bin/bash -c sleep 9', '  100 zsh -c tail -f x', '  100 sh -c ls', '  100 node server.js', '  200 /bin/zsh -c other'].join('\n')
+  const ps = ['  7 100 /bin/zsh -c -l source ~/.zshrc && npm run dev', '  8 100 /bin/bash -c sleep 9', '  9 100 zsh -c tail -f x', '  10 100 sh -c ls', '  11 100 node server.js', '  12 200 /bin/zsh -c other'].join('\n')
   assert.equal(countShells(ps, 100), 4)
 })
 
@@ -106,7 +106,7 @@ test('3-3 한국어 로케일에서도 프로세스 시작 시각을 읽는다(p
   const dir = mkdtempSync(join(tmpdir(), 'ps-'))
   const ps = join(dir, 'ps')
   // A fake ps: Korean dates unless LC_ALL=C, as the real one does with a Korean LC_TIME.
-  writeFileSync(ps, `#!/bin/sh\nif [ "$2" = "lstart=" ]; then if [ "$LC_ALL" = "C" ]; then echo "Wed Oct  1 10:00:00 2026"; else echo "수 10  1 10:00:00 2026"; fi; else echo "  1 /bin/zsh -c x"; fi\n`)
+  writeFileSync(ps, `#!/bin/sh\nif [ "$2" = "lstart=" ]; then if [ "$LC_ALL" = "C" ]; then echo "Wed Oct  1 10:00:00 2026"; else echo "수 10  1 10:00:00 2026"; fi; else echo "  1 1 /bin/zsh -c x"; fi\n`)
   chmodSync(ps, 0o755)
   const prev = process.env.LC_ALL
   process.env.LC_ALL = 'ko_KR.UTF-8'
@@ -185,4 +185,19 @@ test('4 TaskStop 성공은 문구의 첫머리("Successfully stopped")로: 설�
   const bg = new BackgroundTracker(f)
   bg.scan()
   assert.deepEqual(bg.open({ now: T0 + 5000 }), [])
+})
+
+test('백그라운드 셸 수(75): Claude 프로세스 아래의 셸을 센다. 채널 심의 pid 면 부모(Claude)로 올라간다', async () => {
+  const { countShells, claudeRoot } = await import('../src/background.ts')
+  const ps = [
+    '  100     1 /usr/bin/tmux',
+    '  200   100 claude --resume x',
+    '  300   200 /usr/bin/node channel-shim.js',
+    '  400   200 /bin/zsh -c npm test',
+    '  401   200 /bin/sh -c tail -f log',
+    '  402   300 /bin/sh -c not counted, child of the shim',
+  ].join('\n')
+  assert.equal(claudeRoot(ps, 200), 200, 'Claude 자신이면 그대로')
+  assert.equal(claudeRoot(ps, 300), 200, '채널 심이면 부모 Claude')
+  assert.equal(countShells(ps, claudeRoot(ps, 300)), 2, 'Claude 아래의 셸 둘')
 })
