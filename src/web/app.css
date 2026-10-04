@@ -181,13 +181,13 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
    screen and behind a collapsed sidebar, so a dropped connection there went unnoticed. */
 .topbar .conn { flex: none; padding: 0 8px; }
 .list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 8px 12px; }
-.sec-head { display: flex; align-items: center; gap: 8px; height: 28px; margin-top: 6px; padding: 0 12px; font-size: var(--fs-s); color: var(--muted); border-radius: 8px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.sec-head { display: flex; align-items: center; gap: 8px; height: 34px; -webkit-touch-callout: none; user-select: none; margin: 0 8px; padding: 5px 12px; border-radius: var(--r-8); font-size: var(--fs-s); font-weight: 600; color: var(--muted); }
 .sec-head:hover { background: var(--hover); }
 .sec-head .tw { flex: 0 0 14px; display: inline-grid; place-items: center; transition: transform .15s; }
 .sec-head .tw .ic { width: 12px; height: 12px; }
 .sec-head.open .tw { transform: rotate(90deg); }
 .sec-head .n { margin-left: auto; }
-.row { display: flex; align-items: center; gap: 8px; height: var(--row-h); padding: 0 12px; border-radius: 8px; font-size: var(--fs-m); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.row { display: flex; align-items: center; gap: 12px; height: 32px; margin: 0 8px; padding: 5px 12px; border-radius: var(--r-8); font-size: var(--fs-m); line-height: 20px; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; background: var(--side); }
 .row:hover { background: var(--hover); }
 .row.active { background: var(--active); }
 .row .lead { flex: 0 0 14px; display: inline-grid; place-items: center; color: var(--muted); }
@@ -236,7 +236,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .user { align-self: flex-end; max-width: 75%; display: flex; flex-direction: column; align-items: flex-end; }
 @media (max-width: 899px) { .user { max-width: 85%; } }
 .user .bubble { width: fit-content; max-width: 100%; background: var(--soft); border-radius: 12px; padding: 10px 14px; white-space: pre-wrap; }
-.user .meta { display: flex; gap: 8px; align-items: center; font-size: var(--fs-time); color: var(--muted); margin-top: 4px; }
+.user .meta { display: flex; gap: 8px; align-items: center; font-size: var(--fs-time); line-height: 14px; color: var(--muted); margin-top: 2px; }
 .user .meta .held { color: var(--yellow); }
 .user .meta .failed { color: var(--red); }
 .user.optimistic { opacity: .6; } /* 17: shown before the broker's own echo of it comes back */
@@ -249,10 +249,10 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .md p:last-child { margin-bottom: 0; }
 .md ul, .md ol { margin: .2em 0 .65em; padding-left: 1.5em; }
 .md li + li { margin-top: .15em; }
-.md blockquote { margin: .4em 0 .65em; padding: 0 0 0 12px; border-left: 3px solid var(--line); color: var(--text-2); }
+.md blockquote { margin: 4px 0; padding: 0 0 0 10px; border-left: 3px solid var(--line-strong); color: var(--text-2); }
 .md .md-h { margin: 1em 0 .4em; line-height: 1.35; font-size: var(--fs-l); }
 .md h5.md-h, .md h6.md-h { font-size: var(--fs-m); }
-.md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+.md hr { border: 0; height: 1px; background: var(--line); margin: 4px 0; }
 .md code { font-family: var(--mono); font-size: var(--fs-s); background: var(--soft); border-radius: 4px; padding: .05em .35em; }
 .md .table-wrap { overflow-x: auto; margin: .4em 0 .75em; border: 1px solid var(--line); border-radius: 8px; }
 .md table { border-collapse: collapse; font-size: var(--fs-s); min-width: 100%; }
@@ -633,3 +633,8 @@ body > .crash { position: fixed; font: 15px/1.5 -apple-system, system-ui, sans-s
 .user .meta .desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .user .meta .held, .user .meta [data-act], .user .meta .t { flex-shrink: 0; }
 .chip.pr-open .ic { color: #2f9a4f; } .chip.pr-merged .ic { color: #8250df; } .chip.pr-closed .ic { color: #cf3f3f; }
+
+.row:active, .chip:active { transform: scale(.96); transition: transform .2s cubic-bezier(.25,.1,.25,1); }
+@media (prefers-reduced-motion: reduce) { .row:active, .chip:active { transform: none; } }
+button:active:not(:disabled) { transform: scale(.9); transition: transform .2s cubic-bezier(.25,.1,.25,1); }
+@media (hover: hover) and (pointer: fine) { .row:hover { background: var(--hover); } .sec-head:hover { background: var(--hover); } }
