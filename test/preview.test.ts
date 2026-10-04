@@ -64,5 +64,30 @@ test('흐린(2) 언어 이름 줄은 그 언어의 코드 펜스로, 빈 줄까�
 
 test('언어 이름처럼 보여도 흐리지(dim) 않으면 펜스로 보지 않는다', () => {
   const screen = ['⏺ 이렇게 하세요.', '', '  typescript', '  const x = 1', '', '✢ Writing…', ...box].join('\n')
-  assert.equal(writingPreview(screen), '이렇게 하세요.\n\ntypescript\nconst x = 1')
+  assert.equal(writingPreview(screen), '이렇게 하세요.\n\ntypescript const x = 1')
+})
+
+const wide = (n: number) => '─'.repeat(n)
+
+test('쓰는 중 미리보기: 터미널 폭에 꺾인 문단은 꺾임만 떼어 잇고, 목록 항목은 잇지 않는다', () => {
+  // Rule is 32 columns. "alpha beta gamma delta" (22) + " epsilon" fits in 30, so the break was the wrap.
+  const screen = ['⏺ alpha beta gamma delta', '  epsilon zeta eta theta', '', '  - 목록 하나', '    둘째 줄', wide(32), '❯ ', wide(32)].join('\n')
+  assert.equal(writingPreview(screen), 'alpha beta gamma delta epsilon zeta eta theta\n\n- 목록 하나\n  둘째 줄')
+})
+
+test('쓰는 중 미리보기: 단어가 실제로 넘어간 줄바꿈은 그대로 둔다', () => {
+  const screen = ['⏺ alpha beta gamma delta epsilon', '  zetaetathetaiota', wide(32), '❯ ', wide(32)].join('\n')
+  assert.equal(writingPreview(screen), 'alpha beta gamma delta epsilon\nzetaetathetaiota')
+})
+
+test('쓰는 중 미리보기: 머리가 화면 위로 밀려도 앞서 보인 글 끝을 앵커로 이어 붙인다', () => {
+  const shown = '앞부분 글이 길게 이어져 왔어요 여기까지가 보였어요'
+  const screen = ['  앞부분 글이 길게 이어져 왔어요 여기까지가 보였어요', '  다음 문단이 여기 있어요.', wide(32), '❯ ', wide(32)].join('\n')
+  assert.equal(writingPreview(screen, shown), shown + '\n다음 문단이 여기 있어요.')
+})
+
+test('쓰는 중 미리보기: 앵커를 못 찾으면 앞서 보인 글을 그대로 둔다', () => {
+  const screen = ['  전혀 다른 화면 글이에요', wide(32), '❯ ', wide(32)].join('\n')
+  assert.equal(writingPreview(screen, '앞서 보인 글 본문입니다 충분히 길어요'), '')
+  assert.equal(writingPreview(screen), '')
 })

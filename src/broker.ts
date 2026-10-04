@@ -144,6 +144,8 @@ export interface Orphan {
 /** Rows of the terminal a screen picture shows, and the scrollback added above them when there is any. */
 const SCREEN_ROWS = 80
 const SCREEN_HISTORY = 120
+/** How far up the 쓰는 중 preview reads (15/39): long answers scroll their head off the screen. */
+const LIVE_HISTORY = 200
 const ORPHAN_SCAN_LIMIT = 400
 const ORPHAN_SCAN_TTL_MS = 30_000
 
@@ -408,6 +410,8 @@ const REPLACED_COMMANDS: Record<string, string> = { mode: '/permission-mode', mo
 
 export class Broker {
   private registry = new SessionRegistry()
+  /** The 쓰는 중 text last shown per thread: the anchor when the block's head has scrolled off (15/39). */
+  private liveShown = new Map<string, string>()
   /** A hook delivered twice (user + project config) is handled once. */
   private recentHooks = new RecentKeys(HOOK_DEDUPE_MS)
   /** A mobile double-tap delivers the same button twice. */
@@ -665,10 +669,15 @@ export class Broker {
    */
   async webLive(thread: string): Promise<string | undefined> {
     const s = this.registry.byThreadTs(thread)
-    if (!s || s.ended || s.state !== 'busy' || !s.pane) return ''
+    if (!s || s.ended || s.state !== 'busy' || !s.pane) {
+      this.liveShown.delete(thread)
+      return ''
+    }
     try {
-      const block = writingPreview(await this.tmux.captureAnsi(s.pane))
-      return block === '' ? undefined : block
+      const block = writingPreview(await this.tmux.captureAnsi(s.pane, LIVE_HISTORY), this.liveShown.get(thread))
+      if (block === '') return undefined
+      this.liveShown.set(thread, block)
+      return block
     } catch {
       return undefined
     }

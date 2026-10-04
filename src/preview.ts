@@ -141,13 +141,106 @@ function dropVisiblePrefix(line: string, n: number): string {
   return line.slice(i)
 }
 
+/** Terminal columns a string takes: CJK, Hangul and emoji are two columns, the rest one. */
+export function visualWidth(s: string): number {
+  let w = 0
+  for (const ch of s) {
+    const c = ch.codePointAt(0)!
+    const wide =
+      (c >= 0x1100 && c <= 0x115f) ||
+      (c >= 0x2e80 && c <= 0xa4cf) ||
+      (c >= 0xac00 && c <= 0xd7a3) ||
+      (c >= 0xf900 && c <= 0xfaff) ||
+      (c >= 0xfe30 && c <= 0xfe4f) ||
+      (c >= 0xff00 && c <= 0xff60) ||
+      (c >= 0xffe0 && c <= 0xffe6) ||
+      (c >= 0x1f300 && c <= 0x1faff)
+    w += wide ? 2 : 1
+  }
+  return w
+}
+
+const LIST_RE = /^\s*([-*+]|\d+[.)])\s/
+const HEAD_LINE_RE = /^\s*#{1,6}\s/
+
 /**
- * `screen` is `tmux capture-pane -e` output (SGR colour codes kept). Returns the block's markdown, or `''`
- * when nothing is being written right now (either genuinely idle, or — while still busy — a thinking pause
- * with no text block on screen; callers tell the two apart from the session's own busy/idle state, not from
- * this return value, since the screen looks the same in both cases).
+ * Claude Code wraps a long paragraph at the terminal width. Put back the breaks that were only the wrap: the
+ * next line's first word would have fit on the line above (with 2 columns to spare), so the break was the
+ * screen's, not the writer's. List items, headings, code and blank lines are never joined.
  */
-export function writingPreview(screen: string): string {
+function reflow(raw: string[], width: number): string[] {
+  const out: string[] = []
+  let inCode = false
+  for (const line of raw) {
+    const plain = stripAnsi(line)
+    if (isDimLangLine(line) !== undefined) inCode = true
+    else if (!plain.trim()) inCode = false
+    const above = out.length ? out[out.length - 1]! : undefined
+    if (!inCode && above !== undefined && canJoin(stripAnsi(above), plain, width)) {
+      const a = stripAnsi(above)
+      const sep = !/\s$/.test(a) && /[\x21-\x7e]$/.test(a) && /^[\x21-\x7e]/.test(plain) ? ' ' : ''
+      out[out.length - 1] = above + sep + line
+    } else out.push(line)
+  }
+  return out
+}
+
+function canJoin(above: string, next: string, width: number): boolean {
+  if (!above.trim() || !next.trim()) return false
+  if (LIST_RE.test(above) || LIST_RE.test(next) || HEAD_LINE_RE.test(above) || HEAD_LINE_RE.test(next)) return false
+  if (above.trimStart().startsWith('```') || next.trimStart().startsWith('```')) return false
+  if (/^\s/.test(next)) return false // indented beyond the block's own two spaces: code
+  const word = next.trimStart().split(' ')[0]!
+  return visualWidth(above.trimEnd()) + 1 + visualWidth(word) <= width - 2
+}
+
+/** The squashed text (no whitespace) of each line, with the same markdown marks removed as the block had. */
+const squash = (s: string) => s.replace(/\s+/g, '')
+
+/**
+ * The block's head has scrolled off even the history read: find where the text already shown (`prev`) ends
+ * on screen, by its last 40 characters (then 24, 16, 8) with whitespace ignored, and return what comes after
+ * it. `undefined` when no anchor is found — the caller keeps `prev` as it is.
+ */
+function continuation(prev: string, raw: string[]): { rest: string; midLine: boolean } | undefined {
+  const plain = raw.map(stripAnsi)
+  const parts = plain.map(squash)
+  const hay = parts.join('')
+  const needle = squash(prev.replace(/\*\*|`/g, '').replace(/^```.*$/gm, ''))
+  for (const n of [40, 24, 16, 8]) {
+    if (needle.length < n) continue
+    const tail = needle.slice(-n)
+    const at = hay.lastIndexOf(tail)
+    if (at < 0) continue
+    const end = at + tail.length
+    let acc = 0
+    let li = 0
+    while (li < parts.length - 1 && acc + parts[li]!.length < end) acc += parts[li++]!.length
+    // Visible characters of line `li` already covered by the anchor.
+    let covered = end - acc
+    let cut = 0
+    while (cut < plain[li]!.length && covered > 0) {
+      if (!/\s/.test(plain[li]![cut]!)) covered--
+      cut++
+    }
+    const first = dropVisiblePrefix(raw[li]!, cut)
+    const midLine = first.trim() !== ''
+    const body = [first, ...raw.slice(li + 1)]
+    return { rest: blockToMarkdown(midLine ? body : body.slice(1)), midLine }
+  }
+  return undefined
+}
+
+/**
+ * `screen` is `tmux capture-pane -e` output (SGR colour codes kept), `history` lines above it included. Returns
+ * the block's markdown, or `''` when nothing is being written right now (either genuinely idle, or — while
+ * still busy — a thinking pause with no text block on screen; callers tell the two apart from the session's own
+ * busy/idle state, not from this return value, since the screen looks the same in both cases).
+ *
+ * `prev` is what the caller last showed for this block. If the block's head has scrolled past what was read,
+ * the answer is `prev` plus whatever follows it on screen; with no anchor found, `''` (the caller keeps `prev`).
+ */
+export function writingPreview(screen: string, prev = ''): string {
   const ansiLines = screen.split('\n')
   const lines = ansiLines.map(stripAnsi)
   // The input box: a rule with a ❯ line right under it, the lowest one on screen.
@@ -159,6 +252,7 @@ export function writingPreview(screen: string): string {
     }
   }
   if (box < 0) return ''
+  const width = visualWidth(lines[box]!.trim())
   let end = box
   while (end > 0 && (!lines[end - 1]!.trim() || SPINNER_RE.test(lines[end - 1]!) || TIP_RE.test(lines[end - 1]!))) end--
   let start = -1
@@ -169,14 +263,21 @@ export function writingPreview(screen: string): string {
       start = i
       break
     }
-    if (/^\S/.test(l)) return '' // another line at column 0 (the prompt, a banner): no text block
+    if (/^\S/.test(l)) break // another line at column 0 (the prompt, a banner): the head is off the top, or gone
     if (TOOL_SUMMARY_RE.test(l)) return ''
   }
-  if (start < 0) return ''
-  const raw: string[] = []
-  for (let i = start; i < end; i++) {
+  const dropped: string[] = []
+  const from = start < 0 ? 0 : start
+  for (let i = from; i < end; i++) {
     const n = i === start ? 2 : lines[i]!.startsWith('  ') ? 2 : lines[i]!.length - lines[i]!.trimStart().length
-    raw.push(dropVisiblePrefix(ansiLines[i]!, n))
+    dropped.push(dropVisiblePrefix(ansiLines[i]!, n))
   }
-  return blockToMarkdown(raw)
+  if (start < 0) {
+    if (!prev) return ''
+    const more = continuation(prev, dropped)
+    if (!more) return '' // no anchor: a thinking pause, or the screen moved on; the caller keeps what it showed
+    if (!more.rest) return prev
+    return more.midLine ? prev + more.rest : prev + '\n' + more.rest
+  }
+  return blockToMarkdown(reflow(dropped, width))
 }
