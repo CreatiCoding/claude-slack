@@ -1798,8 +1798,12 @@ function draw(row) {
     }
     case 'tool':
       return toolEl(row)
-    case 'msg':
-      return msgEl(row.ev)
+    case 'msg': {
+      // Command output (the broker's own message, not Claude's answer) gets the 240 px cap (21).
+      const el = msgEl(row.ev)
+      for (const box of el?.querySelectorAll?.('.codebox') ?? []) box.classList.add('cmd')
+      return el
+    }
     case 'notice':
       return noticeEl(row.icon, row.text)
   }
