@@ -2580,6 +2580,14 @@ function renderComposerBits() {
       openMenu({ x: r.left, y: r.top, above: true }, list.map((l) => ({ label: l.label, icon: ic, cls: l.state ? 'pr-' + l.state.toLowerCase() : '', run: () => (ic === 'pr' ? openLink(l.url) : window.open(l.url, '_blank', 'noopener')) })))
     })
   }
+  // The settings chips (73): model, effort and permission, each opening its own choices with the current one ticked.
+  const setChip = (label, current, list, cmd, onValue) => chip('bot', `${label} ▾`, (e) => {
+    const r = e.currentTarget.getBoundingClientRect()
+    openMenu({ x: r.left, y: r.top, above: true }, list.map((o) => ({ label: o.label ?? o, icon: 'dot', on: (o.value ?? o) === current, run: () => command(s, `${cmd} ${o.value ?? o}`) })))
+  })
+  setChip(s.model || '모델', s.model, options.models, 'model')
+  setChip(s.effort || 'effort', s.effort, options.efforts, 'effort')
+  setChip('권한', s.autoAllow ? 'autoAllow' : s.permissionMode, options.modes, 'mode')
   const links = linkCache.get(s.pid)
   linkChip('pr', 'PR', links?.prs)
   linkChip('link', 'Slack 스레드', links?.threads, links ? undefined : withToken('/go/thread?ts=' + encodeURIComponent(s.thread)))
