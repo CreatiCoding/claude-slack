@@ -70,13 +70,13 @@ test('웹에서 보낸 그림: 장수·용량·형식·장당 크기 한도를 �
   // 모르는 형식.
   const bad = await t.broker.webSend(100, '', [{ name: 'a.bmp', type: 'image/bmp', data: png1x1 }])
   assert.equal(bad.ok, false)
-  assert.match(bad.note, /형식/)
+  assert.match(bad.note, /이미지가 아니에요: a\.bmp/)
 
   // 장당 10MiB 를 넘는 것.
   const big = Buffer.alloc(10 * 1024 * 1024 + 1).toString('base64')
   const tooBig = await t.broker.webSend(100, '', [{ name: 'a.png', type: 'image/png', data: big }])
   assert.equal(tooBig.ok, false)
-  assert.match(tooBig.note, /10MiB/)
+  assert.match(tooBig.note, /이미지 크기가 맞지 않아요: a\.png/)
 
   // 모두 base64 합 3,145,728자를 넘는 것(한 장은 한도 안이어도).
   const almostMax = Buffer.alloc(2_400_000).toString('base64')
@@ -85,7 +85,7 @@ test('웹에서 보낸 그림: 장수·용량·형식·장당 크기 한도를 �
     { name: 'b.png', type: 'image/png', data: almostMax },
   ])
   assert.equal(overTotal.ok, false)
-  assert.match(overTotal.note, /용량/)
+  assert.match(overTotal.note, /너무 커요/)
   s.conn.close()
   t.close()
 })
@@ -403,6 +403,47 @@ test('기본 프롬프트는 새로 띄우는 세션에 --append-system-prompt �
   await tick()
   const row = t.broker.webSessions().find((x) => x.pid === 100)!
   assert.ok(row.permission && JSON.stringify(row.permission.blocks).includes('perm_allow'), '다른 세션에서도 물을 수 있게 카드째')
+  s.conn.close()
+  t.close()
+})
+
+test('웹 보내기(40): 같은 글을 1.5초 안에 두 번 보내면 두 번째는 거절하고, 명령(:)은 막지 않는다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const first = await t.broker.webSend(100, '같은 글')
+  assert.equal(first.ok, true)
+  const again = await t.broker.webSend(100, '같은 글')
+  assert.equal(again.ok, false)
+  assert.match(again.note, /방금 보낸 글이에요/)
+  const other = await t.broker.webSend(100, '다른 글')
+  assert.equal(other.ok, true)
+  s.conn.close()
+  t.close()
+})
+
+test('웹 보내기(40): 스레드로 찾는다 — 살아 있지도 뜨는 중·다시 여는 중·휴면도 아니면 끝난 세션', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const live = (t.broker as unknown as { registry: { live: Array<{ threadTs: string }> } }).registry.live[0]!
+  const ok = await t.broker.webSendThread(live.threadTs, '스레드로 보냄')
+  assert.equal(ok.ok, true)
+  const gone = await t.broker.webSendThread('9999.0001', '없는 스레드')
+  assert.equal(gone.ok, false)
+  assert.equal(gone.note, '이미 끝난 세션이에요')
+  s.conn.close()
+  t.close()
+})
+
+test('웹 보내기(40): 그림 한 장이라도 못 쓰면 메시지 전체를 실패시킨다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYJg=='
+  const r = await t.broker.webSend(100, '그림 포함', [
+    { name: 'ok.png', type: 'image/png', data: png1x1 },
+    { name: 'empty.png', type: 'image/png', data: '' },
+  ])
+  assert.equal(r.ok, false)
+  assert.equal(r.note, '이미지 크기가 맞지 않아요: empty.png')
   s.conn.close()
   t.close()
 })

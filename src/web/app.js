@@ -78,14 +78,22 @@ const sessionOf = (ts) => sessions.find((s) => s.thread === ts)
  */
 const AWAY = new Set([502, 503, 504])
 const waitingCommands = []
-async function api(path, body) {
+// A command that gets no answer in 30 s fails with 응답이 없어요, not a spinner that never stops (40). Sends are
+// left out: a send that timed out may still have reached Claude, so it says 전달됐는지 확인할 수 없어요 instead.
+const COMMAND_TIMEOUT_MS = 30_000
+async function api(path, body, { timeout = body !== undefined } = {}) {
   let r
+  const ac = new AbortController()
+  const timer = timeout ? setTimeout(() => ac.abort(), COMMAND_TIMEOUT_MS) : null
   try {
-    r = await fetch(withToken(path), body === undefined ? { headers: authHeaders } : { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+    r = await fetch(withToken(path), body === undefined ? { headers: authHeaders } : { method: 'POST', headers: { ...authHeaders, 'content-type': 'application/json' }, body: JSON.stringify(body), signal: ac.signal })
   } catch {
+    clearTimeout(timer)
+    if (ac.signal.aborted) throw new Error('응답이 없어요')
     throw new Error(body === undefined ? '연결할 수 없어요' : '전달됐는지 확인할 수 없어요. 대화를 보고 필요하면 다시 보내 주세요')
   }
   if (AWAY.has(r.status) && body !== undefined) {
+    clearTimeout(timer)
     brokerAway()
     return new Promise((resolve, reject) => {
       const job = { path, body, resolve, reject, until: Date.now() + 60_000 }
@@ -95,7 +103,9 @@ async function api(path, body) {
   let data = {}
   try {
     data = await r.json()
-  } catch {}
+  } catch {} finally {
+    clearTimeout(timer)
+  }
   if (!r.ok) throw Object.assign(new Error(data.note || data.error || `HTTP ${r.status}`), { data })
   return data
 }
@@ -2443,7 +2453,8 @@ async function sendText(s, text, pics = []) {
   // `/btw` answers from the screen, which the broker's :btw reads back; typed raw it would stay in the terminal.
   const body = /^\/btw\s/.test(text) ? ':' + text.slice(1) : text
   try {
-    await api(`/api/session/${s.pid}/send`, { text: body, ...(pics.length ? { images: pics.map(({ name, type, data }) => ({ name, type, data })) } : {}) })
+    // By thread (40): a row still starting, waking or dormant has no live pid, but its thread is always there.
+    await api(`/api/thread/${encodeURIComponent(s.thread)}/send`, { text: body, ...(pics.length ? { images: pics.map(({ name, type, data }) => ({ name, type, data })) } : {}) }, { timeout: false })
     return true
   } catch (err) {
     toast('보내지 못했어요: ' + err.message, 'err')

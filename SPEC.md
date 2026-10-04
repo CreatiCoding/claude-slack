@@ -619,6 +619,7 @@ HTTP 인터페이스(IF-001~IF-050)는 따로 적지 않으면 아래 값을 따
 | IF-009 | `POST /api/subscribe` | `conn`: string, 필수(IF-003 의 `hello.conn`). `thread`: string｜null, 선택, `^\d+\.\d+$` 아니면 null 취급 | 204 | 404(ERR-007) | 멱등성: 예(같은 값 반복 가능, 키 없음) |
 | IF-010 | `POST /api/client-error` | `where`(≤ 40자), `message`(≤ 500자), `stack`(≤ 4,000자, 줄당 ≤ 300자), `view`(≤ 8자), `url`(≤ 120자), `ua`: 모두 string, 선택, 기본 `''`. 초과분은 자른다 | 204 | 429(ERR-008) | 속도 제한: 직전 60,000 ms 안에 60건. REQ-F-072 |
 | IF-011 | `POST /api/metrics` | `tab`, `view`: string. `recvBytes`, `recvEvents`, `dom`: number. `apply: {n, sum, max}`. `stalls: {n, max}`. `catchups: [{rounds, events, ms}]`(앞 50개만 쓴다). 모두 선택, 숫자가 아니면 0 | 204 | 401·403·415 | REQ-F-072 |
+| IF-087 | `POST /api/thread/<thread>/send` | 경로의 `<thread>` 는 Slack 스레드 ts. 본문은 IF-012 와 같다 | 200 `{ok: true, note}` | 400 `{ok: false, note}`. `note` 는 아래 REQ-F-094 의 문구 | 본문 상한 24 MiB. 웹이 행의 스레드로 보낸다(40). 같은 글 1,500 ms 중복 거절은 REQ-F-094 |
 | IF-012 | `POST /api/session/<pid>/send` | `text`: string, 선택, 기본 `''`. `images`: `[{name?: string, type?: string, data: string}]`, 선택, 앞 8개만 쓴다(39). `data` 는 base64 또는 `data:` URL | 200 `{ok: true, note: "보냈습니다."}` | 400 `{ok: false, note}`(ERR-010, ERR-011) | 본문 상한 25,165,824 자. REQ-F-057 |
 | IF-013 | `GET /api/session/<pid>/trash-info` | 없음 | 200 `{ok: true, note: "", folder, repos: [{path, uncommitted, unpushed}]}` | 200 `{ok: false, note, folder?}`(ERR-010, ERR-016~ERR-019) | REQ-F-062 |
 | IF-014 | `POST /api/session/<pid>/trash` | `{}` | 200 `{ok: true, note: "휴지통으로 옮겼습니다: <~경로>"}` | 400(ERR-010, ERR-016~ERR-020) | REQ-F-062 |
@@ -2707,6 +2708,27 @@ cache-control: no-store
 - 수용 기준: AC-163
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
+
+### REQ-F-094 웹 보내기: 스레드로 찾고, 같은 글은 한 번만, 그림은 전부 아니면 전부 (40)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 트리거: 웹 입력칸 보내기(IF-087, 또는 IF-012)
+- 전제조건: 행에 스레드가 있다
+- 입력: 스레드, 글, 그림(0~8장)
+- 처리 규칙:
+  1. 스레드로 세션을 찾는다. 살아 있으면 그 세션으로 보낸다(REQ-F-010 과 같은 경로).
+  2. 살아 있지 않으면: 뜨는 중(`pendingLaunches`)이면 대기 큐에 넣고 `세션이 뜨면 바로 전달할게요`. 다시 여는 중(`waking`)이면 같은 큐에 넣고 같은 안내. 휴면(`dormant`)이면 깨운다(`보냈습니다.`). 셋 다 아니면 `이미 끝난 세션이에요`.
+  3. 휴면 세션에 `:`·`!` 명령은 깨우지 않고 `쉬고 있는 세션에는 이 명령을 보낼 수 없어요. 일반 글로 보내면 깨어나요`.
+  4. 같은 스레드·같은 글(공백 뺀 뒤)·같은 그림 장수를 1,500 ms 안에 다시 보내면 `방금 보낸 글이에요. 잠시 뒤 다시 보내 주세요`. `:` 명령은 빼고 본다.
+  5. 그림 하나라도 못 쓰면(0 byte, 보관소가 거절) 메시지 전체를 `이미지 크기가 맞지 않아요: <name>` 로 실패시킨다(전에는 그 장만 빠졌다).
+  6. 웹 응답 문구는 모두 해요체다(REQ-F-094 의 문구와 §4.3 의 그림 문구: `이미지는 한 번에 8장까지 보낼 수 있어요`, `이미지가 아니에요: <name>`, `이미지가 너무 커요. 몇 장씩 나눠서 보내 주세요`).
+- 출력: `{ok, note}`
+- 사후조건: 글은 Slack 스레드에 `🌐 웹:` 으로 올라가고, 대화 이벤트 `user`(via web) 가 남는다
+- 예외·오류: 웹 명령 응답이 30,000 ms 안에 없으면 `응답이 없어요`(명령만. 보내기는 빠진다 — 보냈는지 모르므로 `전달됐는지 확인할 수 없어요…`)
+- 경계값: 그림 8장까지. 4번의 1,500 ms 는 `WEB_SEND_DEDUPE_MS`
+- 수용 기준: AC-164
+- 근거: `src/broker.ts` `webSend`·`webSendThread`·`webDeliver`, `src/admin.ts` (`/api/thread/<thread>/send`), `src/web/app.js` `api`·`sendText`
+- 추적: IF-087, IF-012, REQ-F-010, REQ-F-078(17)
 
 ### REQ-F-067 쓰는 중인 글을 화면에서 읽어 내보낸다
 - 의무: MUST
@@ -5427,6 +5449,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-164 | REQ-F-094 | 살아 있지 않은 세션의 행(뜨는 중·다시 여는 중·휴면)에서 보내고, 같은 글을 1.5초 안에 두 번 보내고, 그림 한 장이 빈 값이면 | `test/web.test.ts` 의 웹 보내기 묶음(40), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-163 | REQ-F-093 | 긴 답이 화면 위로 밀린 상태에서 미리보기를 읽는다. 꺾인 줄은 잇고 목록·펜스는 잇지 않는다. 머리가 200줄 밖이면 앞 글 끝을 앵커로 이어 붙이고, 앵커가 없으면 `''` 를 돌려준다 | `test/preview.test.ts` 의 쓰는 중 미리보기 묶음(39) | 위 규칙대로 나온다 |
 | AC-162 | REQ-F-077 | 이벤트 6,400개(`user`·`tool`·`tool_end`·`text` 1,600번씩)인 긴 대화를 바로 연다 | `PerformanceObserver('layout-shift')` 로 1,000 ms 동안 잰다(36) | 누적 레이아웃 이동(CLS) = 0.0020(실측만 하고 코드는 바꾸지 않았다) |
 | REQ-F-077 | 요청 "대화 열 때 화면이 튀지 않게"(36, 실측만) | AC-162 | `scripts/qa-web.ts` |

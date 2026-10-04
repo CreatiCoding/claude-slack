@@ -275,6 +275,8 @@ const STALL_SCREEN_MS = 90_000
 const HOOK_DEDUPE_MS = 2000
 /** A mobile double-tap delivers the same button twice within this window. */
 const ACTION_DEDUPE_MS = 1500
+/** A web message repeated within this window is a double send, not a second message (17/40). */
+const WEB_SEND_DEDUPE_MS = 1500
 /** How long a command's dialog may take to appear after we type it. */
 const POST_COMMAND_DIALOG_MS = 3000
 const POST_SLASH_DIALOG_MS = 2000
@@ -416,6 +418,7 @@ export class Broker {
   private recentHooks = new RecentKeys(HOOK_DEDUPE_MS)
   /** A mobile double-tap delivers the same button twice. */
   private recentActions = new RecentKeys(ACTION_DEDUPE_MS)
+  private recentWebSends = new RecentKeys(WEB_SEND_DEDUPE_MS)
   private pendingLaunches = new Map<string, PendingLaunch>()
   private pendingPermissions = new Map<string, { msgTs: string; pid: number; requestId: string; toolName: string; at: number; timer?: ReturnType<typeof setTimeout>; reminded?: number; text?: string; blocks?: unknown[] }>()
   /** Block types this workspace rejected, so they are not sent (and refused) again every time. */
@@ -848,45 +851,83 @@ export class Broker {
   /** A message typed in the web app: shown in the thread as the web's, then handled exactly as a thread reply. */
   async webSend(pid: number, raw: string, pictures: Array<{ name?: string; type?: string; data: string }> = []): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
-    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션이에요' }
+    return this.webDeliver(session.threadTs, raw, pictures, session)
+  }
+
+  /**
+   * The same, found by thread (40): the page keeps the thread of a row it shows even while the session has no
+   * pid yet (starting), or none any more (waking, dormant). Routed the way a Slack thread reply is: queued for a
+   * launch or a wake in progress, woken from dormant, or sent to the live session.
+   */
+  async webSendThread(thread: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string }> = []): Promise<{ ok: boolean; note: string }> {
+    const live = this.registry.byThreadTs(thread)
+    if (live && !live.ended) return this.webDeliver(thread, raw, pictures, live)
+    if (!this.pendingLaunches.has(thread) && !this.waking.has(thread) && !this.dormant.has(thread)) return { ok: false, note: '이미 끝난 세션이에요' }
+    return this.webDeliver(thread, raw, pictures, undefined)
+  }
+
+  private async webDeliver(threadTs: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string }>, session: Session | undefined): Promise<{ ok: boolean; note: string }> {
     // Pictures from the page go where Slack attachments go, and reach Claude the same way: a path it can read.
     // Checked here too (18), not just client-side — a page is never the only thing that can reach this call.
-    if (pictures.length > WEB_IMAGES_MAX) return { ok: false, note: `한 메시지에 그림은 ${WEB_IMAGES_MAX}장까지입니다.` }
+    if (pictures.length > WEB_IMAGES_MAX) return { ok: false, note: `이미지는 한 번에 ${WEB_IMAGES_MAX}장까지 보낼 수 있어요` }
     // Each picture's own byte size is checked before it is added to the running total: a single
-    // oversized picture should be refused as "10MiB 를 넘습니다", not as the (much smaller) total-size
+    // oversized picture should be refused as its own size, not as the (much smaller) total-size
     // message, since its base64 alone would trip that check too.
     let totalBase64 = 0
     for (const [i, p] of pictures.entries()) {
       const mime = String(p.type ?? '')
       const ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : /gif/.test(mime) ? 'gif' : /jpe?g/.test(mime) ? 'jpg' : undefined
-      if (!ext) return { ok: false, note: `${p.name ?? `그림 ${i + 1}`}: 지원하지 않는 형식입니다.` }
+      const name = p.name ?? `그림 ${i + 1}`
+      if (!ext) return { ok: false, note: `이미지가 아니에요: ${name}` }
       const bytes = Math.ceil((String(p.data ?? '').length * 3) / 4)
-      if (bytes > WEB_IMAGE_BYTES_MAX) return { ok: false, note: `${p.name ?? `그림 ${i + 1}`}: 10MiB 를 넘습니다.` }
+      if (bytes > WEB_IMAGE_BYTES_MAX) return { ok: false, note: `이미지 크기가 맞지 않아요: ${name}` }
       totalBase64 += String(p.data ?? '').length
-      if (totalBase64 > WEB_IMAGES_BASE64_MAX) return { ok: false, note: '그림 용량이 한 메시지에 담을 수 있는 한도를 넘었습니다.' }
+      if (totalBase64 > WEB_IMAGES_BASE64_MAX) return { ok: false, note: '이미지가 너무 커요. 몇 장씩 나눠서 보내 주세요' }
+    }
+    const typed = raw.trim()
+    if (!typed && !pictures.length) return { ok: false, note: '보낼 내용이 없어요' }
+    // The same text again within 1,500 ms is a double send (17/40); commands (`:`) are not held back by it.
+    if (!typed.startsWith(':') && this.recentWebSends.isRepeat(`${threadTs}\n${typed}\n${pictures.length}`)) return { ok: false, note: '방금 보낸 글이에요. 잠시 뒤 다시 보내 주세요' }
+    if (session?.handedOffTo && !typed.startsWith(':')) return { ok: false, note: '🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌어요. 거기서 이어가세요.' }
+    if (session?.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 트랜스크립트가 100MB 를 넘어 입력을 막았어요. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
+    if (!session && (typed.startsWith(':') || typed.startsWith('!')) && this.dormant.has(threadTs) && !this.pendingLaunches.has(threadTs) && !this.waking.has(threadTs)) {
+      return { ok: false, note: '쉬고 있는 세션에는 이 명령을 보낼 수 없어요. 일반 글로 보내면 깨어나요' }
     }
     const saved: string[] = []
     for (const [i, p] of pictures.entries()) {
       const mime = String(p.type ?? '')
       const ext = /png/.test(mime) ? 'png' : /webp/.test(mime) ? 'webp' : /gif/.test(mime) ? 'gif' : 'jpg'
       const buf = Buffer.from(String(p.data ?? '').replace(/^data:[^,]*,/, ''), 'base64')
-      if (!buf.length || !this.images.put(session.threadTs, buf, p.type)) continue
+      // All or nothing (40): one picture that cannot be written fails the whole message, not just that one.
+      if (!buf.length || !this.images.put(threadTs, buf, p.type)) return { ok: false, note: `이미지 크기가 맞지 않아요: ${p.name ?? `그림 ${i + 1}`}` }
       const dir = imagesDir()
       mkdirSync(dir, { recursive: true })
       const path = join(dir, `${Date.now()}-web-${i}.${ext}`)
       await writeFile(path, buf)
       saved.push(path)
     }
-    const typed = raw.trim()
-    if (!typed && !saved.length) return { ok: false, note: '보낼 내용이 없습니다.' }
-    if (session.handedOffTo && !typed.startsWith(':')) return { ok: false, note: '🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌습니다. 거기서 이어가세요.' }
-    if (session.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 트랜스크립트가 100MB 를 넘어 입력을 막았습니다. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
     const text = [typed, ...saved.map((p) => `[Image attached: ${p}]`)].filter(Boolean).join('\n')
-    const ts = await this.quietSlack.post({ threadTs: session.threadTs, text: `🌐 웹: ${typed || '(그림)'}${saved.length ? ` · 그림 ${saved.length}장` : ''}` })
-    if (saved.length) await this.quietSlack.uploadFiles({ threadTs: session.threadTs, paths: saved }).catch(() => false)
-    this.noteMsg(ts, session.threadTs)
-    this.emitEvent(session.threadTs, this.userEvent(session.threadTs, ts, text, 'web'))
-    this.logAt('INFO', 'web', 'message', this.tag(session, { ts, chars: text.length }))
+    const ts = await this.quietSlack.post({ threadTs, text: `🌐 웹: ${typed || '(그림)'}${saved.length ? ` · 그림 ${saved.length}장` : ''}` })
+    if (saved.length) await this.quietSlack.uploadFiles({ threadTs, paths: saved }).catch(() => false)
+    this.noteMsg(ts, threadTs)
+    this.emitEvent(threadTs, this.userEvent(threadTs, ts, text, 'web'))
+    if (session) this.logAt('INFO', 'web', 'message', this.tag(session, { ts, chars: text.length }))
+    if (!session) {
+      // No live session yet: the same queues a Slack reply uses (3034–3047), or a wake from dormant.
+      const msg = { text, user: 'web', ts }
+      const pending = this.pendingLaunches.get(threadTs)
+      if (pending) {
+        pending.queued.push(msg)
+        return { ok: true, note: '세션이 뜨면 바로 전달할게요' }
+      }
+      if (this.waking.has(threadTs)) {
+        this.waking.get(threadTs)!.push(msg)
+        return { ok: true, note: '세션이 뜨면 바로 전달할게요' }
+      }
+      await this.wakeDormant(this.dormant.get(threadTs)!, msg)
+      return { ok: true, note: '보냈습니다.' }
+    }
     // Same routing as a thread reply. In the web app `/` needs no `:` in front: nothing intercepts it there.
     if (text.startsWith(':')) await this.runThreadCommand(session, text.slice(1).trim())
     else if (text.startsWith('/') || text.startsWith('!')) await this.runCommand(session, text)

@@ -50,6 +50,7 @@ export interface AdminApi {
   webSessions?(): WebSession[]
   webOptions?(): { models: Array<{ label: string; value: string }>; efforts: string[]; modes: Array<{ label: string; value: string }> }
   webSend?(pid: number, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
+  webSendThread?(thread: string, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webTrashInfo?(pid: number): { ok: boolean; note: string; folder?: string; repos?: Array<{ path: string; uncommitted: number; unpushed: number }> }
   webTrash?(pid: number): Promise<{ ok: boolean; note: string }>
@@ -494,6 +495,14 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const body = await readJson(req, 24 * 1024 * 1024)
     const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
+    return send(res, result.ok ? 200 : 400, result)
+  }
+  // By thread, for a row with no pid yet (starting) or none any more (waking, dormant): see webSendThread (40).
+  const sendThread = /^\/api\/thread\/([^/]+)\/send$/.exec(url.pathname)
+  if (req.method === 'POST' && sendThread && api.webSendThread) {
+    const body = await readJson(req, 24 * 1024 * 1024)
+    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
+    const result = await api.webSendThread(decodeURIComponent(sendThread[1]!), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
   }
   const trash = /^\/api\/session\/(\d+)\/trash(-info)?$/.exec(url.pathname)
