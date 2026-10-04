@@ -1471,6 +1471,21 @@ function showCrash(err) {
   box.querySelector('[data-x="reload"]').addEventListener('click', () => location.reload())
   box.querySelector('[data-x="list"]').addEventListener('click', () => (box.remove(), closeConvo()))
 }
+// A skill's activation text inside an answer folds into one line, 스킬 사용 · <names>, that opens to the
+// original (78). A block runs from 'Activated skill:' to the 'Link:' line, with a 'Considered:' line before it.
+const SKILL_BLOCK_RE = /(?:^Considered:[^\n]*\n)?^Activated skill: ([^\n]+)\n[\s\S]*?^Link:[^\n]*(?:\n|$)/gm
+// Markdown escapes raw HTML, so the blocks go in as tokens and become the details after rendering.
+function answerMd(text) {
+  const blocks = []
+  const body = text.replace(SKILL_BLOCK_RE, (block, name) => {
+    blocks.push({ name: name.trim(), block: block.trim() })
+    return `\n\nSKILLUSE${blocks.length - 1}X\n\n`
+  })
+  return md(body).replace(/SKILLUSE(\d+)X/g, (_, i) => {
+    const b = blocks[Number(i)]
+    return `<details class="skill-use"><summary>스킬 사용 · ${esc(b.name)}</summary><pre><code>${esc(b.block)}</code></pre></details>`
+  })
+}
 function drawConvo(evs, { live = false } = {}) {
   const t0 = performance.now()
   const follow = atBottom()
@@ -1714,7 +1729,7 @@ function draw(row) {
       const pictured = new Set([...(row.ev.images || []).map((im) => im.name), ...(row.ev.html || []).map((h) => h.name)])
       const others = (row.ev.files || []).map((f) => f.split('/').pop()).filter((n) => !pictured.has(n))
       const whole = isHtmlDocument(row.ev.text)
-      el.innerHTML = `<div class="md">${whole ? '' : md(row.ev.text)}</div>${imagesHtml(row.ev.images)}${others.length ? `<div class="files">${icon('attach')} ${others.map(esc).join(', ')}</div>` : ''}`
+      el.innerHTML = `<div class="md">${whole ? '' : answerMd(row.ev.text)}</div>${imagesHtml(row.ev.images)}${others.length ? `<div class="files">${icon('attach')} ${others.map(esc).join(', ')}</div>` : ''}`
       // HTML is drawn, read-only: an answer that is a whole document, each ```html block, each attached .html.
       if (whole) el.firstElementChild.append(htmlPreview(row.ev.text, row.ev.text))
       for (const pre of el.querySelectorAll('pre[data-lang="html"]')) {
