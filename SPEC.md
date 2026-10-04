@@ -2751,7 +2751,7 @@ cache-control: no-store
 - 액터: 브로커, 웹, 관리 페이지
 - 처리 규칙(58 문구): 웹에 보이는 글은 해요체에 끝 마침표 없이. 주요 문구: `이미 끝난 세션이에요`, `보낼 내용이 없어요`, `이미지는 한 번에 8장까지 보낼 수 있어요`, `이미지가 아니에요: <name>`, `이미지 크기가 맞지 않아요: <name>`, `이미지가 너무 커요. 몇 장씩 나눠서 보내 주세요`, `이미지를 읽지 못했어요: <name>`, `클립보드에 이미지가 없어요`, `클립보드를 읽지 못했어요. 입력칸을 길게 눌러 붙여넣어 보세요`, `대화가 초기화됐어요`, `멈췄어요`, `눌렀어요`(버튼 결과 없음).
 - 처리 규칙(59 수치): 기기에 대화를 저장하기까지 1,500 ms. 서버의 화면 오류 기록 상한은 분당 120(넘으면 429).
-- 처리 규칙(60 능력·복구): SSE `hello` 가 `caps: {phoneAccess, tools}` 를 싣는다. `phoneAccess` 는 공개 주소 설정(`CLAUDE_SLACK_WEB_PUBLIC_URL`/도메인)으로 정하고, 열린 주소(localhost 여부)로 정하지 않는다. `GET /recovery` 는 정적 복구 가이드(`src/recovery.html`)이고 복사 가능한 복구 프롬프트를 둔다. `scripts/doctor.ts dedupe` 는 가장 나중에 뜬 pid 를 남기고 나머지를 닫는다. `scripts/doctor.ts logs` 는 로그 끝 60줄(모든 단계).
+- 처리 규칙(60 능력·복구): SSE `hello` 가 `caps: {phoneAccess, tools}` 를 싣는다. `phoneAccess` 는 공개 주소 설정(`CLAUDE_SLACK_WEB_PUBLIC_URL`/도메인)으로 정하고, 열린 주소(localhost 여부)로 정하지 않는다. `GET /recovery` 는 정적 복구 가이드(`src/recovery.html`)이고 복사 가능한 복구 프롬프트를 둔다. `scripts/doctor.ts dedupe` 는 먼저 뜬 pid(소켓을 쥔 쪽)를 남기고 나머지를 닫는다. `scripts/doctor.ts logs` 는 로그 끝 60줄(모든 단계).
 - 미구현(다음 라운드): 55(대화 행 칩·권한 카드·코드 블록 등 화면), 56(세션 목록 폰 행·밀기·꾹 누르기), 57(입력 칩 순서·↑↓ 기록 출처·사진 8장 칸·새 세션 자동 완성·⌘K), 웹 `화면` 칩의 이미지 못 받을 때 글 화면, 웹 `:status` 설정 항목(세션 메뉴의 `상태 새로 읽기`는 있음).
 - 수용 기준: AC-179
 - 근거: `src/admin.ts` `hello.caps`·`/recovery`·화면 오류 상한, `src/recovery.html`, `scripts/doctor.ts`, `src/web/app.js` `phoneAccess`·`keepTimeline`
