@@ -3324,7 +3324,7 @@ async function openStats(days) {
         <div><span>도구 호출</span><b>${s.tools}</b></div>
         <div><span>권한 요청</span><b>${s.permissions}</b></div>
       </div>
-      ${s.pr ? `<h4>풀 리퀘스트</h4><div class="stats-grid"><div><span>머지</span><b>${s.pr.merged}</b></div><div><span>생성</span><b>${s.pr.created}</b></div><div><span>머지까지 중앙값</span><b>${fmt(s.pr.medianMergeMs)}</b></div><div><span>머지까지 p90</span><b>${fmt(s.pr.p90MergeMs)}</b></div></div>` : ''}
+      ${s.pr ? `<h4>풀 리퀘스트</h4><div class="stats-grid"><div><span>머지</span><b>${s.pr.merged}</b></div><div><span>생성</span><b>${s.pr.created}</b></div><div><span>머지까지 중앙값</span><b>${fmt(s.pr.medianMergeMs)}</b></div><div><span>머지까지 p90</span><b>${fmt(s.pr.p90MergeMs)}</b></div><div><span>추가 / 삭제</span><b>+${s.pr.additions} −${s.pr.deletions}</b></div><div><span>이 도구에서 나온 PR</span><b>${s.pr.linked}</b></div></div><div class="stats-recent">${s.pr.recent.map((r) => `<a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.url.replace(/^https:\/\/[^/]+\//, ''))}</a>`).join('')}</div>` : ''}
       <h4>동시성</h4>
       <div class="stats-series" aria-label="동시성 그래프">${s.series.map((v) => `<i style="height:${Math.min(100, Math.round(v * 40))}%" title="${v}"></i>`).join('')}</div>
       <h4>요일 × 시간 (내 글)</h4>

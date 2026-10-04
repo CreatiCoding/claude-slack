@@ -98,6 +98,8 @@ export interface PrStat {
   mergedAt?: string
   createdAt: string
   url: string
+  additions?: number
+  deletions?: number
 }
 export function prSummary(prs: PrStat[], now: number, days: StatDays) {
   const from = now - days * DAY
@@ -105,11 +107,15 @@ export function prSummary(prs: PrStat[], now: number, days: StatDays) {
   const merged = prs.filter((p) => inWin(p.mergedAt))
   const created = prs.filter((p) => inWin(p.createdAt))
   const times = merged.map((p) => Date.parse(p.mergedAt!) - Date.parse(p.createdAt)).filter((x) => x >= 0).sort((a, b) => a - b)
+  const sum = (xs: PrStat[], k: 'additions' | 'deletions') => xs.reduce((a, p) => a + (p[k] ?? 0), 0)
   return {
     merged: merged.length,
     created: created.length,
     medianMergeMs: quantile(times, 0.5),
     p90MergeMs: quantile(times, 0.9),
+    additions: sum(merged, 'additions'),
+    deletions: sum(merged, 'deletions'),
+    linked: 0,
     recent: [...created].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20).map((p) => ({ url: p.url, createdAt: p.createdAt, mergedAt: p.mergedAt })),
   }
 }

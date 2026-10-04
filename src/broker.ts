@@ -1202,23 +1202,32 @@ export class Broker {
    */
   async webStatsWithPr(days: StatDays): Promise<ReturnType<typeof computeStats> & { pr?: ReturnType<typeof prSummary> }> {
     const base = this.webStats(days)
-    const gh = (args: string[]) =>
-      new Promise<Array<{ url: string; createdAt: string; closedAt?: string | null }>>((resolve, reject) =>
-        execFile('gh', ['search', 'prs', '--author', '@me', ...args, '--json', 'url,createdAt,closedAt', '--limit', '300'], { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
-          if (err) return reject(err)
-          try {
-            resolve(JSON.parse(out))
-          } catch (e) {
-            reject(e)
-          }
-        }),
-      )
     try {
-      const [merged, all] = await Promise.all([gh(['--merged']), gh(['--state', 'all'])])
-      const byUrl = new Map<string, { url: string; createdAt: string; mergedAt?: string }>()
-      for (const p of all) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt })
-      for (const p of merged) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt, mergedAt: p.closedAt ?? undefined })
-      return { ...base, pr: prSummary([...byUrl.values()], Date.now(), days) }
+      // The person's pull requests, merged and created, 100 at a time and at most ten pages each (53).
+      const search = async (q: string) => {
+        const out: Array<{ url: string; createdAt: string; mergedAt?: string | null; additions?: number; deletions?: number }> = []
+        let after: string | null = null
+        for (let page = 0; page < 10; page++) {
+          const query = `query($q:String!,$after:String){search(query:$q,type:ISSUE,first:100,after:$after){pageInfo{hasNextPage endCursor} nodes{... on PullRequest{url createdAt mergedAt additions deletions}}}}`
+          const args = ['api', 'graphql', '-f', `query=${query}`, '-f', `q=${q}`]
+          if (after) args.push('-f', `after=${after}`)
+          const raw = await new Promise<string>((resolve, reject) => execFile('gh', args, { timeout: 30_000, maxBuffer: 16 * 1024 * 1024 }, (err, o) => (err ? reject(err) : resolve(o))))
+          const page_ = (JSON.parse(raw) as { data: { search: { pageInfo: { hasNextPage: boolean; endCursor: string }; nodes: typeof out } } }).data.search
+          out.push(...page_.nodes.filter((n) => n && n.url))
+          if (!page_.pageInfo.hasNextPage) break
+          after = page_.pageInfo.endCursor
+        }
+        return out
+      }
+      const [merged, created] = await Promise.all([search('is:pr author:@me is:merged'), search('is:pr author:@me')])
+      const byUrl = new Map<string, { url: string; createdAt: string; mergedAt?: string; additions?: number; deletions?: number }>()
+      for (const p of created) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt, additions: p.additions, deletions: p.deletions })
+      for (const p of merged) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt, mergedAt: p.mergedAt ?? undefined, additions: p.additions, deletions: p.deletions })
+      // Links that came up in the tools' conversations: how many of the person's PRs (53).
+      const texts = this.events.threadIds().flatMap((t) => this.events.since(t, 0).flatMap((e) => (e.type === 'user' || e.type === 'text' ? [e.text] : [])))
+      const linked = new Set(texts.flatMap((t) => [...t.matchAll(/https:\/\/[\w.-]+\/[\w.-]+\/[\w.-]+\/pull\/\d+/g)].map((m) => m[0])))
+      const summary = prSummary([...byUrl.values()], Date.now(), days)
+      return { ...base, pr: { ...summary, linked: [...linked].filter((u) => byUrl.has(u)).length } }
     } catch {
       return base
     }
