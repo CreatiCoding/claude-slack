@@ -100,7 +100,7 @@ export interface WebSession {
   /** The context window and what it holds: `used` is rounded to 1,000 tokens (43). */
   contextWindow?: { size: number; used: number }
   /** The plan's usage in percent, five-hour and weekly (43). */
-  usage?: { fiveHour?: number; sevenDay?: number }
+  usage?: { fiveHour?: number; sevenDay?: number; fiveHourResetsAt?: number; sevenDayResetsAt?: number }
   /** The transcript's size in MB, one decimal (43). */
   transcriptMb?: number
   /** SESSION.md in the session folder, when there is one (43). */
@@ -861,7 +861,7 @@ export class Broker {
     else if (s.contextLabel) out.context = s.contextLabel
     if (st?.contextSize !== undefined && st.contextUsed !== undefined) out.contextWindow = { size: st.contextSize, used: st.contextUsed }
     const usage = this.status.usage()
-    if (usage) out.usage = { fiveHour: usage.fiveHour, sevenDay: usage.sevenDay }
+    if (usage) out.usage = { fiveHour: usage.fiveHour, sevenDay: usage.sevenDay, fiveHourResetsAt: usage.fiveHourResetsAt, sevenDayResetsAt: usage.sevenDayResetsAt }
     if (s.transcriptPath) {
       const now = Date.now()
       let size = this.transcriptSizes.get(s.transcriptPath)

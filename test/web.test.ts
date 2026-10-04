@@ -473,7 +473,7 @@ test('목록 값(43): 사용량은 가장 최근 상태 파일의 값을 쓰고,
   const store = new StatusStore(dir)
   assert.equal(store.usage(1_000), undefined, '파일이 없으면 값도 없다')
   writeFileSync(join(dir, 'a.json'), JSON.stringify({ at: 1, rateLimits: { fiveHour: { used: 40, resetsAt: 9_999_999_999 }, sevenDay: { used: 12, resetsAt: 1 } } }))
-  assert.deepEqual(store.usage(2_000_000), { fiveHour: 40, sevenDay: 0 }, '초기화 시각이 지난 주간 창은 0%')
+  assert.deepEqual(store.usage(2_000_000), { fiveHour: 40, sevenDay: 0, fiveHourResetsAt: 9_999_999_999_000, sevenDayResetsAt: 1000 }, '초기화 시각이 지난 주간 창은 0%')
   rmSync(dir, { recursive: true, force: true })
 })
 

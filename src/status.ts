@@ -34,6 +34,9 @@ export interface SessionStatus {
 export interface PlanUsage {
   fiveHour?: number
   sevenDay?: number
+  /** When each window resets, epoch ms (77: the gauge's tooltip). */
+  fiveHourResetsAt?: number
+  sevenDayResetsAt?: number
 }
 
 const USAGE_CACHE_MS = 5_000
@@ -74,7 +77,8 @@ export class StatusStore {
     }
     const rl = newest?.rateLimits
     const pct = (w: RateWindow | undefined) => (!w || typeof w.used !== 'number' ? undefined : w.resetsAt && w.resetsAt * 1000 <= now ? 0 : Math.round(w.used))
-    const usage = rl ? { fiveHour: pct(rl.fiveHour), sevenDay: pct(rl.sevenDay) } : undefined
+    const reset = (w: RateWindow | undefined) => (w?.resetsAt ? w.resetsAt * 1000 : undefined)
+    const usage = rl ? { fiveHour: pct(rl.fiveHour), sevenDay: pct(rl.sevenDay), fiveHourResetsAt: reset(rl.fiveHour), sevenDayResetsAt: reset(rl.sevenDay) } : undefined
     this.usageCache = { at: now, usage }
     return usage
   }
