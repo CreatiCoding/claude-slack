@@ -1223,7 +1223,7 @@ export class Broker {
     const threads: StatThread[] = this.events.threadIds().map((thread) => ({
       thread,
       cwd: cwds.get(thread) ?? '',
-      events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined })),
+      events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined, text: 'text' in e ? (e as { text?: string }).text : undefined })),
     }))
     return computeStats(threads, Date.now(), days)
   }
@@ -1232,7 +1232,9 @@ export class Broker {
   private prViews = new Map<string, { at: number; html: string }>()
   async webPrView(url: string): Promise<{ ok: boolean; html?: string; note?: string }> {
     const host = /^https:\/\/([\w.-]+)\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.exec(url)?.[1]
-    if (!host || !prHosts().includes(host)) return { ok: false, note: 'PR 주소가 아니에요' }
+    // A host from settings, or the origin of a folder a session works in (71).
+    const origins = this.registry.live.flatMap((s) => originHosts(s.cwd))
+    if (!host || ![...prHosts(), ...origins].includes(host)) return { ok: false, note: 'PR 주소가 아니에요' }
     const hit = this.prViews.get(url)
     if (hit && Date.now() - hit.at < 600_000) return { ok: true, html: hit.html }
     try {

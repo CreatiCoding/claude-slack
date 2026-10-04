@@ -990,7 +990,14 @@ async function resume(r, { confirmed = false } = {}) {
   // Started from the preview (47) it needs no second question; a press anywhere else still asks (19).
   if (!confirmed && !confirm(`"${r.title || folderOf(r.cwd)}" 대화를 이어서 할까요?`)) return
   try {
-    const res = await api('/api/session/resume', { id: r.id })
+    let res
+    try {
+      res = await api('/api/session/resume', { id: r.id })
+    } catch (err) {
+      // Already alive (71): the broker answers with the thread; go there instead of stopping at the error.
+      if (!err.data?.thread) throw err
+      res = { thread: err.data.thread, note: '이미 살아 있는 대화예요. 그 세션으로 갈게요' }
+    }
     toast(res.note)
     if (res.thread) {
       if (res.thread === current) await catchUp(res.thread) // already there: just make sure it's fresh
@@ -1920,14 +1927,12 @@ function wireCopyButtons(doc) {
     const target = doc.getElementById(btn.getAttribute('data-copy'))
     if (!target) return
     const text = 'value' in target ? target.value : target.textContent
+    // 1.5 s of feedback either way (71): a failed copy says so instead of staying silent.
+    const prev = btn.textContent
     navigator.clipboard
       .writeText(text ?? '')
-      .then(() => {
-        const prev = btn.textContent
-        btn.textContent = '복사했어요'
-        setTimeout(() => btn.isConnected && (btn.textContent = prev), 1500)
-      })
-      .catch(() => {})
+      .then(() => (btn.textContent = '복사했어요'), () => (btn.textContent = '복사하지 못했어요'))
+      .finally(() => setTimeout(() => btn.isConnected && (btn.textContent = prev), 1500))
   })
 }
 function htmlPreview(html, code, codeBox, name) {
@@ -2322,6 +2327,9 @@ let typing = null
 let paceRate = 0
 let paceAt = 0
 let paceLen = 0
+// The backlog present when it appeared drains at a fixed rate over 1,200 ms (71): a share of what is left each
+// frame would only leave about a third after 1.2 s.
+let catchPerMs = 0
 function typeInto(el, target) {
   if (!el) return
   let keep = typed
@@ -2350,13 +2358,15 @@ function typeInto(el, target) {
     draw()
     return
   }
+  const backlogNow = target.length - typed.length
+  catchPerMs = Math.max(catchPerMs, backlogNow / 1200)
   let last = performance.now()
   const step = (t) => {
-    if (typed.length >= target.length) return
+    if (typed.length >= target.length) return void (catchPerMs = 0)
     const elapsed = Math.max(0, t - last)
     last = t
     const backlog = target.length - typed.length
-    const advance = Math.max(paceRate * elapsed, (backlog * elapsed) / 1200)
+    const advance = Math.max(paceRate * elapsed, catchPerMs * elapsed)
     typed = target.slice(0, typed.length + Math.min(backlog, Math.max(1, Math.ceil(advance))))
     draw()
     typing = requestAnimationFrame(step)

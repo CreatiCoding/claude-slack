@@ -345,3 +345,11 @@ test('sameMessage: 이미지/파일 첨부 표시가 붙거나 바뀌어도 같�
   assert.ok(sameMessage('[File attached: /tmp/log.txt] 로그 확인해줘', '로그 확인해줘'), '우리 쪽 첨부 표시를 떼고 비교한다')
   assert.ok(!sameMessage('이거 봐줘 [Image #1]', '저거 봐줘 [Image #1]'), '본문이 다르면 여전히 다른 메시지다')
 })
+
+test('choices(71): 문장 가운데의 ```choices 글자는 선택지가 아니고, 줄 맨 앞의 펜스만 선택지로 본다', async () => {
+  const { extractChoices } = await import('../src/format.ts')
+  const mid = '이 글에는 ```choices 라고 쓴 말이 들어 있어요\n그 뒤 글입니다'
+  assert.deepEqual(extractChoices(mid), { text: mid })
+  const real = '어느 쪽으로 할까요?\n```choices\n진행해\n멈춰\n```'
+  assert.deepEqual(extractChoices(real), { text: '어느 쪽으로 할까요?', choices: ['진행해', '멈춰'] })
+})

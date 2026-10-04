@@ -10,6 +10,8 @@ export interface StatEvent {
   via?: string
   name?: string
   state?: string
+  /** A message's text (a permission card's line starts with 🔐 권한 요청). */
+  text?: string
 }
 
 export interface StatThread {
@@ -128,7 +130,7 @@ export function computeStats(threads: StatThread[], now: number, days: StatDays)
   const inRange = (at: number) => at >= from && at <= now
   const myMessages = threads.flatMap((t) => t.events.filter((e) => e.type === 'user' && (e.via === 'web' || e.via === 'terminal') && inRange(e.at)))
   const tools = threads.flatMap((t) => t.events.filter((e) => e.type === 'tool' && inRange(e.at)))
-  const perms = threads.flatMap((t) => t.events.filter((e) => e.type === 'msg' && inRange(e.at) && /권한 요청/.test(e.name ?? '')))
+  const perms = threads.flatMap((t) => t.events.filter((e) => e.type === 'msg' && inRange(e.at) && /권한 요청/.test(e.text ?? '')))
   const byDay = new Map<string, { work: number; mine: number; sessions: Set<string> }>()
   const dayKey = (at: number) => {
     const d = new Date(at)

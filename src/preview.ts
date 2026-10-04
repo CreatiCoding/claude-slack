@@ -154,6 +154,7 @@ export function visualWidth(s: string): number {
       (c >= 0xfe30 && c <= 0xfe4f) ||
       (c >= 0xff00 && c <= 0xff60) ||
       (c >= 0xffe0 && c <= 0xffe6) ||
+      (c >= 0x2600 && c <= 0x27bf) ||
       (c >= 0x1f300 && c <= 0x1faff)
     w += wide ? 2 : 1
   }

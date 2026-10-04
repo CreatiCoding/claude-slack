@@ -95,7 +95,8 @@ export function toMrkdwn(md: string): string {
     .join('')
 }
 
-const CHOICES_RE = /\n?```choices\n([\s\S]*?)\n```\s*$/
+// The fence starts a line, and no line inside it has a fence of its own (71): mid-sentence text is not a block.
+const CHOICES_RE = /(?:^|\n)```choices[ \t]*\n((?:(?![^\n]*```)[^\n]*\n)*?)```\s*$/
 
 /**
  * A trailing ```choices fenced block (22): up to 6 short options the person picks instead of typing a
