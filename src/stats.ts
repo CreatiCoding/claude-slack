@@ -7,6 +7,8 @@
 export interface StatEvent {
   type: string
   at: number
+  /** A message's Slack time: a held message is shown twice in the log under the same one (16). */
+  ts?: string
   via?: string
   name?: string
   state?: string
@@ -134,7 +136,8 @@ export function computeStats(threads: StatThread[], now: number, days: StatDays)
     series.push(Math.round((overlap / width) * 100) / 100)
   }
   const inRange = (at: number) => at >= from && at <= now
-  const myMessages = threads.flatMap((t) => t.events.filter((e) => e.type === 'user' && (e.via === 'web' || e.via === 'terminal') && inRange(e.at)))
+  // A held message is shown again when it is delivered (its bubble moves): the same message is one, not two (16).
+  const myMessages = [...new Map(threads.flatMap((t) => t.events.filter((e) => e.type === 'user' && (e.via === 'web' || e.via === 'terminal') && inRange(e.at)).map((e) => [`${t.thread}\n${e.ts ?? e.at}`, e] as const))).values()]
   const tools = threads.flatMap((t) => t.events.filter((e) => e.type === 'tool' && inRange(e.at)))
   const perms = threads.flatMap((t) => t.events.filter((e) => e.type === 'msg' && inRange(e.at) && /권한 요청/.test(e.text ?? '')))
   const byDay = new Map<string, { work: number; mine: number; sessions: Set<string> }>()

@@ -1248,7 +1248,7 @@ export class Broker {
     const threads: StatThread[] = this.events.threadIds().map((thread) => ({
       thread,
       cwd: cwds.get(thread) ?? '',
-      events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined, text: 'text' in e ? (e as { text?: string }).text : undefined })),
+      events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, ts: 'ts' in e ? (e as { ts?: string }).ts : undefined, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined, text: 'text' in e ? (e as { text?: string }).text : undefined })),
     }))
     return computeStats(threads, Date.now(), days)
   }

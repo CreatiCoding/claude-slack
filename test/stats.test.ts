@@ -50,3 +50,15 @@ test('사용 통계(53): PR 절 — 머지·생성 수, 머지까지 시간(머�
   assert.equal(r.medianMergeMs, day)
   assert.equal(r.recent.length, 2)
 })
+
+test('내 메시지(16): 붙잡혔다 전달되며 다시 남은 같은 글은 한 번으로 센다', () => {
+  // A held message is in the log twice under the same Slack time; the stats count it once.
+  const now = Date.now()
+  const events = [
+    { type: 'user', at: now - 60_000, via: 'web', ts: '1.1' },
+    { type: 'user', at: now - 30_000, via: 'web', ts: '1.1' },
+    { type: 'user', at: now - 20_000, via: 'web', ts: '1.2' },
+  ]
+  const stats = computeStats([{ thread: 't1', cwd: '/p', events }], now, 1)
+  assert.equal(stats.daily.reduce((n, d) => n + d.mine, 0), 2)
+})
