@@ -3726,8 +3726,8 @@ addEventListener('keydown', (e) => {
     const s = sessionOf(current)
     if (s && s.state === 'busy') {
       e.preventDefault()
+      // No toast (73): the stop shows in the conversation and the activity box.
       command(s, 'esc')
-      toast('중단했어요')
       return
     }
   }
