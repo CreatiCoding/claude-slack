@@ -170,6 +170,7 @@ async function restart(): Promise<void> {
   console.log('20초 안에 응답하지 않았습니다. launchd 상태를 확인하세요: launchctl list | grep claude-slack')
 }
 
+// Claude processes (not brokers) that share one run: the newer one stays, the older is closed (60).
 async function dedupe(autoYes: boolean): Promise<void> {
   const procs = await claudeProcesses()
   const byGroup = new Map<string, ClaudeProc[]>()

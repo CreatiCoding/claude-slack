@@ -858,6 +858,16 @@ function renderList() {
     add.addEventListener('click', () => newGroup())
     list.append(add)
   }
+  // The recovery guide sits under the list (60).
+  if (!list.querySelector('.recovery-line')) {
+    const rec = document.createElement('a')
+    rec.className = 'recovery-line'
+    rec.href = '/recovery'
+    rec.target = '_blank'
+    rec.rel = 'noopener'
+    rec.textContent = '문제가 생겼을 때 · 복구 가이드'
+    list.append(rec)
+  }
   list.scrollTop = keepScroll
   if (focusedThread) list.querySelector(`.row[data-thread="${focusedThread}"]`)?.focus()
 }
@@ -3291,7 +3301,6 @@ function globalItems() {
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
     { label: '사용 통계', icon: 'spark', run: () => openStats(7) },
-    { label: '문제가 생겼을 때 · 복구 가이드', icon: 'undo', run: () => window.open('/recovery', '_blank') },
     { label: '새 그룹', icon: 'folder', run: () => newGroup() },
     { label: '기본 프롬프트', icon: 'edit', run: editDefaultPrompt },
     {
