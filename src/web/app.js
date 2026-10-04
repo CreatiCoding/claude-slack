@@ -890,7 +890,10 @@ function liveRow(s, groupId) {
   // A phone row (56): line 2 is the first message, line 3 the state (or the wait) · folder · when.
   if (isPhone()) {
     row.querySelector('.sub.last').textContent = s.preview || last
-    row.querySelector('.sub.where').textContent = `${s.state === 'waiting' ? s.waiting || STATE.waiting : STATE[s.state] || s.state} · ${folderOf(s.cwd)} · ${ago(s.lastAt)}`
+    // While a turn runs, the line says what it runs (72), and how long it has been quiet.
+    const quiet = s.quietMs ? ` · ${Math.round(s.quietMs / 60000)}분째 새 출력 없음` : ''
+    const desc = s.state === 'waiting' ? s.waiting || STATE.waiting : s.running?.length ? `실행 중: ${s.running.join(', ')}${quiet}` : STATE[s.state] || s.state
+    row.querySelector('.sub.where').textContent = `${desc} · ${folderOf(s.cwd)} · ${ago(s.lastAt)}`
   } else {
     row.querySelector('.sub.last').textContent = last
     row.querySelector('.sub.where').textContent = `${folderOf(s.cwd)} · ${ago(s.lastAt)}`
