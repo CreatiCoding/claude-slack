@@ -526,6 +526,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 @keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
 .menu.sheet { animation: sheet-up .28s cubic-bezier(.2, .9, .3, 1); }
 @media (prefers-reduced-motion: reduce) { .menu.sheet { animation: none; } }
+@keyframes sheet-down { to { transform: translateY(24px); opacity: 0; } }
+.menu.sheet.closing { animation: sheet-down .28s cubic-bezier(.2, .9, .3, 1) forwards; }
 /* The sheet's grab handle (67): 48×4 in a 16px row, centred. */
 .menu.sheet::before { content: ''; display: block; width: 48px; height: 4px; margin: 6px auto 6px; border-radius: 2px; background: #e5e8eb; }
 @media (prefers-color-scheme: dark) { .menu.sheet::before { background: #3c3c47; } }

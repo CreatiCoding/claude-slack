@@ -3097,9 +3097,22 @@ async function sendText(s, text, pics = []) {
 // ------------------------------------------------------------------ menus
 let menuState = null
 function closeMenu() {
-  menuState?.scrim.remove()
-  menuState?.menu.remove()
+  const state = menuState
   menuState = null
+  if (!state) return
+  // A sheet goes back down (67) before it is removed; a reduced-motion reader gets it at once.
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches
+  if (!state.menu.classList.contains('sheet') || reduce) {
+    state.scrim.remove()
+    state.menu.remove()
+    return
+  }
+  state.menu.classList.add('closing')
+  state.scrim.classList.add('closing')
+  setTimeout(() => {
+    state.scrim.remove()
+    state.menu.remove()
+  }, 280)
 }
 /**
  * A bottom sheet (20): starting a touch within 24px of its own top edge (where a drag handle would be —
