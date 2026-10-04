@@ -349,18 +349,18 @@ html.kbd-open .composer { padding-bottom: 10px; }
 /* Gauges above the composer (44): ring + value, the explanation on hover/focus (PC) or a toast (phone). */
 .gauges { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--fs-s); color: var(--muted); margin: 0 0 6px; }
 .gauge { position: relative; display: inline-flex; align-items: center; gap: 4px; background: none; border: 0; padding: 2px 0; color: inherit; font: inherit; cursor: default; }
-.gauge svg { width: 20px; height: 20px; transform: rotate(-90deg); flex: none; }
-.gauge circle { fill: none; stroke-width: 3; }
-.gauge .bg { stroke: var(--line); }
-.gauge .fg { stroke: var(--green); transition: stroke-dashoffset 0.2s; }
-.gauge.warn .fg { stroke: var(--yellow); }
+.gauge svg { width: 16px; height: 16px; transform: rotate(-90deg); flex: none; }
+.gauge circle { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+.gauge .bg { stroke: var(--line-strong); }
+.gauge .fg { stroke: var(--green); transition: stroke-dashoffset var(--t) var(--ease); }
+.gauge.warn .fg { stroke: var(--orange); }
 .gauge.bad .fg { stroke: var(--red); }
 .gauge .tip { position: absolute; left: 0; bottom: calc(100% + 8px); min-width: 180px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 10px 12px; display: none; z-index: 5; text-align: left; color: var(--text); }
 .gauge:hover .tip, .gauge:focus-visible .tip { display: block; }
 .gauge .tip b { display: block; font-size: 15px; margin: 2px 0 6px; }
 .gauge .tip .bar { height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; margin-bottom: 6px; }
 .gauge .tip .bar i { display: block; height: 100%; background: var(--green); }
-.gauge.warn .tip .bar i { background: var(--yellow); }
+.gauge.warn .tip .bar i { background: var(--orange); }
 .gauge.bad .tip .bar i { background: var(--red); }
 .gauge .tip small { display: block; color: var(--muted); margin-top: 4px; }
 .size-banner { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--yellow-soft); color: var(--text-2); border-radius: 8px; padding: 6px 10px; margin-bottom: 6px; font-size: var(--fs-s); }
@@ -652,3 +652,11 @@ body > .crash { position: fixed; font: 15px/1.5 -apple-system, system-ui, sans-s
 @media (prefers-reduced-motion: reduce) { .row:active, .chip:active { transform: none; } }
 button:active:not(:disabled) { transform: scale(.9); transition: transform .2s cubic-bezier(.25,.1,.25,1); }
 @media (hover: hover) and (pointer: fine) { .row:hover { background: var(--hover); } .sec-head:hover { background: var(--hover); } }
+.gauge .g-label { font-size: 11px; line-height: 14px; color: var(--muted); white-space: nowrap; }
+.gauge { padding: 1px 3px; border-radius: var(--r-6); }
+.gauge:hover { background: var(--hover); }
+.gauge .tip .g-name { display: block; color: var(--muted); font-size: var(--fs-s); }
+.gauge .tip .g-row { display: flex; justify-content: space-between; gap: 12px; font-size: var(--fs-s); }
+.gauge .tip .g-line { display: block; font-size: var(--fs-s); color: var(--text-2); }
+.g-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 50%; color: var(--muted); font-size: 11px; background: none; border: 0; padding: 0; overflow: hidden; }
+.g-folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
