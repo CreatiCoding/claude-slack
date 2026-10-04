@@ -2726,7 +2726,11 @@ test('webLive: 바쁠 때 글 블록이면 markdown, 블록이 없으면(생각 
   t.tmux.screen = ['✢ Thinking…', ...box].join('\n') // 블록 없이 스피너만: 생각 중
   assert.equal(await t.broker.webLive('1.000'), undefined)
 
+  // Idle with the block still on screen: it is still shown (73); an ended session shows nothing.
   session.state = 'idle'
+  t.tmux.screen = ['⏺ 쓰는 중인 \x1b[1m굵은\x1b[0m 글', '', '✢ Writing…', ...box].join('\n')
+  assert.equal(await t.broker.webLive('1.000'), '쓰는 중인 **굵은** 글')
+  ;(session as { ended?: boolean }).ended = true
   assert.equal(await t.broker.webLive('1.000'), '')
   s.conn.close()
   t.close()

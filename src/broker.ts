@@ -755,7 +755,8 @@ export class Broker {
    */
   async webLive(thread: string): Promise<string | undefined> {
     const s = this.registry.byThreadTs(thread)
-    if (!s || s.ended || s.state !== 'busy' || !s.pane) {
+    // A block still on the screen is shown whatever the state (73): only an ended or paneless session has none.
+    if (!s || s.ended || !s.pane) {
       this.liveShown.delete(thread)
       return ''
     }
