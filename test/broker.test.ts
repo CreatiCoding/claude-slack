@@ -2699,8 +2699,10 @@ test(':lightfork — SESSION.md 가 쓰이면 그 내용으로 새 세션을 띄
   await until(() => t.slack.posts.some((p) => /SESSION\.md/.test(p.text)), '작성 요청 안내')
   await tick(1100)
   writeFileSync(join(dir, 'SESSION.md'), '# 이어받을 내용\n여기까지 했음')
+  // The turn that writes the file ends (the Stop hook); the light copy waits for that (46).
+  await hook(t.socketPath, 100, { hook_event_name: 'Stop' })
   await until(() => t.tmux.launches.length >= 1, '새 세션을 띄움', 8000)
-  await until(() => t.slack.posts.some((p) => /🧵.*새 스레드로 넘겼습니다/.test(p.text)), '넘김 안내')
+  await until(() => t.slack.posts.some((p) => /🧵.*새 스레드로 넘겼어요/.test(p.text)), '넘김 안내')
   const session = (t.broker as unknown as { registry: { live: Array<{ handedOffTo?: string }> } }).registry.live[0]!
   assert.ok(session.handedOffTo)
 
@@ -2805,6 +2807,28 @@ test('45: 휴면은 켜고 끌 수 있고, 글이 가거나 터미널에서 입�
   await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:rest on' })
   await hook(t.socketPath, 100, { hook_event_name: 'UserPromptSubmit', prompt: '터미널에서 입력' })
   assert.equal(t.broker.webSessions()[0]!.resting, undefined, '터미널 입력도 풀린다')
+  s.conn.close()
+  t.close()
+})
+
+test('46: 가벼운 복제 — SESSION.md 가 20KB 를 넘으면 묻고, 앞부분만이면 잘라서 넘기고 원래 세션은 쉰다 (claude-web 이관: 46)', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cs-lf46-'))
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1', cwd: dir })
+  // The file is already there and newer than the last word: no new request, only the size question.
+  writeFileSync(join(dir, 'SESSION.md'), '가'.repeat(9000))
+  void t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:lightfork' })
+  await until(() => t.slack.posts.some((p) => /정리해 달라고/.test(p.text)), '작성 요청')
+  // The turn that asked ends; the size question follows.
+  await hook(t.socketPath, 100, { hook_event_name: 'Stop' })
+  await until(() => t.slack.posts.some((p) => /줄여서 넘길까요\?/.test(p.text)), '크기를 묻는 카드', 5000)
+  assert.equal(t.tmux.launches.length, 0, '묻는 동안은 띄우지 않는다')
+
+  await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:lightfork cut' })
+  await until(() => t.tmux.launches.length >= 1, '앞부분만 넘겨 띄운다', 8000)
+  const session = (t.broker as unknown as { registry: { live: Array<{ resting?: boolean; handedOffTo?: string }> } }).registry.live[0]!
+  assert.ok(session.handedOffTo, '원래 세션은 넘겨졌다고 표시')
+  assert.equal(session.resting, true, '원래 세션은 휴면으로 둔다')
   s.conn.close()
   t.close()
 })

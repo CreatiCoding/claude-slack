@@ -27,7 +27,7 @@ const MAX_OPTIONS = 20
 
 const opt = (text: string, value: string) => ({ text: { type: 'plain_text', text, emoji: true }, value })
 /** action_id must be unique within a message; `renderActionId` handles that and the broker matches the base. */
-const btn = (text: string, base: ActionBase, value: string, style?: 'primary' | 'danger') => ({
+export const btn = (text: string, base: ActionBase, value: string, style?: 'primary' | 'danger') => ({
   type: 'button',
   text: { type: 'plain_text', text, emoji: true },
   action_id: renderActionId(base, value),

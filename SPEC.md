@@ -2709,6 +2709,22 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-100 복제와 가벼운 복제 (46)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 트리거: 복제(`webFork`, 세션 메뉴 `복제`), 가벼운 복제(명령 `lightfork`, 세션 메뉴 `가벼운 복제`, 50MB 띠·창)
+- 처리 규칙:
+  1. 복제: 새 세션 이름은 `<원본 이름>의 사본`. 원본이 든 그룹에 넣는다. 복사하는 이벤트는 사람 글·답·도구·도구 결과·명령 출력(카드 없는 `msg`)·할 일. 카드(버튼이 달린 `msg`)는 복사하지 않는다. 알림 문구: `여기까지 복제한 대화예요 (<원본 id 앞 8자> 에서). 이 아래부터 새 세션이에요`.
+  2. 가벼운 복제: SESSION.md 작성을 요청하고(원본의 마지막 사람 글 뒤에 쓴 게 없으면 다시 요청하지 않는다), 그 턴이 끝나면 읽는다. 없으면 `❌ 가벼운 복제로 새 세션을 열지 못했어요. SESSION.md 가 없어요`.
+  3. 20,000 byte 를 넘으면 카드로 묻는다: `SESSION.md 가 N KB 예요 · 줄여서 넘길까요?` 버튼 `줄이기`(줄여 달라고 요청한 뒤 다시 판정)·`앞부분만`(UTF-8 경계에서 앞 20,000 byte 만).
+  4. 새 세션은 원본과 같은 이름, 같은 그룹, 같은 모델·effort·권한 모드(`settingsArgs`)로 뜬다. 원본은 휴면(REQ-F-099)으로 두고, 100 MB 로 잠긴 원본은 `/exit` 로 끝낸다.
+  5. 웹 버튼 응답에 새 스레드(`thread`)를 실어 보낸다.
+  6. 실패는 `❌ 가벼운 복제로 새 세션을 열지 못했어요. <이유>`.
+- 출력: 새 스레드, 원본의 넘김 안내
+- 수용 기준: AC-170
+- 근거: `src/broker.ts` `lightfork` 명령·`lightforkRun`·`awaitTurnEnd`·`copyGroup`·`startFork`·`cutUtf8`, `src/web/app.js` `sessionItems`·`renderSizeBanner`
+- 추적: REQ-F-099, REQ-F-098(50MB 띠), 이전 `:lightfork`(P4-32)
+
 ### REQ-F-099 휴면 (45)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5533,6 +5549,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-170 | REQ-F-100 | 복제는 이름·그룹·이벤트 종류·알림 문구가 맞고, 가벼운 복제는 20KB 를 넘으면 묻고, 앞부분만이면 잘라 넘기며 원본은 휴면이 된다 | `test/web.test.ts` 복제 묶음, `test/broker.test.ts` 46 묶음, `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-169 | REQ-F-099 | 휴면을 켜면 회색 배지, 글이 가면 풀린다, 터미널 입력도 풀린다. 재시작 기록에 남는다 | `test/broker.test.ts` 의 45 묶음, `scripts/qa-web.ts` 45 묶음(PC·폰) | 위 규칙대로 나온다 |
 | AC-168 | REQ-F-098 | 게이지 다섯 개의 값과 색, 50MB 띠와 창(세션마다 한 번), PC 설명 상자, 폰 토스트, 폰 폭에서 가로 넘침 없음 | `scripts/qa-web.ts` 의 44 묶음 | 위 규칙대로 나온다 |
 | AC-167 | REQ-F-097 | 끝난 세션은 ended 로 목록에 남고, 뜨는 중인 대화는 starting 으로 보인다. 사용량은 가장 최근 상태 파일을 쓰고 지난 초기화 창은 0% | `test/web.test.ts` 의 목록 값(43) 묶음 | 위 규칙대로 나온다 |

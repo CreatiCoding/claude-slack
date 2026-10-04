@@ -1025,7 +1025,7 @@ function renderSizeBanner(s) {
     banner.innerHTML = locked
       ? `<span>대화 기록이 ${Math.round(mb)}MB 로 너무 커서 입력을 막았어요 · 가벼운 복제만 할 수 있어요</span><button type="button" class="ghost" data-act="lightfork">가벼운 복제</button>`
       : `<span>대화 기록이 ${Math.round(mb)}MB 로 너무 길어졌어요 · 가벼운 복제로 이어가요</span><button type="button" class="ghost" data-act="lightfork">가벼운 복제</button>`
-    banner.querySelector('[data-act]').addEventListener('click', () => s && sendText(s, ':lightfork'))
+    banner.querySelector('[data-act]').addEventListener('click', () => s && command(s, 'lightfork'))
     // Over 50 MB, once per session: a window that asks, remembered on this device (last 200 sessions) (44).
     const seen = store.get('size-seen', [])
     if (!locked && !seen.includes(s.thread)) {
@@ -1043,7 +1043,7 @@ function showSizeWindow(s, mb, locked) {
   win.innerHTML = `<div class="size-card" role="dialog" aria-modal="true"><p><b>대화 기록이 ${mb}MB 예요</b></p><p>${locked ? '입력을 막았어요. 가벼운 복제로 이어가 주세요.' : '너무 길면 답이 느려져요. 가벼운 복제로 이어가면 좋아요.'}</p><div class="size-actions"><button type="button" class="primary" data-act="lightfork">가벼운 복제</button>${locked ? '' : '<button type="button" class="ghost" data-act="close">나중에</button>'}</div></div>`
   win.querySelector('[data-act="lightfork"]').addEventListener('click', () => {
     win.remove()
-    sendText(s, ':lightfork').catch(() => {})
+    command(s, 'lightfork')
   })
   win.querySelector('[data-act="close"]')?.addEventListener('click', () => win.remove())
   document.body.append(win)
@@ -2666,6 +2666,7 @@ function sessionItems(s) {
       ],
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
+    { label: '가벼운 복제', icon: 'copy', run: () => command(s, 'lightfork') },
     { label: s.resting ? '휴면 풀기' : '휴면으로 두기', icon: 'dot', run: () => command(s, s.resting ? 'rest off' : 'rest on') },
     { label: '새로고침', icon: 'refresh', run: () => refreshSession(s) },
     {

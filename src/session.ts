@@ -27,6 +27,9 @@ export interface Session {
   refreshWaitNoted?: boolean
   /** Put to rest by the person (45): shown grey; a message or a terminal prompt wakes it. */
   resting?: boolean
+  /** When SESSION.md was last asked for and written, and when the person last wrote (46): decides whether to ask again. */
+  summaryAt?: number
+  humanAt?: number
   /** Background work that a refresh cut off, told to the relaunched session first. */
   interrupted?: Array<{ kind: string; label: string }>
   /** How often each dialog was surfaced lately, so one that keeps coming back is explained once instead of carded forever. */

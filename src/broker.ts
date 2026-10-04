@@ -22,7 +22,7 @@ import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, readSessionText, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, extractChoices, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
-import { answeredBlocks, choiceBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
+import { btn, answeredBlocks, choiceBlocks, EFFORT_OPTIONS, MODEL_OPTIONS, PERMISSION_MODES, refreshPicker, confirmBlocks, controlPanel, heldNoticeBlocks, keyedDialogBlocks, markAnswered, shortModel, newSessionEntry, newSessionModal, NEW_SESSION_BLOCK_ID, NEW_SESSION_VIEW_ID, permissionBlocksV2, planApprovalBlocks, questionBlocks, homeView, resumePicker, settingsModal, stuckBlocks, SETTINGS_VIEW_ID, type PanelState, type PurgeScope, type Question, type SessionState } from './panel.ts'
 import { renderScreenPictures, type ScreenPicture } from './terminal-image.ts'
 import { PinStore } from './pins.ts'
 import { TitleStore } from './titles.ts'
@@ -293,6 +293,19 @@ const HOOK_DEDUPE_MS = 2000
 const ACTION_DEDUPE_MS = 1500
 /** A web message repeated within this window is a double send, not a second message (17/40). */
 const WEB_SEND_DEDUPE_MS = 1500
+/** Cut a string to at most `maxBytes` of UTF-8, at a character boundary (46). */
+function cutUtf8(s: string, maxBytes: number): string {
+  let out = ''
+  let bytes = 0
+  for (const ch of s) {
+    const b = Buffer.byteLength(ch)
+    if (bytes + b > maxBytes) break
+    out += ch
+    bytes += b
+  }
+  return out
+}
+
 /** How long a command's dialog may take to appear after we type it. */
 const POST_COMMAND_DIALOG_MS = 3000
 const POST_SLASH_DIALOG_MS = 2000
@@ -308,6 +321,8 @@ const BTW_POLL_MS = 400
 const LIGHTFORK_TIMEOUT_MS = 180_000
 const LIGHTFORK_POLL_MS = 1_000
 const LIGHTFORK_MAX_CHARS = 20_000
+/** Longer than this, SESSION.md is asked about before a light copy (46). */
+const LIGHTFORK_FILE_MAX = 20_000
 const SCREEN_SETTLE_TIMEOUT_MS = 4000
 /** Lines kept from a screen: enough for a glance, few enough to read on a phone. */
 const SCREEN_DIGEST_LINES = 20
@@ -378,6 +393,8 @@ function startingRow(p: PendingLaunch): WebSession {
 
 interface PendingLaunch {
   threadTs: string
+  /** The name the new session takes when it says hello (46: a copy is "<name>의 사본"). */
+  title?: string
   /** The conversation being reopened, so a second request for it is refused while this one is coming up. */
   resumeId?: string
   rootTs?: string
@@ -448,6 +465,8 @@ export class Broker {
   private recentWebSends = new RecentKeys(WEB_SEND_DEDUPE_MS)
   /** The one-line result of the page's last button press, for its toast (42). */
   private lastWebNote?: string
+  /** The thread a page action just opened (a light copy), handed back with its result (46). */
+  private lastWebThread?: string
   /** Sessions that just ended, newest last, for the list's ended section (43). */
   private recentEnded = new Map<string, WebSession>()
   /** Per-transcript size reads, every 30 s (43). */
@@ -1105,23 +1124,28 @@ export class Broker {
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
     if (!session.sessionId) return { ok: false, note: '대화 id 를 아직 모릅니다. 첫 메시지 뒤에 다시 해 보세요.' }
     this.logAt('INFO', 'launch', 'fork', this.tag(session))
-    const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: [...this.settingsArgs(session), '--fork-session'], fork: { fromThread: session.threadTs, transcript: session.transcriptPath } })
+    const name = session.manualTitle ?? session.title ?? basename(session.cwd)
+    const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: [...this.settingsArgs(session), '--fork-session'], title: `${name}의 사본`, fork: { fromThread: session.threadTs, transcript: session.transcriptPath, fromId: session.sessionId?.slice(0, 8) } })
+    if (thread) this.copyGroup(session.threadTs, thread)
     return thread ? { ok: true, note: '복제한 세션을 띄웁니다.', thread } : { ok: false, note: '세션을 띄우지 못했습니다.' }
   }
 
   /** A button in the web app: the very handler a Slack click reaches, as the owner. */
-  async webAction(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string }> {
+  async webAction(a: { actionId: string; value: string; messageTs?: string; blocks?: unknown[] }): Promise<{ ok: boolean; note: string; thread?: string }> {
     if (!a.actionId || typeof a.value !== 'string') return { ok: false, note: '잘못된 버튼입니다.' }
     // Right after a broker restart the session may not be back yet: say so, rather than "눌렀습니다" for a press that went nowhere.
     const target = decodeValue(a.value)?.pid
     if (target && !this.registry.byPid(target)) return { ok: false, note: '세션이 아직 다시 붙지 않았어요. 잠시 뒤 다시 눌러 주세요.' }
     const thread = a.messageTs ? this.msgThread.get(a.messageTs) : undefined
     this.lastWebNote = undefined
+    this.lastWebThread = undefined
     await this.handleAction({ user: this.defaultRecipient, channel: this.cfg.channelId, actionId: a.actionId, value: a.value, messageTs: a.messageTs ?? '', ...(thread ? { threadTs: thread } : {}), ...(a.blocks ? { blocks: a.blocks } : {}) })
     // The result of what was pressed, as a toast (42); a press with no result of its own still says 눌렀습니다.
     const note = this.lastWebNote ?? '눌렀습니다.'
+    const opened = this.lastWebThread
     this.lastWebNote = undefined
-    return { ok: true, note }
+    this.lastWebThread = undefined
+    return opened ? { ok: true, note, thread: opened } : { ok: true, note }
   }
 
   // ----------------------------------------------------------------- admin
@@ -1617,6 +1641,7 @@ export class Broker {
       session.rootTs = rootTs
     }
     if (pending?.rootTs) session.rootTs = pending.rootTs
+    if (pending?.title) session.manualTitle ??= pending.title
 
     // The record before the session can be found: a hook arriving right after registration (a permission
     // dialog) must already see 전부 허용 and the rest.
@@ -3783,8 +3808,9 @@ export class Broker {
 
   /** Push a message into the session now, and watch that it actually starts a turn. */
   private async deliver(session: Session, text: string, user: string, ts: string, via: 'channel' | 'keys' = 'channel'): Promise<void> {
-    // A message reaching it wakes it (45).
+    // A message reaching it wakes it (45); the person's own words are dated for the light copy (46).
     if (session.resting) session.resting = undefined
+    if (ts !== session.threadTs) session.humanAt = Date.now()
     session.lastInjected = text
     session.triggerTs = ts
     // A synthetic delivery (계속해, :tell, the retraction notice itself) carries the thread's own ts;
@@ -3999,7 +4025,7 @@ export class Broker {
    * Start a Claude Code session in tmux bound to a Slack thread. Without a
    * threadTs (slash command, modal, resume) the bot posts a root message first.
    */
-  async launchSession(o: { cwd: string; prompt: string; user: string; threadTs?: string; rootTs?: string; resumeId?: string; extraArgs?: string[]; queued?: HeldMessage[]; fork?: { fromThread: string; transcript?: string } }): Promise<string | undefined> {
+  async launchSession(o: { cwd: string; prompt: string; user: string; threadTs?: string; rootTs?: string; resumeId?: string; extraArgs?: string[]; queued?: HeldMessage[]; fork?: { fromThread: string; transcript?: string; fromId?: string }; title?: string }): Promise<string | undefined> {
     const cwd = o.cwd
     // One conversation, one process: two of them resuming the same session id write over each other's transcript.
     // A fork is the exception: it resumes into a new session id, and the original keeps running.
@@ -4061,7 +4087,7 @@ export class Broker {
       const i = (o.extraArgs ?? []).indexOf(flag)
       return i >= 0 ? o.extraArgs![i + 1] : undefined
     }
-    this.pendingLaunches.set(threadTs, { threadTs, resumeId: o.resumeId, rootTs, statusTs, cwd, prompt: o.prompt, queued: [...(o.queued ?? [])], ...launched, ...(argAfter('--model') ? { model: argAfter('--model') } : {}), ...(argAfter('--effort') ? { effort: argAfter('--effort') } : {}) })
+    this.pendingLaunches.set(threadTs, { threadTs, title: o.title, resumeId: o.resumeId, rootTs, statusTs, cwd, prompt: o.prompt, queued: [...(o.queued ?? [])], ...launched, ...(argAfter('--model') ? { model: argAfter('--model') } : {}), ...(argAfter('--effort') ? { effort: argAfter('--effort') } : {}) })
     // The startup dialogs are over once the session's shim says hello; polling past that is wasted captures.
     this.confirmDialogs(launched.pane, () => !this.pendingLaunches.has(threadTs!))
       .then((dialogs) => dialogs.length && this.logAt('INFO', 'dialog', `auto-confirmed startup dialogs: ${dialogs.join(', ')}`, { t: threadTs, window: launched.window }))
@@ -4075,7 +4101,72 @@ export class Broker {
    * answered cards or turn marks), a line saying where the copy ends, and the original's transcript lines
    * remembered so the fork's copy of them is not replayed as new.
    */
-  private startFork(threadTs: string, fork: { fromThread: string; transcript?: string }): void {
+  /**
+   * The light copy (46): SESSION.md is asked for (unless the one already written is newer than the person's last
+   * word), read once the turn that writes it has ended, and a new session takes it as its start. `shrink` asks
+   * for a shorter file first; `cut` keeps only the first 20,000 bytes. Over 20,000 bytes and no choice given, a
+   * card asks which.
+   */
+  private async lightforkRun(c: CommandContext, s: Session, mode: string, user: string): Promise<void> {
+    const path = join(s.cwd, 'SESSION.md')
+    const fresh = existsSync(path) && (s.summaryAt ?? 0) > (s.humanAt ?? 0)
+    if (mode === 'shrink' || (!fresh && mode !== 'cut')) {
+      await c.post(mode === 'shrink' ? '📝 SESSION.md 를 줄여 달라고 요청했어요…' : '📝 지금까지 대화를 `SESSION.md` 에 정리해 달라고 요청했어요…')
+      await this.inject(s, mode === 'shrink'
+        ? 'SESSION.md 를 20KB 안으로 줄여 다시 써 주세요. 다음 세션이 바로 이어받을 핵심만 남기세요.'
+        : '지금까지의 대화를 이어받을 다음 세션이 읽을 SESSION.md 파일을 이 폴더에 써 주세요. 무엇을 하고 있었는지, 왜, 지금 어디까지 됐는지, 다음에 할 일을 정리해 주세요.', user, s.threadTs)
+      if (!(await this.awaitTurnEnd(s, LIGHTFORK_TIMEOUT_MS))) return void (await c.post('SESSION.md 를 제때 쓰지 못했어요(3분 넘게 기다렸어요). 직접 작성을 요청하거나 다시 시도하세요.'))
+      s.summaryAt = Date.now()
+    }
+    if (!existsSync(path)) return void (await c.post('❌ 가벼운 복제로 새 세션을 열지 못했어요. SESSION.md 가 없어요'))
+    let content = readFileSync(path, 'utf8')
+    const bytes = Buffer.byteLength(content)
+    if (mode !== 'cut' && bytes > LIGHTFORK_FILE_MAX) {
+      // A choice, not a silent cut (46): shorten it, or keep the first 20 KB.
+      await this.slack.post({
+        threadTs: s.threadTs,
+        text: `SESSION.md 가 ${Math.round(bytes / 1000)} KB 예요 · 줄여서 넘길까요?`,
+        blocks: [
+          { type: 'section', text: { type: 'mrkdwn', text: `SESSION.md 가 ${Math.round(bytes / 1000)} KB 예요 · 줄여서 넘길까요?` } },
+          { type: 'actions', elements: [btn('줄이기', ACTION.ctlBtn, encodeValue(s.pid, 'lightfork shrink'), 'primary'), btn('앞부분만', ACTION.ctlBtn, encodeValue(s.pid, 'lightfork cut'))] },
+        ],
+      }).catch(() => {})
+      return
+    }
+    if (mode === 'cut') content = cutUtf8(content, LIGHTFORK_FILE_MAX)
+    const pointer = `[이전 대화에서 이어감 — 원래 스레드: ${s.threadTs}, 필요하면 read_session 도구로 전체 맥락을 더 읽을 수 있습니다]\n\n${truncate(content, LIGHTFORK_MAX_CHARS)}`
+    const newThreadTs = await this.launchSession({ cwd: s.cwd, prompt: pointer, user, extraArgs: this.settingsArgs(s), title: s.manualTitle ?? s.title })
+    if (!newThreadTs) return void (await c.post('❌ 가벼운 복제로 새 세션을 열지 못했어요. 세션을 띄우지 못했어요'))
+    s.handedOffTo = newThreadTs
+    this.copyGroup(s.threadTs, newThreadTs)
+    // The original rests (45); a locked one (100 MB) is ended, since it cannot take input any more.
+    s.resting = true
+    if (s.sizeBlocked && s.pane) await this.tmux.typeLine(s.pane, '/exit')
+    this.lastWebThread = newThreadTs
+    this.changed()
+    await c.post(`🧵 새 스레드로 넘겼어요: 거기서 이어가세요. 이 세션은 계속 떠 있지만(터미널에서는 그대로 쓸 수 있어요) Slack·웹 입력은 새 스레드로 보내세요.`)
+  }
+
+  /** Wait for the turn that was just started to end (46). Gives up after `timeoutMs`. */
+  private async awaitTurnEnd(s: Session, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    let seen = false
+    while (Date.now() < deadline) {
+      if (s.turn) seen = true
+      // A turn that never shows up (the answer came back at once) is not waited for beyond 3 s.
+      else if (seen || Date.now() - (deadline - timeoutMs) > 3_000) return true
+      await sleep(LIGHTFORK_POLL_MS)
+    }
+    return false
+  }
+
+  /** A new session goes into the group its original is in (46). */
+  private copyGroup(from: string, to: string): void {
+    const group = this.groupStore.get().groups.find((g) => g.items.includes(from))
+    if (group) this.groupStore.apply({ op: 'move', thread: to, group: group.id })
+  }
+
+  private startFork(threadTs: string, fork: { fromThread: string; transcript?: string; fromId?: string }): void {
     if (fork.transcript) this.forkSkips.set(threadTs, transcriptUuids(fork.transcript))
     let after = 0
     for (;;) {
@@ -4083,12 +4174,15 @@ export class Broker {
       if (!page.length) break
       for (const ev of page) {
         after = ev.seq
-        if (ev.type !== 'user' && ev.type !== 'text' && ev.type !== 'tool' && ev.type !== 'tool_end') continue
+        // Pictures ride on text and tool_end; command output is a plain msg; cards (with buttons) are not copied.
+        if (ev.type === 'msg' && ev.blocks?.length) continue
+        if (ev.type !== 'user' && ev.type !== 'text' && ev.type !== 'tool' && ev.type !== 'tool_end' && ev.type !== 'msg' && ev.type !== 'todos') continue
         const { seq: _s, at, ...body } = ev
         this.events.emit(threadTs, body as EventBody, at)
       }
     }
-    this.emitEvent(threadTs, { type: 'notice', text: '여기까지 복제한 대화', icon: 'undo' })
+    const from = fork.fromId ? ` (${fork.fromId} 에서)` : ''
+    this.emitEvent(threadTs, { type: 'notice', text: `여기까지 복제한 대화예요${from}. 이 아래부터 새 세션이에요`, icon: 'undo' })
   }
 
   private scheduleLaunchTimeout(threadTs: string, statusTs: string): void {
@@ -4340,26 +4434,11 @@ export class Broker {
       run: async (c) => {
         const s = c.session
         const user = c.user ?? this.defaultRecipient
-        if (s.lightforking) return void (await c.post('이미 SESSION.md 를 쓰는 중입니다. 잠시 기다리세요.'))
-        if (s.handedOffTo) return void (await c.post(`이미 다른 스레드로 넘겼습니다. 그 스레드에서 이어가세요.`))
+        if (s.lightforking) return void (await c.post('이미 SESSION.md 를 쓰는 중이에요. 잠시 기다려 주세요.'))
+        if (s.handedOffTo) return void (await c.post('이미 다른 스레드로 넘겼어요. 그 스레드에서 이어가세요.'))
         s.lightforking = true
-        await c.post('📝 지금까지 대화를 `SESSION.md` 에 정리해 달라고 요청했습니다…')
-        const path = join(s.cwd, 'SESSION.md')
         try {
-          await this.inject(s, '지금까지의 대화를 이어받을 다음 세션이 읽을 SESSION.md 파일을 이 폴더에 써 주세요. 무엇을 하고 있었는지, 왜, 지금 어디까지 됐는지, 다음에 할 일을 정리해 주세요.', user, s.threadTs)
-          const content = await this.awaitStableFile(path, LIGHTFORK_TIMEOUT_MS, LIGHTFORK_POLL_MS)
-          if (!content) {
-            await c.post('SESSION.md 를 제때 쓰지 못했습니다(3분 넘게 기다렸습니다). 직접 작성을 요청하거나 다시 시도하세요.')
-            return
-          }
-          const pointer = `[이전 대화에서 이어감 — 원래 스레드: ${s.threadTs}, 필요하면 read_session 도구로 전체 맥락을 더 읽을 수 있습니다]\n\n${truncate(content, LIGHTFORK_MAX_CHARS)}`
-          const newThreadTs = await this.launchSession({ cwd: s.cwd, prompt: pointer, user, extraArgs: this.settingsArgs(s) })
-          if (!newThreadTs) {
-            await c.post('새 세션을 띄우지 못했습니다.')
-            return
-          }
-          s.handedOffTo = newThreadTs
-          await c.post(`🧵 새 스레드로 넘겼습니다: 거기서 이어가세요. 이 세션은 계속 떠 있지만(터미널에서는 그대로 쓸 수 있습니다) Slack·웹 입력은 새 스레드로 보내세요.`)
+          await this.lightforkRun(c, s, c.arg.trim(), user)
         } finally {
           s.lightforking = false
         }

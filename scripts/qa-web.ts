@@ -811,7 +811,7 @@ for (const [label, size, phone] of [
   // 복제 opens the new session, with the copied history and the line where it ends.
   if (!phone) {
     await page.locator('#btn-more').click()
-    await page.locator('.menu .mi', { hasText: '복제' }).click()
+    await page.locator('.menu .mi', { hasText: /^복제$/ }).click()
     await page.waitForSelector('text=여기까지 복제한 대화', { timeout: 3000 }).catch(() => {})
     check(`${label}: 복제 → 새 세션을 연다`, calls.includes('fork:11') && (await page.locator('.notice', { hasText: '여기까지 복제한 대화' }).count()) === 1)
     await page.locator(`.row[data-thread="${A}"]`).click()

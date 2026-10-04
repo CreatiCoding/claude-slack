@@ -274,7 +274,7 @@ test('복제: --fork-session 으로 새 세션, 원래 대화는 원래 시각�
   const copied = t.broker.events.since(r.thread!, 0)
   assert.deepEqual(copied.map((e) => e.type), ['user', 'text', 'notice'])
   assert.equal(copied[1]!.at, originalAt, '원래 시각 그대로')
-  assert.ok(copied[2]!.type === 'notice' && copied[2]!.text === '여기까지 복제한 대화')
+  assert.ok(copied[2]!.type === 'notice' && /^여기까지 복제한 대화예요 \(s1 에서\)\. 이 아래부터 새 세션이에요$/.test(copied[2]!.text), JSON.stringify(copied[2]))
 
   // The fork's own transcript starts with the original's lines (same uuid), then goes on.
   const forkTranscript = t.transcript + '.fork.jsonl'
