@@ -3186,7 +3186,7 @@ export class Broker {
     s.refreshAfter = Date.now()
     s.refreshWaitNoted = undefined
     this.logAt('INFO', 'session', 'refresh scheduled for when the work ends', this.tag(s))
-    await c.post('⏳ 작업이 끝나면 새로고침합니다. 그동안 보낸 메시지는 붙잡아 두었다가 다시 연 세션에 넘깁니다.')
+    await c.post('🔄 작업과 백그라운드 작업이 끝나면 새로고침할게요. 그사이 보낸 메시지는 새로고침한 세션에 전달해요')
     this.changed()
     this.armRefreshCheck()
     await this.maybeRunScheduledRefresh(s)
@@ -3218,7 +3218,7 @@ export class Broker {
       if (tasks.length && !s.refreshWaitNoted) {
         // Said once, not on every look a minute later (42).
         s.refreshWaitNoted = true
-        await this.slack.post({ threadTs: s.threadTs, text: `🔄 작업과 백그라운드 작업이 끝나면 새로고침할게요. 그사이 보낸 메시지는 새로고침한 세션에 전달해요` }).catch(() => {})
+        await this.slack.post({ threadTs: s.threadTs, text: `🔄 백그라운드 작업 ${tasks.length}개가 끝나면 새로고침할게요 · ${truncate(tasks[0]!.label, 80)}` }).catch(() => {})
       }
       if (tasks.length || !s.refreshAfter || s.turn || s.refreshing) return
       this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))

@@ -1875,7 +1875,7 @@ function userEl(row) {
       : set.has('x')
         ? '<span class="failed">취소함</span>'
         : delivered
-          ? `${ev.via === 'web' && lastWebUserTs() === ev.ts ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
+          ? `${ev.via === 'web' && lastWebUserTs() === ev.ts ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" >잘못 보냄 · 멈추고 무시하라고 하기</button>` : ''}`
           : ''
   el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${stamp(ev.at)}</span>${st}`
   return el
@@ -2403,7 +2403,7 @@ $('log').addEventListener('click', async (e) => {
       const row = view.rows.find((r) => r.kind === 'user' && r.ev.ts === ts)
       if (row?.el) {
         row.el.classList.add('dropped')
-        row.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="dropped-note">잘못 보냄 · 멈추고 무시하라고 하기</span>')
+        row.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="dropped-note">잘못 보냄 · 따르지 말라고 전했어요</span>')
       }
     } catch (err) {
       toast(err.message, 'err')
