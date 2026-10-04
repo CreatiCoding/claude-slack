@@ -1,3 +1,4 @@
+import { hostname } from 'node:os'
 /**
  * A small admin page for the sessions this broker is relaying.
  *
@@ -423,7 +424,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const me: { thread: string | null; live?: string; thinking?: boolean; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
     // What this broker can do, from its settings, not from the address the page was opened on (60).
-    write('hello', { conn, webHash: WEB_HASH, caps: { phoneAccess: !!opts?.publicUrl, tools: WEB_TOOLS } })
+    write('hello', { conn, webHash: WEB_HASH, caps: { phoneAccess: !!opts?.publicUrl, tools: WEB_TOOLS, mac: hostname().replace(/\.local$/, '') } })
     const offEvent = api.events.subscribe((thread, ev) => {
       if (me.thread === thread) write('ev', { thread, ev }, `ev:${ev.type}`)
     })

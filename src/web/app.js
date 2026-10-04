@@ -281,6 +281,7 @@ function brokerAway() {
 }
 let connId = null
 let phoneAccess = true // from the broker's hello (60)
+let macName = '' // the Mac's name, from the same hello (79)
 let webHash = null // this load's baseline (21); a later `hello` with a different one means new code is up
 let newVersionSeen = false
 async function subscribe(ts) {
@@ -317,6 +318,7 @@ function connect() {
     connId = hello.conn
     // The broker says whether a phone can reach it (60): the setting decides, not where this page was opened.
     if (hello.caps) phoneAccess = !!hello.caps.phoneAccess
+    if (hello.caps?.mac) macName = hello.caps.mac
     // The broker restarting with new code (21): a tab open from before has no reason to notice on its
     // own otherwise. First value seen this load is the baseline — a later, different one is the new code.
     if (hello.webHash) {
@@ -3351,7 +3353,7 @@ function globalItems() {
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
     { label: '사용 통계', icon: 'spark', run: () => openStats(7) },
-    { label: '연결', icon: 'chat', sub: () => [{ label: '왕복 확인', icon: 'refresh', run: async () => {
+    { label: `연결 · ${macName || '이 맥'}`, icon: 'chat', sub: () => [{ label: '왕복 확인', icon: 'refresh', run: async () => {
       // The round trip to the broker, timed from this page (79).
       const t0 = performance.now()
       try {
