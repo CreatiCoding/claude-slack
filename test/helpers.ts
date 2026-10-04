@@ -202,6 +202,9 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
   const offsetsPath = join(tmpdir(), `cs-offsets-${id}.json`)
   const noticesPath = join(tmpdir(), `cs-notices-${id}.json`)
   const threadInfoPath = join(tmpdir(), `cs-tinfo-${id}.json`)
+  // An empty default prompt file: launches carry no --append-system-prompt unless a test sets one (54).
+  const defaultPromptPath = join(tmpdir(), `cs-prompt-${id}.txt`)
+  writeFileSync(defaultPromptPath, '')
   const revivePath = join(tmpdir(), `cs-live-${id}.json`)
   const slack = new FakeSlack()
   const tmux = new FakeTmux()
@@ -219,6 +222,7 @@ export async function setup(extra: Partial<BrokerConfig> & { transcript?: string
       offsetsPath,
       noticesPath,
       threadInfoPath,
+      defaultPromptPath,
       revivePath,
       // Every test's FakeSlack numbers threads from 1.000, so a shared event folder would mix their logs.
       eventsDir: join(tmpdir(), `cs-events-${id}`),

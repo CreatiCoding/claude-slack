@@ -21,6 +21,8 @@ export interface GroupsState {
   /** Sessions outside any group, in the order they were put (the rest follow in the default order). */
   loose: string[]
   recentClearedAt?: number
+  /** The ids of groups folded shut: kept here so every device shows the same (54). */
+  collapsed?: string[]
 }
 
 export type GroupOp =
@@ -31,6 +33,8 @@ export type GroupOp =
   | { op: 'move'; thread: string; group: string | null; before?: string | null }
   /** Put a group before another group (or at the end). */
   | { op: 'order'; id: string; before?: string | null }
+  /** Fold a group shut or open it, for every device (54). */
+  | { op: 'fold'; id: string; open: boolean }
   /** The order of the sessions outside groups, as shown after a drop (the dropped one is taken out of its group). */
   | { op: 'loose'; order: string[] }
   | { op: 'clearRecent' }
@@ -49,7 +53,7 @@ export class GroupStore {
     if (!this.state) {
       try {
         const raw = JSON.parse(readFileSync(this.path, 'utf8')) as Partial<GroupsState>
-        this.state = { groups: raw.groups ?? [], loose: raw.loose ?? [], ...(raw.recentClearedAt ? { recentClearedAt: raw.recentClearedAt } : {}) }
+        this.state = { groups: raw.groups ?? [], loose: raw.loose ?? [], ...(raw.recentClearedAt ? { recentClearedAt: raw.recentClearedAt } : {}), ...(raw.collapsed ? { collapsed: raw.collapsed } : {}) }
       } catch {
         this.state = { groups: [], loose: [] }
       }
@@ -60,7 +64,8 @@ export class GroupStore {
   /** Apply one change; the result says what went wrong, if anything. */
   apply(o: GroupOp): { ok: boolean; note: string; id?: string } {
     const st = this.get()
-    const name = (n: string) => n.trim().slice(0, 60)
+    // A group name is 40 characters at most (54).
+    const name = (n: string) => n.trim().slice(0, 40)
     const out = (from: string) => {
       st.loose = st.loose.filter((t) => t !== from)
       for (const g of st.groups) g.items = g.items.filter((t) => t !== from)
@@ -106,6 +111,14 @@ export class GroupStore {
         const [g] = st.groups.splice(i, 1)
         const at = o.before ? st.groups.findIndex((x) => x.id === o.before) : -1
         at < 0 ? st.groups.push(g!) : st.groups.splice(at, 0, g!)
+        break
+      }
+      case 'fold': {
+        if (!st.groups.some((x) => x.id === o.id)) return { ok: false, note: '그룹을 찾지 못했어요.' }
+        const shut = new Set(st.collapsed ?? [])
+        if (o.open) shut.delete(o.id)
+        else shut.add(o.id)
+        st.collapsed = [...shut]
         break
       }
       case 'loose': {

@@ -2709,6 +2709,19 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-108 그룹과 기본 프롬프트 (54)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. 그룹 이름은 다듬은 뒤 40자까지.
+  2. 접힘은 그룹 파일(`collapsed`, 그룹 id 목록)에 두어 기기끼리 같다. 명령 `fold {id, open}`.
+  3. 그룹 메뉴 `위로 이동`·`아래로 이동` (순서 명령 `order`). 그룹 머리에 `· N개 대기`. 빈 그룹 안내: PC `비어 있어요 · 대화를 우클릭해 넣으세요`, 폰 `비어 있어요 · 대화를 밀어 더보기로 넣으세요`.
+  4. 기본 프롬프트: 파일이 없으면 기본값을 쓰고 파일에 적는다. 공백만 저장하면 기본값으로 돌아간다. 8,000자에서 자른다. 조회 응답에 `isDefault` 를 싣고, 시트에 `기본값` 표시와 `기본값으로` 버튼을 둔다.
+- 미구현(다음 라운드): 사이드바 아래 `＋ 새 그룹` 고정 줄(지금은 메뉴에 있다).
+- 수용 기준: AC-178
+- 근거: `src/groups.ts` `fold`·이름 40, `src/broker.ts` `webDefaultPrompt`·`webDefaultPromptInfo`·`webSetDefaultPrompt`, `src/web/app.js` `moveGroup`·`secHead`·`editDefaultPrompt`
+- 추적: REQ-F-097
+
 ### REQ-F-107 사용 통계 (53)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5641,6 +5654,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-178 | REQ-F-108 | 그룹 이름 40자, 접힘이 그룹 파일에 남음, 기본 프롬프트는 없으면 기본값·공백 저장은 기본값 | `test/web.test.ts` 그룹·기본 프롬프트(54), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-177 | REQ-F-107 | 열린 턴과 바쁜 시간이 규칙대로 계산되고, 분위수는 floor(q·n), 웹 창이 PC·폰에서 열린다 | `test/stats.test.ts`, `scripts/qa-web.ts` 53 묶음 | 위 규칙대로 나온다 |
 | AC-176 | REQ-F-106 | /btw 와 :btw 가 한 카드로 올라가고 답으로 고쳐지며, 대화 기록에는 남지 않고, 읽지 못하면 안내 | `test/broker.test.ts` /btw 묶음(52), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-175 | REQ-F-105 | 모르는 스레드 링크는 조회해 채널·작성자·첫 글로 보이고, 파일에 남으며, 실패는 기다렸다 다시 묻는다 | `test/thread-info.test.ts` | 위 규칙대로 나온다 |

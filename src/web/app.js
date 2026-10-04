@@ -600,7 +600,7 @@ function badgeHtml(s) {
 }
 
 function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
-  const open = !folded[key]
+  const open = group ? !(groups.collapsed || []).includes(group.id) : !folded[key]
   const el = document.createElement('div')
   el.className = 'sec-head' + (open ? ' open' : '') + (group ? ' group' : '')
   el.setAttribute('role', 'button')
@@ -610,6 +610,7 @@ function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
   el.querySelector('.gname').textContent = label
   el.addEventListener('click', (e) => {
     if (e.target.closest('.gmore')) return
+    if (group) return void groupOp({ op: 'fold', id: group.id, open: !open })
     folded[key] = open
     store.set('folded', folded)
     renderList()
@@ -715,8 +716,18 @@ function groupItems(g) {
       const name = prompt('그룹 이름', g.name)
       if (name && name.trim()) groupOp({ op: 'rename', id: g.id, name })
     } },
+    { label: '위로 이동', icon: 'up', run: () => moveGroup(g, -1) },
+    { label: '아래로 이동', icon: 'down', run: () => moveGroup(g, 1) },
     { label: '그룹 삭제', icon: 'deny', danger: true, run: () => confirm(`"${g.name}" 그룹을 지울까요? 안의 세션은 그대로 남아요.`) && groupOp({ op: 'delete', id: g.id }) },
   ]
+}
+// Up one place: before the group above; down one place: before the group after the next (54).
+function moveGroup(g, dir) {
+  const i = groups.groups.findIndex((x) => x.id === g.id)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= groups.groups.length) return
+  const before = dir < 0 ? groups.groups[j].id : (groups.groups[j + 1]?.id ?? null)
+  groupOp({ op: 'order', id: g.id, before })
 }
 async function groupOp(op) {
   try {
@@ -749,8 +760,12 @@ function renderList() {
   for (const g of groups.groups) {
     const members = g.items.map((t) => byThread.get(t)).filter(Boolean)
     const h = secHead('g:' + g.id, g.name, members.length, { group: g })
+    // A group's folded state is the broker's, shared by every device (54).
+    const waiting = members.filter((s) => s.state === 'waiting').length
+    if (waiting) h.el.querySelector('.n').textContent = `${members.length} · ${waiting}개 대기`
     list.append(h.el)
     if (h.open) for (const s of members) list.append(liveRow(s, g.id))
+    if (h.open && !members.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">${isPhone() ? '비어 있어요 · 대화를 밀어 더보기로 넣으세요' : '비어 있어요 · 대화를 우클릭해 넣으세요'}</div>`)
   }
   const loose = groups.loose || []
   const rank = (s) => (loose.includes(s.thread) ? loose.indexOf(s.thread) : Infinity)
@@ -2931,8 +2946,11 @@ function checkPermissionModal() {
 /** The instruction every new or reopened session gets, edited in a sheet. */
 async function editDefaultPrompt() {
   let text = ''
+  let isDefault = false
   try {
-    text = (await api('/api/default-prompt')).text
+    const info = await api('/api/default-prompt')
+    text = info.text
+    isDefault = !!info.isDefault
   } catch {}
   const scrim = document.createElement('div')
   scrim.className = 'scrim dim'
@@ -2942,6 +2960,18 @@ async function editDefaultPrompt() {
   el.setAttribute('aria-modal', 'true')
   el.innerHTML = `<div class="ns-head"><h2>기본 프롬프트</h2></div><p class="hint">모든 세션에 넣는 지시예요(예: "한국어로 답해"). 새로 띄우거나 다시 연 세션부터 적용돼요. 비우면 넣지 않아요.</p><textarea class="ns-prompt" rows="6"></textarea><div class="ns-actions"><button class="btn" type="button" data-x="cancel">취소</button><button class="btn primary" type="button" data-x="save">저장</button></div>`
   el.querySelector('textarea').value = text
+  // The built-in prompt is marked, and a button takes the edit back to it (54).
+  el.querySelector('.ns-head').insertAdjacentHTML('beforeend', `<span class="hint">${isDefault ? '기본값' : ''}</span><button type="button" class="ghost" data-x="reset">기본값으로</button>`)
+  el.querySelector('[data-x="reset"]').addEventListener('click', async () => {
+    // A blank save is the built-in prompt again; the page shows what it now holds.
+    try {
+      await api('/api/default-prompt', { text: '' })
+      el.querySelector('textarea').value = (await api('/api/default-prompt')).text
+      el.querySelector('.hint').textContent = '기본값'
+    } catch (err) {
+      toast(err.message, 'err')
+    }
+  })
   const close = () => (scrim.remove(), el.remove())
   scrim.addEventListener('click', close)
   el.querySelector('[data-x="cancel"]').addEventListener('click', close)

@@ -70,6 +70,7 @@ export interface AdminApi {
   webGroups?(): unknown
   webGroupOp?(o: never): { ok: boolean; note: string; id?: string }
   webDefaultPrompt?(): string
+  webDefaultPromptInfo?(): { text: string; isDefault: boolean }
   webSetDefaultPrompt?(text: string): { ok: boolean; note: string }
   webClearArchives?(): Promise<{ ok: boolean; note: string }>
   webLinks?(pid: number): Promise<{ prs: Array<{ url: string; label: string }>; threads: Array<{ url: string; label: string }> }>
@@ -547,7 +548,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     }
   }
   if (url.pathname === '/api/default-prompt' && api.webDefaultPrompt && api.webSetDefaultPrompt) {
-    if (req.method === 'GET') return send(res, 200, { text: api.webDefaultPrompt() })
+    if (req.method === 'GET') return send(res, 200, api.webDefaultPromptInfo ? api.webDefaultPromptInfo() : { text: api.webDefaultPrompt() })
     if (req.method === 'POST') {
       const result = api.webSetDefaultPrompt(String((await readJson(req)).text ?? ''))
       return send(res, result.ok ? 200 : 400, result)

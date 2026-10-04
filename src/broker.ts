@@ -384,6 +384,8 @@ const SIZE_BLOCK_BYTES = 100 * 1024 * 1024
 const READ_SESSION_MAX_CHARS_CAP = 200_000
 // 18: a web message's picture limits, checked here (never just in the page that happened to send them).
 const WEB_IMAGES_MAX = 8
+/** The default prompt when none is set (54). */
+const BUILTIN_DEFAULT_PROMPT = '나는 한국어를 읽어. 페이지에 보이는 글은 모두 한국어로 써 줘: 최종 답, 도구를 쓰는 사이사이 쓰는 짧은 설명, reply 메시지까지. 코드·명령·파일 경로·식별자·인용한 출력은 원래 그대로 둬.'
 /** Claude Code's own permission modes (the ones `--permission-mode` takes). */
 const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto']
 /** How many just-ended sessions the list keeps (43). */
@@ -932,11 +934,22 @@ export class Broker {
     try {
       return readFileSync(this.defaultPromptPath, 'utf8')
     } catch {
-      return ''
+      // No file yet: the built-in prompt is written and used (54).
+      try {
+        mkdirSync(join(this.defaultPromptPath, '..'), { recursive: true })
+        writeFileSync(this.defaultPromptPath, BUILTIN_DEFAULT_PROMPT)
+      } catch {}
+      return BUILTIN_DEFAULT_PROMPT
     }
   }
+  /** The default prompt as the page shows it: the text, and whether it is the built-in one (54). */
+  webDefaultPromptInfo(): { text: string; isDefault: boolean } {
+    const text = this.webDefaultPrompt()
+    return { text, isDefault: text === BUILTIN_DEFAULT_PROMPT }
+  }
   webSetDefaultPrompt(text: string): { ok: boolean; note: string } {
-    const t = text.trim().slice(0, 8000)
+    // A blank save is the built-in prompt again (54), not nothing.
+    const t = (text.trim() || BUILTIN_DEFAULT_PROMPT).slice(0, 8000)
     try {
       mkdirSync(join(this.defaultPromptPath, '..'), { recursive: true })
       writeFileSync(this.defaultPromptPath, t)
