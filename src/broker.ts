@@ -30,7 +30,7 @@ import { StatusStore, DEFAULT_STATUS_DIR } from './status.ts'
 import { stableNodePath } from './node-path.ts'
 import { ThreadLinks } from './thread-links.ts'
 import { countUserMessages, deleteRecentSession, listRecentSessions, readFirstMessage, type RecentSession } from './sessions-list.ts'
-import { countArchives, deleteArchive, listArchives, renameArchive, type SessionArchive } from './archive.ts'
+import { countArchives, deleteArchive, findArchiveByThread, listArchives, renameArchive, writeArchive, type ArchivedMessage, type SessionArchive } from './archive.ts'
 import { PurgeService } from './purge.ts'
 import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
@@ -323,6 +323,8 @@ const LIGHTFORK_POLL_MS = 1_000
 const LIGHTFORK_MAX_CHARS = 20_000
 /** Longer than this, SESSION.md is asked about before a light copy (46). */
 const LIGHTFORK_FILE_MAX = 20_000
+/** How many conversations of ended sessions the past records keep (47). */
+const ENDED_ARCHIVE_MAX = 100
 const SCREEN_SETTLE_TIMEOUT_MS = 4000
 /** Lines kept from a screen: enough for a glance, few enough to read on a phone. */
 const SCREEN_DIGEST_LINES = 20
@@ -937,7 +939,7 @@ export class Broker {
       if (deleteArchive(a.path, this.cfg.archiveDir)) n++
     }
     this.logAt('INFO', 'admin', 'archives cleared', { n })
-    return { ok: true, note: `지난 기록 ${n}개를 지웠어요.` }
+    return { ok: true, note: `지난 기록 ${n}개를 지웠어요` }
   }
 
   /** The pickers' choices, the same lists the Slack settings modal offers. */
@@ -1181,7 +1183,7 @@ export class Broker {
       channelId: this.cfg.channelId,
       live,
       pins: this.pinStore.list(),
-      recent: await this.resumable(25),
+      recent: await this.resumable(50),
       archives: listArchives(50, this.cfg.archiveDir).map((a) => {
         const stored = this.titles.get(a.sessionId)
         return stored ? { ...a, title: stored } : a
@@ -4941,9 +4943,38 @@ export class Broker {
 
   // ------------------------------------------------------------------- state
 
+  /**
+   * A session that ended leaves its conversation in the past records (47). Only the newest 100 of these are kept;
+   * a conversation already archived (by a purge, say) is not written again.
+   */
+  private archiveEnded(session: Session): void {
+    const dir = this.cfg.archiveDir
+    const messages: ArchivedMessage[] = []
+    for (const e of this.events.since(session.threadTs, 0)) {
+      if (e.type === 'user') messages.push({ ts: e.ts, user: e.via, bot: false, text: e.text })
+      else if (e.type === 'text') messages.push({ ts: String(e.at), bot: true, text: e.text })
+    }
+    if (!messages.length || findArchiveByThread(session.threadTs, dir)) return
+    try {
+      writeArchive({ key: `ended-${session.threadTs}`, sessionId: session.sessionId ?? '', cwd: session.cwd, title: session.manualTitle ?? session.title, threadTs: session.threadTs, origin: session.origin === 'slack' ? 'slack' : 'terminal', archivedAt: new Date().toISOString(), transcriptPath: session.transcriptPath, messages }, dir)
+    } catch (err) {
+      this.logAt('WARN', 'archive', `past record not written: ${describeError(err)}`, this.tag(session))
+      return
+    }
+    const autos = listArchives(10_000, dir).filter((a) => {
+      try {
+        return (JSON.parse(readFileSync(a.path, 'utf8')) as SessionArchive).key.startsWith('ended-')
+      } catch {
+        return false
+      }
+    })
+    for (const a of autos.slice(ENDED_ARCHIVE_MAX)) deleteArchive(a.path, dir)
+  }
+
   private async endSession(session: Session, why: string): Promise<void> {
     if (session.ended) return
     session.ended = true
+    this.archiveEnded(session)
     this.logAt('INFO', 'session', `ended: ${why}`, this.tag(session, { held: session.held?.length ?? 0 }))
     this.clearStall(session)
     if (session.autoAllowWatch) clearInterval(session.autoAllowWatch)

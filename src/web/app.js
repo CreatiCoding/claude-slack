@@ -58,7 +58,7 @@ let options = { models: [], efforts: [], modes: [] }
 const threads = new Map()
 let current = null // thread ts
 const seen = store.get('seen', {})
-const folded = store.get('folded', { recent: true, archives: true })
+const folded = store.get('folded', {}) // every section opens by default (47)
 
 function thread(ts) {
   let t = threads.get(ts)
@@ -757,14 +757,16 @@ function renderList() {
   list.append(h.el)
   if (h.open) {
     for (const s of live) list.append(liveRow(s, null))
-    if (!live.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">${q ? '찾는 세션이 없어요' : '떠 있는 세션이 없어요'}</div>`)
+    if (!live.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">${q ? '찾는 세션이 없어요' : '실행 중인 세션이 없어요'}</div>`)
   }
 
+  // The list shows up to 15 of the recent conversations and 20 of the past records (47).
   const rec = recent.filter((r) => match(r.title, r.preview, r.cwd))
   const hr = secHead('recent', '이어서 하기', rec.length, { dropOut: true, menu: [clearRecentItem()] })
   list.append(hr.el)
+  if (hr.open && !rec.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">이어서 할 대화가 없어요</div>`)
   if (hr.open)
-    for (const r of rec)
+    for (const r of rec.slice(0, 15))
       list.append(
         plainRow({ lead: icon('play'), name: r.title, sub: r.preview, where: `${folderOf(r.cwd)} · ${ago(r.mtime)}`, when: ago(r.mtime), title: `${r.cwd}\n${r.preview || ''}` }, () => resume(r), (at) => openMenu(at, [{ label: '이어서 하기', icon: 'play', run: () => resume(r) }])),
       )
@@ -773,7 +775,7 @@ function renderList() {
   const ha = secHead('archives', '지난 기록', arc.length, { menu: [clearArchivesItem()] })
   list.append(ha.el)
   if (ha.open)
-    for (const a of arc) {
+    for (const a of arc.slice(0, 20)) {
       const at = Date.parse(a.archivedAt)
       list.append(plainRow({ lead: icon('clipboard'), name: a.title || folderOf(a.cwd), sub: a.preview, where: `${folderOf(a.cwd)} · ${ago(at)}`, when: ago(at), title: a.cwd }, () => viewArchive(a), (p) => openMenu(p, [{ label: '기록 보기', icon: 'file', run: () => viewArchive(a) }])))
     }

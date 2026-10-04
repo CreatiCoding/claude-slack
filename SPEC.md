@@ -2709,6 +2709,19 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-101 이어서 하기와 지난 기록 (47)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. 이어서 할 대화를 찾는 최근 목록 상한은 50(`resumable(50)`). 웹 구역에는 15개까지 그린다.
+  2. 끝난 세션(`endSession`)마다 그 대화를 지난 기록으로 남긴다(`key` = `ended-<스레드>`). 같은 스레드가 이미 보관돼 있으면 다시 쓰지 않는다. `ended-` 기록은 최근 100개까지만 남긴다.
+  3. 웹 지난 기록 구역에는 20개까지 그린다. 구역 접힘의 기본값은 모두 펼침.
+  4. 빈 문구: `실행 중인 세션이 없어요`, `이어서 할 대화가 없어요`. 지난 기록 전체 지우기 응답: `지난 기록 N개를 지웠어요`(마침표 없음).
+- 미구현(다음 라운드): 이어서 하기 행의 미리보기 창과 `이어서 하기` 버튼, 웹 안 타임라인 읽기(지금은 `/view` 로 넘어감), 항목별 삭제 문구 `기록을 지웠어요`.
+- 수용 기준: AC-171
+- 근거: `src/broker.ts` `archiveEnded`·`endSession`·`adminState`·`webClearArchives`, `src/web/app.js` 목록 렌더
+- 추적: REQ-F-097(끝난 세션 목록)
+
 ### REQ-F-100 복제와 가벼운 복제 (46)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5549,6 +5562,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-171 | REQ-F-101 | 끝난 세션의 대화가 지난 기록에 남고, 같은 스레드는 한 번만, 100개를 넘으면 가장 오래된 것부터 지워진다 | `test/web.test.ts` 지난 기록(47) 묶음 | 위 규칙대로 나온다 |
 | AC-170 | REQ-F-100 | 복제는 이름·그룹·이벤트 종류·알림 문구가 맞고, 가벼운 복제는 20KB 를 넘으면 묻고, 앞부분만이면 잘라 넘기며 원본은 휴면이 된다 | `test/web.test.ts` 복제 묶음, `test/broker.test.ts` 46 묶음, `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-169 | REQ-F-099 | 휴면을 켜면 회색 배지, 글이 가면 풀린다, 터미널 입력도 풀린다. 재시작 기록에 남는다 | `test/broker.test.ts` 의 45 묶음, `scripts/qa-web.ts` 45 묶음(PC·폰) | 위 규칙대로 나온다 |
 | AC-168 | REQ-F-098 | 게이지 다섯 개의 값과 색, 50MB 띠와 창(세션마다 한 번), PC 설명 상자, 폰 토스트, 폰 폭에서 가로 넘침 없음 | `scripts/qa-web.ts` 의 44 묶음 | 위 규칙대로 나온다 |

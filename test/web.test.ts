@@ -475,3 +475,18 @@ test('목록 값(43): 사용량은 가장 최근 상태 파일의 값을 쓰고,
   assert.deepEqual(store.usage(2_000_000), { fiveHour: 40, sevenDay: 0 }, '초기화 시각이 지난 주간 창은 0%')
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('지난 기록(47): 끝난 세션의 대화가 지난 기록으로 남고, 같은 스레드는 다시 쓰지 않으며, 끝난 기록은 최근 100개까지만 남는다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await t.broker.webSend(100, '첫 질문입니다')
+  const live = (t.broker as unknown as { registry: { live: Array<{ threadTs: string }> } }).registry.live[0]!
+  const session = live as unknown as Record<string, unknown>
+  const end = (t.broker as unknown as { endSession: (s: unknown, why: string) => Promise<void> }).endSession.bind(t.broker)
+  await end(session, '테스트로 끝냄')
+  const archived = (await import('../src/archive.ts')).findArchiveByThread(live.threadTs, (t.broker as unknown as { cfg: { archiveDir: string } }).cfg.archiveDir)
+  assert.ok(archived, '끝난 세션의 대화가 지난 기록으로 남는다')
+  assert.ok(archived!.archive.messages.some((m) => m.text === '첫 질문입니다'))
+  s.conn.close()
+  t.close()
+})
