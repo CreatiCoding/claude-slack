@@ -3338,6 +3338,16 @@ function globalItems() {
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
     { label: '사용 통계', icon: 'spark', run: () => openStats(7) },
+    { label: '연결', icon: 'chat', sub: () => [{ label: '왕복 확인', icon: 'refresh', run: async () => {
+      // The round trip to the broker, timed from this page (79).
+      const t0 = performance.now()
+      try {
+        await api('/api/options')
+        toast(`맥까지 왕복 ${Math.round(performance.now() - t0)}ms`)
+      } catch (err) {
+        toast(err.message, 'err')
+      }
+    } }] },
     { label: '새 그룹', icon: 'folder', run: () => newGroup() },
     { label: '기본 프롬프트', icon: 'edit', run: editDefaultPrompt },
     {
