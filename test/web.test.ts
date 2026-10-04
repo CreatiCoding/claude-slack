@@ -532,3 +532,17 @@ test('그룹·기본 프롬프트(54): 그룹 이름은 40자, 접힘은 그룹 
   t.close()
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('그림 작은 복사본(57): 보낸 그림의 말풍선용 thumb 이 사용자 이벤트에 함께 실린다', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYJg=='
+  const thumb = 'data:image/jpeg;base64,/9j/AAA='
+  const r = await t.broker.webSend(100, '그림 글', [{ name: 'a.png', type: 'image/png', data: png1x1, thumb }])
+  assert.equal(r.ok, true)
+  const thread = (t.broker as unknown as { registry: { live: Array<{ threadTs: string }> } }).registry.live[0]!.threadTs
+  const user = t.broker.events.since(thread, 0).find((e) => e.type === 'user' && e.text.includes('그림 글'))
+  assert.ok(user && user.type === 'user' && user.images?.[0]?.thumb === thumb, JSON.stringify(user))
+  s.conn.close()
+  t.close()
+})

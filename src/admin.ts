@@ -510,7 +510,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   if (req.method === 'POST' && sendTo && api.webSend) {
     // Pictures ride in this body (shrunk by the page first), so it may be larger than the others.
     const body = await readJson(req, 24 * 1024 * 1024)
-    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
+    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data), ...(typeof x.thumb === 'string' ? { thumb: x.thumb } : {}) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
   }
@@ -549,7 +549,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   const sendThread = /^\/api\/thread\/([^/]+)\/send$/.exec(url.pathname)
   if (req.method === 'POST' && sendThread && api.webSendThread) {
     const body = await readJson(req, 24 * 1024 * 1024)
-    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
+    const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data), ...(typeof x.thumb === 'string' ? { thumb: x.thumb } : {}) })) : []
     const result = await api.webSendThread(decodeURIComponent(sendThread[1]!), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
   }

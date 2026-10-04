@@ -33,6 +33,8 @@ export interface WebImage {
   data?: string
   /** Where to fetch it, when large. */
   src?: string
+  /** A small copy for the bubble (57): long side 360 px, JPEG, sent with the message. */
+  thumb?: string
 }
 
 const TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' }

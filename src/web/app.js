@@ -1728,7 +1728,8 @@ function imagesHtml(images) {
     .map((im) => {
       const w = im.w || 320
       const h = im.h || 240
-      const src = im.data || ''
+      // The bubble shows the small copy when there is one (57); the full picture opens on a press.
+      const src = im.thumb || im.data || ''
       return `<button class="img" type="button" style="aspect-ratio:${w}/${h};width:min(100%,${Math.min(w, 480)}px)" aria-label="${esc(im.name || '그림')} 크게 보기"><img alt="${esc(im.name || '')}" ${src ? `src="${src}"` : `data-src="${esc(withToken(im.src))}" data-key="${esc(`${current}:${im.id}`)}"`} decoding="async"></button>`
     })
     .join('')}</div>`
@@ -2581,7 +2582,15 @@ async function shrinkPicture(f) {
   ctx.drawImage(bmp, 0, 0, c.width, c.height)
   const blob = await new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85))
   const small = blob && blob.size < f.size ? blob : f
-  return { name: f.name, type: small.type, data: await dataOf(small), url: URL.createObjectURL(small) }
+  // The bubble's copy (57): long side 360 px, JPEG 0.7.
+  const tk = Math.min(1, 360 / Math.max(bmp.width, bmp.height))
+  const t = Object.assign(document.createElement('canvas'), { width: Math.max(1, Math.round(bmp.width * tk)), height: Math.max(1, Math.round(bmp.height * tk)) })
+  const tctx = t.getContext('2d')
+  tctx.fillStyle = '#fff'
+  tctx.fillRect(0, 0, t.width, t.height)
+  tctx.drawImage(bmp, 0, 0, t.width, t.height)
+  const tblob = await new Promise((r) => t.toBlob(r, 'image/jpeg', 0.7))
+  return { name: f.name, type: small.type, data: await dataOf(small), url: URL.createObjectURL(small), ...(tblob ? { thumb: await dataOf(tblob) } : {}) }
 }
 function renderPending() {
   syncAttachButton()
@@ -2734,7 +2743,7 @@ async function sendText(s, text, pics = []) {
   const body = /^\/btw\s/.test(text) ? ':' + text.slice(1) : text
   try {
     // By thread (40): a row still starting, waking or dormant has no live pid, but its thread is always there.
-    await api(`/api/thread/${encodeURIComponent(s.thread)}/send`, { text: body, ...(pics.length ? { images: pics.map(({ name, type, data }) => ({ name, type, data })) } : {}) }, { timeout: false })
+    await api(`/api/thread/${encodeURIComponent(s.thread)}/send`, { text: body, ...(pics.length ? { images: pics.map(({ name, type, data, thumb }) => ({ name, type, data, ...(thumb ? { thumb } : {}) })) } : {}) }, { timeout: false })
     return true
   } catch (err) {
     toast('보내지 못했어요: ' + err.message, 'err')

@@ -501,7 +501,7 @@ export function permissionBlocksV2(o: { pid: number; requestId: string; toolName
     blocks: [
       { type: 'section', text: { type: 'mrkdwn', text: `${who}🔐 *${o.toolName}* 권한 요청 · \`${o.requestId}\`\n${o.description}` } },
       ...(detail ? [{ type: 'section', text: { type: 'mrkdwn', text: detail } }] : []),
-      ...(rule && o.hasPane ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `항상 허용을 누르면 \`${rule}\` 규칙이 기록됩니다 (예상)` }] }] : []),
+      ...(rule && o.hasPane ? [{ type: 'context', elements: [{ type: 'mrkdwn', text: `항상 허용하면 \`${rule}\` 규칙이 기록돼요` }] }] : []),
       {
         type: 'actions',
         block_id: `perm_${o.pid}_${o.requestId}`,

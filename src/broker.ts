@@ -987,7 +987,7 @@ export class Broker {
   }
 
   /** A message typed in the web app: shown in the thread as the web's, then handled exactly as a thread reply. */
-  async webSend(pid: number, raw: string, pictures: Array<{ name?: string; type?: string; data: string }> = []): Promise<{ ok: boolean; note: string }> {
+  async webSend(pid: number, raw: string, pictures: Array<{ name?: string; type?: string; data: string; thumb?: string }> = []): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션이에요' }
     return this.webDeliver(session.threadTs, raw, pictures, session)
@@ -998,14 +998,14 @@ export class Broker {
    * pid yet (starting), or none any more (waking, dormant). Routed the way a Slack thread reply is: queued for a
    * launch or a wake in progress, woken from dormant, or sent to the live session.
    */
-  async webSendThread(thread: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string }> = []): Promise<{ ok: boolean; note: string }> {
+  async webSendThread(thread: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string; thumb?: string }> = []): Promise<{ ok: boolean; note: string }> {
     const live = this.registry.byThreadTs(thread)
     if (live && !live.ended) return this.webDeliver(thread, raw, pictures, live)
     if (!this.pendingLaunches.has(thread) && !this.waking.has(thread) && !this.dormant.has(thread)) return { ok: false, note: '이미 끝난 세션이에요' }
     return this.webDeliver(thread, raw, pictures, undefined)
   }
 
-  private async webDeliver(threadTs: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string }>, session: Session | undefined): Promise<{ ok: boolean; note: string }> {
+  private async webDeliver(threadTs: string, raw: string, pictures: Array<{ name?: string; type?: string; data: string; thumb?: string }>, session: Session | undefined): Promise<{ ok: boolean; note: string }> {
     // Pictures from the page go where Slack attachments go, and reach Claude the same way: a path it can read.
     // Checked here too (18), not just client-side — a page is never the only thing that can reach this call.
     if (pictures.length > WEB_IMAGES_MAX) return { ok: false, note: `이미지는 한 번에 ${WEB_IMAGES_MAX}장까지 보낼 수 있어요` }
@@ -1049,7 +1049,10 @@ export class Broker {
     const ts = await this.quietSlack.post({ threadTs, text: `🌐 웹: ${typed || '(그림)'}${saved.length ? ` · 그림 ${saved.length}장` : ''}` })
     if (saved.length) await this.quietSlack.uploadFiles({ threadTs, paths: saved }).catch(() => false)
     this.noteMsg(ts, threadTs)
-    this.emitEvent(threadTs, this.userEvent(threadTs, ts, text, 'web'))
+    // The small copies the page made travel with their pictures (57), in the same order.
+    const sent = this.userEvent(threadTs, ts, text, 'web')
+    if (sent.type === 'user' && sent.images) sent.images = sent.images.map((im, i) => (pictures[i]?.thumb ? { ...im, thumb: pictures[i]!.thumb } : im))
+    this.emitEvent(threadTs, sent)
     if (session) this.logAt('INFO', 'web', 'message', this.tag(session, { ts, chars: text.length }))
     if (!session) {
       // No live session yet: the same queues a Slack reply uses (3034–3047), or a wake from dormant.
