@@ -1239,8 +1239,10 @@ function renderGauges(s) {
     })
     box.prepend(folder)
   }
+  // The gauges are redrawn in place; the folder button is kept, so it is not lost to the redraw (77).
+  for (const g of box.querySelectorAll('.gauge')) g.remove()
   if (folder && s) folder.innerHTML = `${icon('folder')}<span>${esc(folderOf(s.cwd))}</span>`
-  box.innerHTML = list.map(gaugeHtml).join('')
+  box.insertAdjacentHTML('beforeend', list.map(gaugeHtml).join(''))
   for (const b of box.querySelectorAll('.gauge')) {
     b.addEventListener('click', () => {
       if (fine.matches) return
@@ -3516,7 +3518,8 @@ function openFinder() {
   }
   const close = () => (scrim.remove(), el.remove())
   // Typing a query highlights its first match; "새 세션" stays at the top, one ↑ away.
-  q.addEventListener('input', () => ((sel = q.value.trim() ? 1 : 0), draw()))
+  // The first result is the one picked: "새 세션" is first only when it matches (7).
+  q.addEventListener('input', () => ((sel = 0), draw()))
   q.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
@@ -3822,7 +3825,8 @@ function newSession() {
   }
   q('.ns-start').addEventListener('click', () => start())
   q('.ns-prompt').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && hasMouse && !e.shiftKey && !e.isComposing && e.keyCode !== 229) {
+    // A key a skill suggestion already used (Enter filled the skill, 6) is not a send.
+    if (e.key === 'Enter' && hasMouse && !e.shiftKey && !e.isComposing && e.keyCode !== 229 && !e.defaultPrevented) {
       e.preventDefault()
       start()
     }
