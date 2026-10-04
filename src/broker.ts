@@ -98,6 +98,8 @@ export interface WebSession {
   /** The status line's context use, as a percentage text (43). Falls back to the terminal's reading. */
   /** 75: the list's state beside the badge: 코딩 중 while a turn writes code. */
   coding?: boolean
+  /** 75: the PR review loop is running. */
+  reviewLoop?: boolean
   /** 75: background work still running after the turn ended (titles). */
   background?: string[]
   context?: string
@@ -916,6 +918,7 @@ export class Broker {
         autoAllow: !!s.autoAllow,
         ...(s.resting ? { resting: true } : {}),
         ...(s.codingTurn && s.turn ? { coding: true } : {}),
+        ...(s.reviewLoop ? { reviewLoop: true } : {}),
         ...(!s.turn && s.bgTitles?.length ? { background: [...s.bgTitles] } : {}),
         ...(s.refreshAfter ? { refreshAfter: true } : {}),
         ...(this.pluginsFor(s) ? { plugins: this.pluginsFor(s) } : {}),
@@ -2530,6 +2533,8 @@ export class Broker {
           break
         }
         if (CODING_TOOLS.has(ev.name)) session.codingTurn = true
+        // The PR review loop (75): a Skill call for pr-review-loop starts it.
+        if (ev.name === 'Skill' && /(^|:)pr-review-loop$/.test(String((ev.input as { skill?: string } | undefined)?.skill ?? ''))) session.reviewLoop = true
         this.emitEvent(session.threadTs, { type: 'tool', id: ev.id, name: ev.name, title: activityLine(ev.name, ev.input, session.cwd).replace(/`/g, ''), ...(activityDetails(ev.name, ev.input) ? { detail: activityDetails(ev.name, ev.input) } : {}) })
         // Summary view: the answer and the decisions, no cards. The tool is still tracked as in flight.
         if (view === 'summary') {
@@ -2547,6 +2552,8 @@ export class Broker {
         if (denial) await this.reportDenial(session, ev.toolUseId, denial.reason)
         if (session.silentTools?.delete(ev.toolUseId)) break
         const images = (ev.images ?? []).map((im) => this.images.put(session.threadTs, Buffer.from(im.data, 'base64'), im.mediaType)).filter((x): x is WebImage => !!x)
+        // Its round says clean or abort: the loop is over (75).
+        if (/ROUND_CLEAN|ROUND_ABORT/.test(ev.output ?? '')) session.reviewLoop = undefined
         this.emitEvent(session.threadTs, { type: 'tool_end', id: ev.toolUseId, ok: !ev.isError, output: truncate(ev.output ?? '', 4_000), ...(images.length ? { images } : {}) })
         turn.taskEnd(ev.toolUseId, ev.output, ev.isError)
         // The moment Claude Code itself would hand over a queued message.

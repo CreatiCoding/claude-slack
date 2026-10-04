@@ -618,6 +618,8 @@ function waitedFor(s) {
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
   if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
+  // PR 리뷰 루프 (75): the loop outranks coding and plain work while it runs.
+  if (s.reviewLoop && s.state !== 'waiting') return `<span class="badge busy">PR 리뷰 루프</span>`
   // 코딩 중 (75): a busy turn that writes code says so; waiting on a person still wins.
   // 백그라운드 (75): the turn is over but background work still runs, so 대기 becomes 백그라운드.
   if (s.background?.length && s.state !== 'busy' && s.state !== 'waiting') return `<span class="badge busy">백그라운드</span>`

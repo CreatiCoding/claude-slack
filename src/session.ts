@@ -76,6 +76,8 @@ export interface Session {
   codingTurn?: boolean
   /** Background work still running after the turn ended: its titles (75). */
   bgTitles?: string[]
+  /** The PR review loop is running (75): a Skill call for it, until its round says clean or abort. */
+  reviewLoop?: boolean
   /** The dialog already surfaced for this screen, so it is not posted twice. */
   stallShown?: string
   /** The "still working" notice for this turn, edited in place instead of reposted. */
