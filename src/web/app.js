@@ -619,7 +619,7 @@ function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
   if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
   // Priority (75): waiting on a person > PR review loop > coding > working > background > idle.
-  if (s.state === 'waiting') return `<span class="badge waiting">${esc(isPhone() ? s.waiting || STATE.waiting : waitedFor(s))}</span>`
+  if (s.state === 'waiting') return `<span class="badge waiting">${esc(s.waiting || STATE.waiting)}</span>`
   if (s.reviewLoop) return `<span class="badge busy">PR 리뷰 루프</span>`
   if (s.state === 'busy' && s.coding) return `<span class="badge busy">코딩 중</span>`
   if (s.state === 'busy') return `<span class="badge busy">${esc(STATE.busy)}</span>`
@@ -1285,7 +1285,8 @@ function renderHeader() {
   const sub = $('subbar')
   sub.hidden = !current
   if (current) {
-    $('badge').innerHTML = s ? badgeHtml(s) + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
+    // The header badge names the wait (72); how long is said beside it, not inside the badge.
+    $('badge').innerHTML = s ? badgeHtml(s) + (s.state === 'waiting' ? ` <span class="wait-desc">${esc(waitedFor(s))}</span>` : '') + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
     renderMeta(s)
     // A reserved refresh is shown where the session's state is, with a way to take it back.
     let plan = $('subbar').querySelector('.refresh-plan')
