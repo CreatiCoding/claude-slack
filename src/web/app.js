@@ -3303,19 +3303,34 @@ async function toggleAuto(s) {
 async function openPrWindow(url) {
   const win = document.createElement('div')
   win.className = 'pr-window'
-  win.innerHTML = `<div class="pr-bar"><span class="pr-title">PR</span><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="pr-body">불러오는 중…</div>`
+  win.innerHTML = `<div class="pr-bar"><span class="pr-title">PR</span><button type="button" class="icon-btn pr-prev" aria-label="이전 쪽">‹</button><span class="pr-page"></span><button type="button" class="icon-btn pr-next" aria-label="다음 쪽">›</button><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="pr-body"></div>`
   win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
   document.body.append(win)
-  try {
-    const res = await fetch(withToken('/api/pr-view?url=' + encodeURIComponent(url)))
-    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).note || 'PR 을 읽지 못했어요')
-    const frame = document.createElement('iframe')
-    frame.setAttribute('sandbox', '')
-    frame.srcdoc = await res.text()
-    win.querySelector('.pr-body').replaceChildren(frame)
-  } catch (err) {
-    win.querySelector('.pr-body').textContent = err.message
+  // The pages (50): the title stays in the bar; the buttons go to the page before or after, and the count shows where.
+  let page = 0
+  let pages = 1
+  const show = async (to) => {
+    try {
+      const res = await fetch(withToken(`/api/pr-view?url=${encodeURIComponent(url)}&page=${to}`))
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).note || 'PR 을 읽지 못했어요')
+      page = to
+      pages = Number(res.headers.get('x-pr-pages')) || 1
+      const title = decodeURIComponent(res.headers.get('x-pr-title') || '')
+      if (title) win.querySelector('.pr-title').textContent = title
+      win.querySelector('.pr-page').textContent = pages > 1 ? `${page + 1} / ${pages}` : ''
+      win.querySelector('.pr-prev').disabled = page === 0
+      win.querySelector('.pr-next').disabled = page >= pages - 1
+      const frame = document.createElement('iframe')
+      frame.setAttribute('sandbox', '')
+      frame.srcdoc = await res.text()
+      win.querySelector('.pr-body').replaceChildren(frame)
+    } catch (err) {
+      win.querySelector('.pr-body').textContent = err.message
+    }
   }
+  win.querySelector('.pr-prev').addEventListener('click', () => page > 0 && show(page - 1))
+  win.querySelector('.pr-next').addEventListener('click', () => page < pages - 1 && show(page + 1))
+  show(0)
 }
 // AGENTS.md of the session's folder, drawn as Markdown in a window (57).
 async function showAgentsMd(s) {

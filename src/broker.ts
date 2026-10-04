@@ -41,7 +41,7 @@ import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { NoticeStore, type Notice } from './notices.ts'
 import { parseSlackLink, ThreadInfoStore } from './thread-info.ts'
 import { computeStats, prSummary, type StatDays, type StatThread } from './stats.ts'
-import { prViewHtml } from './pr-view.ts'
+import { prViewPages } from './pr-view.ts'
 import { originHosts, prHosts } from './links.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
@@ -1253,18 +1253,23 @@ export class Broker {
   }
 
   /** A pull request as the phone's page (50), kept 600 s. Only GitHub-style pull request addresses are asked. */
-  private prViews = new Map<string, { at: number; html: string }>()
-  async webPrView(url: string): Promise<{ ok: boolean; html?: string; note?: string }> {
+  private prViews = new Map<string, { at: number; title: string; pages: string[] }>()
+  async webPrView(url: string, page = 0): Promise<{ ok: boolean; html?: string; note?: string; title?: string; pages?: number }> {
     const host = /^https:\/\/([\w.-]+)\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.exec(url)?.[1]
     // A host from settings, or the origin of a folder a session works in (71).
     const origins = this.registry.live.flatMap((s) => originHosts(s.cwd))
     if (!host || ![...prHosts(), ...origins].includes(host)) return { ok: false, note: 'PR 주소가 아니에요' }
     const hit = this.prViews.get(url)
-    if (hit && Date.now() - hit.at < 600_000) return { ok: true, html: hit.html }
+    // Pages (50): a page is asked for by number; the window's buttons go through them.
+    const shown = (view: { title: string; pages: string[] }) => {
+      const i = Math.min(Math.max(0, Math.floor(page)), view.pages.length - 1)
+      return { ok: true, html: view.pages[i], title: view.title, pages: view.pages.length }
+    }
+    if (hit && Date.now() - hit.at < 600_000) return shown(hit)
     try {
-      const html = await prViewHtml(url)
-      this.prViews.set(url, { at: Date.now(), html })
-      return { ok: true, html }
+      const view = await prViewPages(url)
+      this.prViews.set(url, { at: Date.now(), ...view })
+      return shown({ ...view })
     } catch (err) {
       return { ok: false, note: `PR 을 읽지 못했어요: ${describeError(err)}` }
     }

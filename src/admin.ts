@@ -57,7 +57,7 @@ export interface AdminApi {
   webNotices?(): unknown[]
   webDeleteArchive?(path: string): { ok: boolean; note: string }
   webAgentsMd?(pid: number): { ok: boolean; note: string; text?: string }
-  webPrView?(url: string): Promise<{ ok: boolean; html?: string; note?: string }>
+  webPrView?(url: string, page?: number): Promise<{ ok: boolean; html?: string; note?: string; title?: string; pages?: number }>
   webStats?(days: 1 | 7 | 30 | 90): unknown
   webStatsWithPr?(days: 1 | 7 | 30 | 90): Promise<unknown>
   webNoticeDismiss?(id?: string): { ok: boolean; note: string }
@@ -531,9 +531,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   }
   // A pull request as a page (50), for the phone's window: no scripts, drawn in a sandbox.
   if (req.method === 'GET' && url.pathname === '/api/pr-view' && api.webPrView) {
-    const r = await api.webPrView(url.searchParams.get('url') ?? '')
+    const r = await api.webPrView(url.searchParams.get('url') ?? '', Number(url.searchParams.get('page') ?? 0))
     if (!r.ok || !r.html) return send(res, 400, { ok: false, note: r.note ?? 'PR 을 읽지 못했어요' })
-    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    // The title and page count ride in headers, so the window's bar can show them (50).
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store', 'x-pr-title': encodeURIComponent(r.title ?? ''), 'x-pr-pages': String(r.pages ?? 1) })
     res.end(r.html)
     return
   }
