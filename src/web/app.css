@@ -275,12 +275,16 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .mention { color: var(--accent); }
 
 /* code blocks */
-.codebox { position: relative; margin: .4em 0 .75em; }
-.codebox pre { margin: 0; background: var(--soft); border-radius: 8px; padding: 34px 12px 10px; overflow-x: auto; max-height: 240px; overflow-y: auto; font: var(--fs-s)/1.55 var(--mono); }
+.codebox { position: relative; margin: 4px 0; }
+.codebox pre { margin: 0; background: var(--soft); border-radius: 8px; padding: 28px 10px 8px; overflow-x: auto; max-height: 240px; overflow-y: auto; font: 13px/1.5 var(--mono); } /* the top strip keeps the copy button off the first line */
 .codebox .ln { color: var(--muted); border-right: 1px solid var(--line); padding: 0 10px 0 12px; }
 .older-hint { text-align: center; font-size: var(--fs-s); color: var(--muted); padding: 6px 0; }
-.codebox pre code { background: none; padding: 0; font-size: inherit; white-space: pre-wrap; word-break: break-all; }
-.copy { position: absolute; top: 6px; right: 6px; display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-s); color: var(--muted); background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 2px 8px; opacity: 0; transition: opacity .12s; }
+.codebox pre code { background: none; padding: 0; font-size: inherit; white-space: pre; }
+.copy { position: absolute; top: 4px; right: 6px; display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 500; color: #6b7684; background: var(--card); border: 0; border-radius: 6px; padding: 0 4px; transition: opacity .15s; cursor: pointer; }
+/* On a mouse the button shows on hover (65); a phone has no hover, so it stays. */
+@media (hover: hover) and (pointer: fine) { .copy { opacity: 0; } }
+:root[data-theme="dark"] .copy { color: #9e9ea4; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .copy { color: #9e9ea4; } }
 .copy .ic { width: 13px; height: 13px; }
 .codebox:hover .copy, .copy:focus-visible, .copy.done { opacity: 1; }
 .copy:hover { color: var(--text); }
