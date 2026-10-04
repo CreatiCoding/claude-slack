@@ -265,7 +265,7 @@ export function keyedDialogBlocks(pid: number, d: { question: string; body?: str
         type: 'actions',
         // Esc sends just the key (`dlgkey esc`), not the `:esc` command — `:esc` means "stop the running
         // turn", which this dialog usually is not.
-        elements: [...moveButtons, btn('Esc로 취소', ACTION.dlgKey, encodeValue(pid, 'dlgkey esc'))],
+        elements: [...moveButtons, btn(d.options.length ? '취소 (Esc)' : '확인 (Enter)', ACTION.dlgKey, encodeValue(pid, d.options.length ? 'dlgkey esc' : 'dlgkey enter'))],
       },
     ],
   }

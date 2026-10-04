@@ -4829,7 +4829,8 @@ export class Broker {
         // Whitespace runs are the same as one space here: the command's words are joined that way on the way in.
         const squash = (x: string) => x.replace(/\s+/g, ' ').trim()
         const at = label === undefined ? -1 : keyed?.options.findIndex((o) => squash(o) === squash(label)) ?? -1
-        if (!keyed || (arg !== 'esc' && at < 0)) {
+        // 'enter' is the confirm of a dialog with no choices (72): it presses Enter once the dialog is still there.
+        if (!keyed || (arg !== 'esc' && arg !== 'enter' && at < 0)) {
           if (c.messageTs && c.messageTs === c.session.openDialogTs) {
             await this.slack.update(c.messageTs, '⌨️ 이미 닫힌 창', [{ type: 'section', text: { type: 'mrkdwn', text: '⌨️ 이미 닫힌 창' } }]).catch(() => {})
             c.session.openDialogTs = undefined
@@ -4838,7 +4839,7 @@ export class Broker {
           return void (await c.ack('이미 닫힌 창이에요'))
         }
         // The cursor moves to the line with exactly this label, from wherever the cursor is now.
-        await this.tmux.sendKeys(c.pane, arg === 'esc' ? ['Escape'] : cursorKeys(at - keyed.selected))
+        await this.tmux.sendKeys(c.pane, arg === 'esc' ? ['Escape'] : arg === 'enter' ? ['Enter'] : cursorKeys(at - keyed.selected))
         if (c.messageTs && c.messageTs === c.session.openDialogTs) {
           await this.slack.update(c.messageTs, '⌨️ 답함', [{ type: 'section', text: { type: 'mrkdwn', text: '⌨️ 답함' } }]).catch(() => {})
           c.session.openDialogTs = undefined

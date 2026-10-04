@@ -2303,7 +2303,7 @@ test('번호 없는 창: 여러 선택지를 각각 누를 수 있고, Esc 는 �
   const posted = t.slack.posts.find((p) => /입력을 기다립니다/.test(p.text))!
   const row = (posted.blocks as Array<{ type: string; elements?: Array<{ action_id: string; value: string; text: { text: string } }> }>).find((b) => b.type === 'actions')!
   const labels = row.elements!.map((e) => e.text.text)
-  assert.deepEqual(labels, ['Open System Settings', 'Try again', 'Esc로 취소'], '커서 줄만이 아니라 둘째 선택지도 버튼이 된다')
+  assert.deepEqual(labels, ['Open System Settings', 'Try again', '취소 (Esc)'], '커서 줄만이 아니라 둘째 선택지도 버튼이 된다')
 
   // 둘째 선택지("Try again")를 고른다: 커서를 한 칸 내리고 Enter.
   const tryAgain = { actionId: row.elements![1]!.action_id, value: row.elements![1]!.value }
