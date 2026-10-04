@@ -2379,7 +2379,7 @@ $('log').addEventListener('click', async (e) => {
       const row = view.rows.find((r) => r.kind === 'user' && r.ev.ts === ts)
       if (row?.el) {
         row.el.classList.add('dropped')
-        row.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="dropped-note">잘못 보냄 · 따르지 말라고 전했어요</span>')
+        row.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="dropped-note">잘못 보냄 · 멈추고 무시하라고 하기</span>')
       }
     } catch (err) {
       toast(err.message, 'err')
