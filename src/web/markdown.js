@@ -69,18 +69,22 @@ function inline(escaped, { slack = false } = {}) {
     s = s.replace(/~~([^~\n]+)~~/g, '<del>$1</del>')
   }
   s = s.replace(/(^|[^"=\u0001])(\bhttps?:\/\/[^\s<>"'`\u0000\u0001]+)/g, (m, pre, u) => pre + autolink(u))
-  s = s.replace(/:([a-z0-9_+-]+):/g, (m, name) => EMOJI[name] ?? m)
+  // A shortcode with a drawn icon becomes that icon; the others lose their text and keep the sentence (69).
+  s = s.replace(/:([a-z0-9_+-]+):/g, (m, name) => (ICON_FOR[name] ? `<span class="emo" role="img" aria-label="${name}">${ICON_FOR[name]}</span>` : ''))
   s = s.replace(/\u0001(\d+)\u0001/g, (_, i) => links[Number(i)])
   return s.replace(/\u0000(\d+)\u0000/g, (_, i) => codes[Number(i)])
 }
 
-const EMOJI = {
-  white_check_mark: '✅', x: '❌', eyes: '👀', hourglass_flowing_sand: '⏳', warning: '⚠️', lock: '🔒', tada: '🎉',
-  heavy_check_mark: '✔️', rocket: '🚀', memo: '📝', bulb: '💡', red_circle: '🔴', large_green_circle: '🟢',
-  large_yellow_circle: '🟡', large_orange_circle: '🟠', black_circle: '⚫', thumbsup: '👍', '+1': '👍', fire: '🔥',
-  black_circle_for_record: '⏺', gear: '⚙️', mag: '🔍', pencil2: '✏️', robot_face: '🤖', clock3: '🕒',
+// Line icons (16px grid, currentColor) for the Slack shortcodes the page draws as icons (69).
+const SVG = (d) => `<svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`
+const ICON_FOR = {
+  white_check_mark: SVG('<path d="M3 8.5l3 3 7-7"/>'), heavy_check_mark: SVG('<path d="M3 8.5l3 3 7-7"/>'),
+  x: SVG('<path d="M4 4l8 8M12 4l-8 8"/>'), warning: SVG('<path d="M8 2.5l6 10.5H2z M8 6.5v3 M8 11.5v.01"/>'),
+  lock: SVG('<rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5a2.5 2.5 0 015 0v2"/>'),
+  gear: SVG('<circle cx="8" cy="8" r="2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.4 3.4l1.4 1.4M11.2 11.2l1.4 1.4M3.4 12.6l1.4-1.4M11.2 4.8l1.4-1.4"/>'),
+  mag: SVG('<circle cx="7" cy="7" r="4"/><path d="M10 10l3.5 3.5"/>'), pencil2: SVG('<path d="M3 13l1-3.5L10.5 2.5l2.5 2.5L6.5 12z"/>'),
+  hourglass_flowing_sand: SVG('<path d="M4 2h8M4 14h8M5 2c0 3 6 3 6 6s-6 3-6 6M11 2c0 3-6 3-6 6s6 3 6 6"/>'),
 }
-
 function table(rows) {
   const cells = (r) => r.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
   const head = cells(rows[0])
