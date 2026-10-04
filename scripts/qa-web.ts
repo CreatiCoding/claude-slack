@@ -694,11 +694,14 @@ for (const [label, size, phone] of [
   page.once('dialog', (d) => d.accept())
   await page.locator('#btn-more').click()
   check(`${label}: 메뉴에 '이 세션' 항목`, (await page.locator('.menu .mhead', { hasText: '이 세션' }).count()) === 1)
+  // 전부 허용 now sits under 설정 (79/73): open it there.
+  await page.locator('.menu .mi', { hasText: /^설정/ }).click()
   await page.locator('.menu .mi', { hasText: '전부 허용 켜기' }).click()
   await page.waitForSelector('#badge .badge.auto', { timeout: 3000 }).catch(() => {})
   check(`${label}: 전부 허용 켜기는 :auto on 명령`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto on')), calls.join(' | '))
   check(`${label}: 켜진 표시(상태 줄 배지)`, (await page.locator('#badge .badge.auto').count()) === 1)
   await page.locator('#btn-more').click()
+  await page.locator('.menu .mi', { hasText: /^설정/ }).click()
   await page.locator('.menu .mi', { hasText: '전부 허용 끄기' }).click()
   await page.waitForFunction(() => !document.querySelector('#badge .badge.auto'), null, { timeout: 3000 }).catch(() => {})
   check(`${label}: 끄기는 묻지 않고 :auto off`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto off')))
@@ -826,7 +829,7 @@ for (const [label, size, phone] of [
 
   // Settings submenu reaches the model command.
   await page.locator('#btn-more').click()
-  await page.locator('.menu .mi', { hasText: '설정 (모델·권한)' }).click()
+  await page.locator('.menu .mi', { hasText: /^설정$/ }).click()
   await page.locator('.menu .mi', { hasText: /^모델/ }).click()
   await page.locator('.menu .mi', { hasText: 'Sonnet' }).click()
   check(`${label}: 설정 › 모델 › Sonnet 은 model 명령`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:model sonnet')), calls.join(' | '))
