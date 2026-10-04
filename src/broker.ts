@@ -2455,6 +2455,8 @@ export class Broker {
     for (const [i, part] of parts.entries()) {
       await this.slack.post({ threadTs: session.threadTs, text: i === 0 ? `🤖 *서브에이전트 보고*\n${part}` : part })
     }
+    // The page gets the same report, marked, so it can draw it as a 서브에이전트 보고 card (72).
+    this.emitEvent(session.threadTs, { type: 'text', text: `🤖 *서브에이전트 보고*\n${body}` })
     this.logAt('INFO', 'stream', 'subagent report', this.tag(session, { chars: report.length, parts: parts.length }))
   }
 

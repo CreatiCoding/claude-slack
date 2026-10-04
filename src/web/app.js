@@ -2195,6 +2195,15 @@ function msgEl(ev) {
     el._at = ev.at
     return el
   }
+  // A subagent's report (72): its own card, with the report as Markdown.
+  if (!blocks && !ev.files?.length && ev.text?.startsWith('🤖 *서브에이전트 보고*')) {
+    const el = document.createElement('div')
+    el.className = 'item card subagent'
+    el._at = ev.at
+    el.innerHTML = `<div class="ttl">${icon('chat')}<span>서브에이전트 보고</span></div><div class="blk md">${mrkdwn(ev.text.replace('🤖 *서브에이전트 보고*', '').trim())}</div>`
+    el.append(timeEl(ev.at))
+    return el
+  }
   if (!blocks && !ev.files?.length) {
     // Longer text the broker posted (command output, a subagent's report): as a message, not a card.
     const el = document.createElement('div')
@@ -2236,6 +2245,11 @@ function cardEl(ev, blocks) {
     if (!blk) continue
     if (!titled && blk.classList.contains('ttl')) titled = true
     el.append(blk)
+  }
+  // Asking for accessibility access (72): the setting's path, and a box to copy it.
+  if (/손쉬운 사용|Accessibility/i.test(plainText(ev.text))) {
+    const path = '시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용'
+    el.insertAdjacentHTML('beforeend', `<div class="blk md"><p>손쉬운 사용 권한이 필요해요. 아래 경로에서 허용해 주세요.</p></div>` + codeBoxHtml(path))
   }
   if (!el.childElementCount) el.innerHTML = `<div class="blk md">${mrkdwn(plainText(ev.text))}</div>`
   if (ev.files?.length) el.insertAdjacentHTML('beforeend', `<div class="files">${icon('attach')} ${ev.files.map((f) => esc(f.split('/').pop())).join(', ')}</div>`)
