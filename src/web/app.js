@@ -1397,7 +1397,8 @@ function resetConvo() {
 }
 
 const scroller = $('scroller')
-const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 60
+// Following the bottom holds within 120 px of it (72).
+const atBottom = () => scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120
 function scrollToBottom() {
   scroller.scrollTop = scroller.scrollHeight // no smooth-scroll on this element: this lands at once
   $('jump').hidden = true
@@ -1419,7 +1420,8 @@ scroller.addEventListener('scroll', () => {
   const dist = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
   if (stuck) $('jump').hidden = true
   else if (dist > scroller.clientHeight) $('jump').hidden = false
-  if (scroller.scrollTop < 200 && view?.start > 0) showOlder()
+  // Older rows are drawn 600 px before the top is reached (72).
+  if (scroller.scrollTop < 600 && view?.start > 0) showOlder()
   if (!positioning && current) scrollMemory.set(current, stuck ? 0 : dist)
 })
 $('jump').firstElementChild.addEventListener('click', scrollToBottom)
