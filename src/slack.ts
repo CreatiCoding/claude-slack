@@ -47,6 +47,8 @@ export interface SlackApi {
   findBotMessage(blockId: string): Promise<string | undefined>
   /** All messages in a thread, root first. `bot` marks messages this app can delete. */
   replies(threadTs: string): Promise<Array<{ ts: string; user?: string; bot: boolean; text: string; blocks?: unknown[] }>>
+  /** A thread's channel name, its first message's author and the first 120 characters (51). */
+  threadInfo?(channelId: string, ts: string): Promise<{ channel: string; user: string; text: string }>
   /** The newest reply of a thread in one call (the root's own ts when it has none); absent where only `replies` is available. */
   latestReply?(threadTs: string): Promise<string | undefined>
   /** The channel's recent top-level messages, newest first, to find threads nothing owns any more. */
@@ -211,6 +213,13 @@ export function createBoltSlack(opts: { botToken: string; appToken: string; chan
     async permalink(ts) {
       const res = await client.chat.getPermalink({ channel, message_ts: ts })
       return String(res.permalink ?? '')
+    },
+    async threadInfo(channelId, ts) {
+      const [chan, first] = await Promise.all([client.conversations.info({ channel: channelId }), client.conversations.replies({ channel: channelId, ts, limit: 1 })])
+      const msg = first.messages?.[0]
+      const who = msg?.user ? await client.users.info({ user: msg.user }).catch(() => undefined) : undefined
+      const name = who?.user?.real_name || who?.user?.name || msg?.user || ''
+      return { channel: String(chan.channel?.name ?? channelId), user: name, text: String(msg?.text ?? '').replace(/\s+/g, ' ').slice(0, 120) }
     },
     async replies(threadTs) {
       const out: Array<{ ts: string; user?: string; bot: boolean; text: string; blocks?: unknown[] }> = []

@@ -39,6 +39,7 @@ import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { NoticeStore, type Notice } from './notices.ts'
+import { parseSlackLink, ThreadInfoStore } from './thread-info.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
@@ -188,6 +189,8 @@ export interface BrokerConfig {
   trashDir?: string
   /** The notification center's file (49); tests point it at a temporary one. */
   noticesPath?: string
+  /** The Slack thread info file (51); tests point it at a temporary one. */
+  threadInfoPath?: string
   /** The home folder new sessions and the folder picker stay under (tests use a temporary one). */
   homeDir?: string
   /** The GitHub account whose marketplaces count as the user's own (default: asked of gh once). */
@@ -472,6 +475,9 @@ export class Broker {
   private lastWebNote?: string
   /** The notification center (49). */
   private notices: NoticeStore
+  /** What Slack thread links are about, asked once and kept (51). */
+  private threadInfos: ThreadInfoStore
+  private threadInfoBusy = false
   /** The thread a page action just opened (a light copy), handed back with its result (46). */
   private lastWebThread?: string
   /** Sessions that just ended, newest last, for the list's ended section (43). */
@@ -571,6 +577,7 @@ export class Broker {
     this.images = new ImageStore(cfg.webImagesDir)
     this.groupStore = new GroupStore(cfg.groupsPath)
     this.notices = new NoticeStore(cfg.noticesPath)
+    this.threadInfos = new ThreadInfoStore(cfg.threadInfoPath)
     this.quietSlack = this.installMirror(slack)
     this.tmux = tmux
     this.confirmDialogs = confirmDialogs
@@ -718,7 +725,9 @@ export class Broker {
     const fromGh = (await Promise.all(repos(session.cwd).slice(0, 5).map((r) => branchPr(r)))).filter((x): x is Link => !!x)
     const prs = sortPrs(fromGh.length ? fromGh : await (this.cfg.prInfo ?? prInfo)(linksIn(texts, 'pr').slice(-10)))
     const own = await this.adminThreadLink(session.threadTs).catch(() => undefined)
-    const threads = [...(own ? [{ url: own, label: '이 세션의 스레드' }] : []), ...linksIn(texts, 'slack').filter((u) => !own || !u.startsWith(own.split('?')[0]!)).slice(-10).map((url) => ({ url, label: url.replace(/^https:\/\/[\w-]+\.slack\.com\/archives\//, '') }))]
+    const slackLinks = linksIn(texts, 'slack').filter((u) => !own || !u.startsWith(own.split('?')[0]!)).slice(-10)
+    this.scheduleThreadInfo(slackLinks)
+    const threads = [...(own ? [{ url: own, label: '이 세션의 스레드' }] : []), ...slackLinks.map((url) => ({ url, label: this.threadLabel(url) }))]
     const value = { prs, threads }
     this.linkCache.set(pid, { at: Date.now(), value })
     return value
@@ -1108,6 +1117,44 @@ export class Broker {
   }
 
   /** End the session and move its folder to the Trash (never deleted). */
+  /** `#채널 · 작성자 · 첫 글` once known, the address's tail until then (51). */
+  private threadLabel(url: string): string {
+    const parsed = parseSlackLink(url)
+    const info = parsed ? this.threadInfos.get(parsed.ts) : undefined
+    if (!info) return url.replace(/^https:\/\/[\w-]+\.slack\.com\/archives\//, '')
+    return `#${info.channel} · ${info.user} · ${info.text}`
+  }
+
+  /**
+   * Ask Slack about the thread links not known yet (51): twelve at most, two at a time. A failure waits 30 minutes,
+   * a rate limit 60 s. Results are kept, so a thread is asked about once.
+   */
+  private scheduleThreadInfo(links: string[]): void {
+    const ask = this.slack.threadInfo?.bind(this.slack)
+    if (!ask || this.threadInfoBusy) return
+    const wanted = links.map(parseSlackLink).filter((x): x is { channel: string; ts: string } => !!x && this.threadInfos.wanted(x.ts)).slice(0, 12)
+    if (!wanted.length) return
+    this.threadInfoBusy = true
+    void (async () => {
+      try {
+        for (let i = 0; i < wanted.length; i += 2) {
+          await Promise.all(
+            wanted.slice(i, i + 2).map(async (w) => {
+              try {
+                this.threadInfos.set(w.ts, await ask(w.channel, w.ts))
+              } catch (err) {
+                this.threadInfos.markFailed(w.ts, /ratelimited/i.test(describeError(err)) ? 60_000 : 30 * 60_000)
+              }
+            }),
+          )
+        }
+      } finally {
+        this.threadInfoBusy = false
+        this.changed()
+      }
+    })()
+  }
+
   /** A notice for the page's notification center (49). Same key twice is not added twice. */
   private addNotice(n: Omit<Notice, 'id' | 'at'>, key?: string): void {
     if (this.notices.add(n, key)) this.changed()
