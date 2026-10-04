@@ -1846,6 +1846,13 @@ function msgEl(ev) {
   const blocks = Array.isArray(ev.blocks) ? ev.blocks : null
   const first = plainText(blocks?.find((b) => b.type === 'section' || b.type === 'context')?.text?.text ?? blocks?.find((b) => b.type === 'context')?.elements?.[0]?.text ?? ev.text)
   const lead = takeEmoji(first)
+  // A side question (52) is a dashed card: it is not in the conversation.
+  if (/^옆길 질문 · 대화에는 남지 않아요/.test(ev.text ?? '')) {
+    const side = document.createElement('div')
+    side.className = 'side-card'
+    side.innerHTML = `<div class="sc-head">${esc(ev.text.split('\n')[0])}</div><div class="sc-body md">${md(ev.text.split('\n').slice(1).join('\n'))}</div>`
+    return side
+  }
   // What 전부 허용 allowed: a line like a tool's, not a card.
   if (/^⚡\s*자동 허용/.test(first)) return autoAllowEl(ev, lead.rest)
   // An answered card: one line, an accent check (or a deny mark) and what was chosen.

@@ -306,6 +306,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .nc-body span { color: var(--muted); font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .nc-x { background: none; border: 0; color: var(--muted); font-size: 18px; padding: 4px 10px; cursor: pointer; }
 .nc-more { align-self: flex-end; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--muted); font: inherit; cursor: pointer; }
+.side-card { border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; color: var(--text-2); font-size: var(--fs-s); }
+.side-card .sc-head { color: var(--muted); margin-bottom: 4px; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

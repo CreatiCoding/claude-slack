@@ -2709,6 +2709,20 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-106 옆길 질문 /btw (52)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. `/btw 질문` 과 `:btw 질문` 을 모두 브로커가 가로챈다(터미널에 그대로 두지 않는다).
+  2. 즉시 카드 하나를 올린다: `옆길 질문 · 대화에는 남지 않아요 — <질문 120자>` + `답을 기다리는 중…`. 답이 나오면 같은 카드를 고쳐 쓴다(`chat.update`).
+  3. 답을 화면에서 못 읽으면 `답을 화면에서 읽지 못했어요. 화면을 확인하세요`. 답을 읽은 뒤 Esc 로 패널을 닫는다.
+  4. 작업 중에도 바로 입력한다. 대화 기록에는 남지 않는다.
+  5. 웹: 이 카드는 점선 카드로 그린다.
+- 미구현(다음 라운드): 1초에 한 번까지 카드를 갱신하는 진행 표시(지금은 끝에 한 번만 고친다).
+- 수용 기준: AC-176
+- 근거: `src/broker.ts` `runBtw`·`runCommand`(/btw 가로채기), `src/web/app.js` `msgEl`
+- 추적: REQ-F-011(작업 중 입력)
+
 ### REQ-F-105 Slack 스레드 링크 정보 (51)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5612,6 +5626,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-176 | REQ-F-106 | /btw 와 :btw 가 한 카드로 올라가고 답으로 고쳐지며, 대화 기록에는 남지 않고, 읽지 못하면 안내 | `test/broker.test.ts` /btw 묶음(52), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-175 | REQ-F-105 | 모르는 스레드 링크는 조회해 채널·작성자·첫 글로 보이고, 파일에 남으며, 실패는 기다렸다 다시 묻는다 | `test/thread-info.test.ts` | 위 규칙대로 나온다 |
 | AC-174 | REQ-F-104 | 설정한 호스트의 PR 이 링크로 잡히고, 초안은 DRAFT, gh 가 답하지 않으면 MISSING | `test/links.test.ts` PR 묶음(50) | 위 규칙대로 나온다 |
 | AC-173 | REQ-F-103 | 같은 키는 한 번만, 30개까지, 재시작 뒤에도 남음, 세 개 + N개 더, 폰·PC 폭에서 맨 위에 보임 | `test/web.test.ts` 알림 센터(49), `scripts/qa-web.ts` 49 묶음 | 위 규칙대로 나온다 |

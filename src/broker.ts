@@ -4482,19 +4482,7 @@ export class Broker {
      */
     btw: {
       user: true,
-      run: async (c) => {
-        const q = c.arg.trim()
-        if (!q) return void (await c.post('사용법: `:btw 질문` — 대화에 남기지 않고 지금까지의 맥락으로만 답합니다.'))
-        // A side question does not touch the main turn — typed in even while one is running, same as Claude
-        // Code's own /btw is meant to be used (a question about the conversation, not a step in it).
-        const before = screenDigest(await this.tmux.capture(c.pane), 200)
-        await this.tmux.typeLine(c.pane, `/btw ${q}`)
-        await c.post(`💬 \`/btw ${truncate(q, 120)}\``)
-        const fresh = await this.readBtwAnswer(c.pane, before)
-        // The answer sits in a panel that keeps the keyboard until Esc; close it so the next message is not typed into it.
-        await this.tmux.sendKeys(c.pane, ['Escape'])
-        await c.post(fresh ? '```' + truncate(fresh.replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했습니다. 화면을 확인하세요.')
-      },
+      run: async (c) => this.runBtw(c.session, c.arg.trim()),
     },
 
     /** What the last statusLine render reported — cost, model, how close to the 200k-token mark (P4-31). */
@@ -4946,10 +4934,32 @@ export class Broker {
     await c.post(this.screenBlock(screen, { maxLines: SCREEN_OUTPUT_LINES }))
   }
 
+  /**
+   * A side question (52): `/btw 질문` and `:btw 질문` both come here, not to the terminal. One card, posted at once
+   * and then updated with the answer: it never enters the conversation, and the panel's Esc closes it again.
+   */
+  private async runBtw(session: Session, q: string): Promise<void> {
+    const threadTs = session.threadTs
+    if (!q) return void (await this.slack.post({ threadTs, text: '사용법: `/btw 질문` — 대화에 남기지 않고 지금까지의 맥락으로만 답해요.' }))
+    if (!session.pane) return void (await this.slack.post({ threadTs, text: '이 세션은 tmux 밖에서 실행 중이라 옆길 질문을 할 수 없어요.' }))
+    const head = `옆길 질문 · 대화에는 남지 않아요 — ${truncate(q, 120)}`
+    const card = await this.slack.post({ threadTs, text: `${head}\n답을 기다리는 중…` })
+    // A side question does not touch the main turn — typed in even while one is running.
+    const before = screenDigest(await this.tmux.capture(session.pane), 200)
+    await this.tmux.typeLine(session.pane, `/btw ${q}`)
+    const fresh = await this.readBtwAnswer(session.pane, before)
+    // The answer sits in a panel that keeps the keyboard until Esc; close it so the next message is not typed into it.
+    await this.tmux.sendKeys(session.pane, ['Escape'])
+    const body = fresh ? '```' + truncate(fresh.replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했어요. 화면을 확인하세요'
+    await this.slack.update(card, `${head}\n${body}`).catch(() => {})
+  }
+
   private async runCommand(session: Session, cmd: string, user?: string, messageTs?: string): Promise<void> {
     const threadTs = session.threadTs
     const post = (text: string) => this.slack.post({ threadTs, text })
     if (cmd === '') return void (await post(HELP))
+    // `/btw` is answered here, from the screen, not sent into the terminal and left there (52).
+    if (/^\/btw(\s|$)/.test(cmd)) return this.runBtw(session, cmd.replace(/^\/btw\s*/, '').trim())
     const early = this.commands[cmd.split(/\s+/)[0] ?? '']
     if (early?.noPane && !session.pane) return early.run(this.ctx(session, cmd, user, messageTs))
     if (!session.pane) {
