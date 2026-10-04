@@ -2765,10 +2765,45 @@ async function toggleAuto(s) {
   await command(s, on ? 'auto on' : 'auto off')
 }
 
+// Usage statistics (53): the numbers the broker works out from the logs, for 1, 7, 30 or 90 days.
+async function openStats(days) {
+  document.querySelector('.stats-window')?.remove()
+  const win = document.createElement('div')
+  win.className = 'stats-window'
+  const fmt = (ms) => (ms == null ? '–' : ms >= 3_600_000 ? `${Math.floor(ms / 3_600_000)}시간 ${Math.round((ms % 3_600_000) / 60_000)}분` : ms >= 60_000 ? `${Math.round(ms / 60_000)}분` : `${Math.round(ms / 1000)}초`)
+  win.innerHTML = `<div class="stats-card" role="dialog" aria-modal="true"><div class="stats-head"><b>사용 통계</b><div class="stats-days">${[1, 7, 30, 90].map((d) => `<button type="button" data-d="${d}" class="${d === days ? 'on' : ''}">${d}일</button>`).join('')}</div><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="stats-body">불러오는 중…</div></div>`
+  win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
+  win.querySelectorAll('[data-d]').forEach((b) => b.addEventListener('click', () => openStats(Number(b.dataset.d))))
+  document.body.append(win)
+  try {
+    const s = await api(`/api/stats?days=${days}`)
+    const max = Math.max(1, ...s.daily.map((d) => d.workMs))
+    win.querySelector('.stats-body').innerHTML = `
+      <div class="stats-grid">
+        <div><span>총 작업 시간</span><b>${fmt(s.totals.work)}</b></div>
+        <div><span>바쁜 시간</span><b>${fmt(s.totals.busy)}</b></div>
+        <div><span>평균 동시성</span><b>${s.totals.avgConcurrency}</b></div>
+        <div><span>최대 동시</span><b>${s.totals.peakConcurrency}</b></div>
+        <div><span>턴 길이 중앙값</span><b>${fmt(s.turns.medianMs)}</b></div>
+        <div><span>턴 p90</span><b>${fmt(s.turns.p90Ms)}</b></div>
+        <div><span>도구 호출</span><b>${s.tools}</b></div>
+        <div><span>권한 요청</span><b>${s.permissions}</b></div>
+      </div>
+      <h4>날마다</h4>
+      ${s.daily.map((d) => `<div class="stats-row"><span>${d.day.slice(5)}</span><i style="width:${Math.round((d.workMs / max) * 100)}%"></i><em>${fmt(d.workMs)} · 내 글 ${d.mine} · 세션 ${d.sessions}</em></div>`).join('') || '<p class="stats-none">기록이 없어요</p>'}
+      <h4>많이 쓴 폴더</h4>
+      ${s.topFolders.map((f) => `<div class="stats-row"><span>${esc(folderOf(f.cwd))}</span><em>${fmt(f.workMs)}</em></div>`).join('') || '<p class="stats-none">없어요</p>'}
+      <h4>많이 쓴 도구</h4>
+      ${s.topTools.map((t) => `<div class="stats-row"><span>${esc(t.name)}</span><em>${t.count}회</em></div>`).join('') || '<p class="stats-none">없어요</p>'}`
+  } catch (err) {
+    win.querySelector('.stats-body').textContent = err.message
+  }
+}
 function globalItems() {
   const theme = store.get('theme', 'auto')
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
+    { label: '사용 통계', icon: 'spark', run: () => openStats(7) },
     { label: '새 그룹', icon: 'folder', run: () => newGroup() },
     { label: '기본 프롬프트', icon: 'edit', run: editDefaultPrompt },
     {

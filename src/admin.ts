@@ -54,6 +54,7 @@ export interface AdminApi {
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webTrashInfo?(pid: number): { ok: boolean; note: string; folder?: string; repos?: Array<{ path: string; uncommitted: number; unpushed: number }> }
   webNotices?(): unknown[]
+  webStats?(days: 1 | 7 | 30 | 90): unknown
   webNoticeDismiss?(id?: string): { ok: boolean; note: string }
   webTrash?(pid: number, expectPath?: string): Promise<{ ok: boolean; note: string }>
   webFork?(pid: number): Promise<{ ok: boolean; note: string; thread?: string }>
@@ -506,6 +507,11 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const images = Array.isArray(body.images) ? (body.images as Array<Record<string, unknown>>).filter((x) => typeof x?.data === 'string').map((x) => ({ name: String(x.name ?? ''), type: String(x.type ?? ''), data: String(x.data) })) : []
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
+  }
+  // Usage statistics (53): ?days=1|7|30|90.
+  if (req.method === 'GET' && url.pathname === '/api/stats' && api.webStats) {
+    const days = Number(url.searchParams.get('days') ?? 7)
+    return send(res, 200, api.webStats(([1, 7, 30, 90] as const).includes(days as 1) ? (days as 1) : 7))
   }
   // The notification center (49): clear one (by id) or all.
   if (req.method === 'POST' && url.pathname === '/api/notices/dismiss' && api.webNoticeDismiss) {

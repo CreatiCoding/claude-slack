@@ -2709,6 +2709,21 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-107 사용 통계 (53)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. 기간 1·7·30·90일. 모든 스레드의 이벤트 기록에서 계산한다(`GET /api/stats?days=`). 각 줄은 머리만 읽는다.
+  2. 턴: `status` 의 busy 부터 다음 비-busy 까지. 열린 턴은 마지막 이벤트가 30분 안이면 지금까지, 아니면 min(마지막+60 s, 시작+30분). 30분을 넘지 않는다. 새 busy 가 열린 턴 위에 오면 min(at, 시작+30분) 으로 닫는다.
+  3. 지표: 총 작업 시간(합), 바쁜 시간(겹친 구간은 한 번), 평균 동시성(총/바쁜), 최대 동시, 턴 길이 중앙값·p90(정렬 뒤 floor(q·n) 번째), 도구 호출 수, 권한 요청 수.
+  4. 동시성 그래프 칸: 1일 15분, 7일 이하 1시간, 그 외 3시간.
+  5. 날마다: 작업 시간(자정을 넘는 턴은 나눠 센다), 내 글(web·terminal 사람 글), 활동 세션 수. 요일×시 히트맵(내 글). 폴더별 작업 시간 상위 10, 도구별 호출 상위 10.
+  6. 웹: 전역 메뉴 `사용 통계`에서 연다(기간 버튼 1·7·30·90일).
+- 미구현(다음 라운드): PR 절(`gh api graphql`, 머지·생성 수, 머지까지 시간), 동시성 그래프와 히트맵의 그림(수치만 보인다), 권한 요청 수는 `msg` 의 '권한 요청' 문구로 어림한다.
+- 수용 기준: AC-177
+- 근거: `src/stats.ts` `turnSpans`·`busyAndPeak`·`quantile`·`computeStats`, `src/events.ts` `threadIds`, `src/broker.ts` `webStats`, `src/web/app.js` `openStats`
+- 추적: REQ-F-097
+
 ### REQ-F-106 옆길 질문 /btw (52)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5626,6 +5641,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-177 | REQ-F-107 | 열린 턴과 바쁜 시간이 규칙대로 계산되고, 분위수는 floor(q·n), 웹 창이 PC·폰에서 열린다 | `test/stats.test.ts`, `scripts/qa-web.ts` 53 묶음 | 위 규칙대로 나온다 |
 | AC-176 | REQ-F-106 | /btw 와 :btw 가 한 카드로 올라가고 답으로 고쳐지며, 대화 기록에는 남지 않고, 읽지 못하면 안내 | `test/broker.test.ts` /btw 묶음(52), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-175 | REQ-F-105 | 모르는 스레드 링크는 조회해 채널·작성자·첫 글로 보이고, 파일에 남으며, 실패는 기다렸다 다시 묻는다 | `test/thread-info.test.ts` | 위 규칙대로 나온다 |
 | AC-174 | REQ-F-104 | 설정한 호스트의 PR 이 링크로 잡히고, 초안은 DRAFT, gh 가 답하지 않으면 MISSING | `test/links.test.ts` PR 묶음(50) | 위 규칙대로 나온다 |

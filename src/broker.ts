@@ -40,6 +40,7 @@ import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { NoticeStore, type Notice } from './notices.ts'
 import { parseSlackLink, ThreadInfoStore } from './thread-info.ts'
+import { computeStats, type StatDays, type StatThread } from './stats.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
@@ -1163,6 +1164,19 @@ export class Broker {
   /** The notification center, newest first (49). */
   webNotices(): Notice[] {
     return this.notices.list()
+  }
+
+  /** Usage statistics for the last 1, 7, 30 or 90 days (53), from every thread's event log. */
+  webStats(days: StatDays): ReturnType<typeof computeStats> {
+    const cwds = new Map<string, string>()
+    for (const r of this.lastRows.values()) cwds.set(r.thread, r.cwd)
+    for (const s of this.registry.live) cwds.set(s.threadTs, s.cwd)
+    const threads: StatThread[] = this.events.threadIds().map((thread) => ({
+      thread,
+      cwd: cwds.get(thread) ?? '',
+      events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined })),
+    }))
+    return computeStats(threads, Date.now(), days)
   }
 
   /** Clear one notice, or all (49). */

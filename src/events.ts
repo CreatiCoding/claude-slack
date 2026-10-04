@@ -8,7 +8,7 @@
  * Keyed by thread, not by session: a refresh relaunches Claude Code in the same
  * thread under a new launch key, and to a person it is one conversation.
  */
-import { appendFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { WebImage } from './images.ts'
@@ -50,6 +50,15 @@ export class EventLog {
 
   constructor(dir = DEFAULT_EVENTS_DIR) {
     this.dir = dir
+  }
+
+  /** Every thread that has a log on disk (53: the usage statistics read them all). */
+  threadIds(): string[] {
+    try {
+      return readdirSync(this.dir).filter((f) => /^\d+\.\d+\.jsonl$/.test(f)).map((f) => f.slice(0, -'.jsonl'.length))
+    } catch {
+      return []
+    }
   }
 
   private file(thread: string): string {

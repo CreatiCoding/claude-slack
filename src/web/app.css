@@ -308,6 +308,21 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .nc-more { align-self: flex-end; background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; color: var(--muted); font: inherit; cursor: pointer; }
 .side-card { border: 1px dashed var(--line); border-radius: 10px; padding: 8px 12px; margin: 8px 0; color: var(--text-2); font-size: var(--fs-s); }
 .side-card .sc-head { color: var(--muted); margin-bottom: 4px; }
+.stats-window { position: fixed; inset: 0; background: var(--scrim); display: grid; place-items: center; z-index: 55; padding: 12px; }
+.stats-card { background: var(--card); color: var(--text); border-radius: 14px; box-shadow: var(--shadow); width: min(640px, 100%); max-height: 86vh; display: flex; flex-direction: column; }
+.stats-head { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.stats-head b { flex: 1; }
+.stats-days button { background: none; border: 1px solid var(--line); border-radius: 8px; padding: 2px 8px; color: var(--muted); font: inherit; cursor: pointer; }
+.stats-days button.on { color: var(--text); background: var(--soft); }
+.stats-body { padding: 12px 16px; overflow-y: auto; font-size: var(--fs-s); }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+.stats-grid span { display: block; color: var(--muted); }
+.stats-grid b { font-size: 16px; }
+.stats-body h4 { margin: 14px 0 6px; color: var(--muted); font-weight: 600; }
+.stats-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 8px; align-items: center; margin: 3px 0; }
+.stats-row i { display: block; height: 6px; background: var(--accent); border-radius: 3px; min-width: 2px; }
+.stats-row em { font-style: normal; color: var(--muted); white-space: nowrap; }
+.stats-none { color: var(--muted); }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

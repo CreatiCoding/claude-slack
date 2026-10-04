@@ -100,6 +100,7 @@ const api: AdminApi = {
   },
   webSessions: () => sessions,
   webNotices: () => noticeList,
+  webStats: () => ({ days: 7, totals: { work: 3_600_000, busy: 1_800_000, avgConcurrency: 2, peakConcurrency: 3 }, turns: { count: 2, medianMs: 60_000, p90Ms: 120_000 }, tools: 5, permissions: 1, series: [], daily: [{ day: '2026-10-04', workMs: 3_600_000, mine: 4, sessions: 2 }], heat: [], topFolders: [{ cwd: '/w/a', workMs: 3_600_000 }], topTools: [{ name: 'Bash', count: 5 }] }),
   webNoticeDismiss: (id) => ({ ok: true, note: '알림을 지웠어요' }),
   webOptions: () => ({ models: [{ label: 'Opus', value: 'opus' }, { label: 'Sonnet', value: 'sonnet' }], efforts: ['low', 'high'], modes: [{ label: 'manual', value: 'default' }, { label: 'auto', value: 'auto' }] }),
   async webSendThread(thread, text, images) {
@@ -1007,6 +1008,22 @@ for (const [label, size, phone] of [
     await ctx.close()
   }
   noticeList = []
+}
+
+// 53: the usage statistics window opens from the global menu, on both widths.
+{
+  for (const phone of [false, true]) {
+    const ctx = await browser.newContext(phone ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true } : { viewport: { width: 1440, height: 820 } })
+    const page = await ctx.newPage()
+    await page.goto(base + '/')
+    await page.waitForSelector('#btn-more')
+    // A permission card of another session can sit over the phone's header: the clicks go to the buttons directly.
+    await page.locator('#btn-more').dispatchEvent('click')
+    await page.locator('.menu .mi', { hasText: /^사용 통계$/ }).dispatchEvent('click')
+    await page.waitForSelector('.stats-card', { timeout: 5000 }).catch(() => {})
+    check(`53: ${phone ? '폰' : 'PC'} 사용 통계 창 — 총 작업 시간과 일별`, ((await page.locator('.stats-card').textContent()) ?? '').includes('총 작업 시간') && ((await page.locator('.stats-card').textContent()) ?? '').includes('2026-10-04'.slice(5)))
+    await ctx.close()
+  }
 }
 
 await browser.close()
