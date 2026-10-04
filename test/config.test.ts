@@ -4,7 +4,7 @@ import { loadConfig, validateEnv } from '../src/config.ts'
 
 const BASE_ENV = { SLACK_BOT_TOKEN: 'xoxb-1', SLACK_APP_TOKEN: 'xapp-1', SLACK_CHANNEL_ID: 'C1', SLACK_ALLOWED_USERS: 'U1' }
 
-test('validateEnv: 모르는 CLAUDE_SLACK_* 키는 기동을 막는다 (claude-web 이관: P4-33)', () => {
+test('validateEnv: 모르는 CLAUDE_SLACK_* 키는 기동을 막는다', () => {
   assert.throws(() => validateEnv({ CLAUDE_SLACK_WEB_PROT: '1234' }), /unknown env var\(s\): CLAUDE_SLACK_WEB_PROT/)
 })
 

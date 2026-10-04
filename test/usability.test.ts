@@ -242,7 +242,7 @@ test('프롬프트가 키를 쥐고 있으면 허용 버튼을 다시 누르라 
   t.close()
 })
 
-test('프롬프트가 쥐고 있던 다이얼로그가 풀리기 전에 아예 사라지면(다른 경로로 이미 답해짐), 거짓 실패를 알리지 않고 조용히 그만둔다 (claude-web 이관: P1-12)', async () => {
+test('프롬프트가 쥐고 있던 다이얼로그가 풀리기 전에 아예 사라지면(다른 경로로 이미 답해짐), 거짓 실패를 알리지 않고 조용히 그만둔다', async () => {
   const t = await setup({ dialogRetryMs: 2000, dialogRetryPollMs: 30 })
   const s = await shim(t.socketPath, { tmuxPane: '%3' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -949,7 +949,7 @@ test('inputBoxHas: 입력창(마지막 두 줄 사이)의 미전송 텍스트만
   assert.equal(inputBoxHas(idle('❯ 다른 글'), '지금 보낸 메시지'), false, '다른 텍스트')
 })
 
-// ---------------------------------------------------------------- claude-web 이관: 지금 화면에서도 "일하는 중"을 알아본다 (REQ-F-048/REQ-F-050, §4.3.9)
+// ---------------------------------------------------------------- 지금 화면에서도 "일하는 중"을 알아본다 (REQ-F-048/REQ-F-050, §4.3.9)
 
 test('detectStuckState: 힌트 문구 없이 스피너 줄만 있어도 일하는 중으로 본다', () => {
   const spinner = '✽ Flibbertigibbeting… (13m 20s · ↓ 14.5k tokens)\n\n❯ \n'

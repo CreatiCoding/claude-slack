@@ -934,7 +934,7 @@ for (const [label, size, phone] of [
   changed()
   await ctx.close()
 }
-// 36: how much the layout jumps around while opening a long conversation (claude-web measured CLS 0.65
+// 36: how much the layout jumps around while opening a long conversation
 // before fixing it — collapsed space before content arrives, a fixed "latest N rows" window, pictures
 // without a reserved aspect ratio). Measured first, fixed only if it reproduces here.
 {

@@ -556,7 +556,7 @@ test('기록 보기는 별도 창이 아니라 페이지 안의 패널(iframe)�
   s.close()
 })
 
-test('안전한 재시작: /api/restart 로 예약·조회·취소한다 (claude-web 이관: P4-30)', async () => {
+test('안전한 재시작: /api/restart 로 예약·조회·취소한다', async () => {
   let scheduled = false
   const s = await listening(fakeApi({
     adminScheduleRestart: () => { scheduled = true; return { ok: true, note: '예약했습니다.' } },

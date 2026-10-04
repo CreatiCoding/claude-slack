@@ -1,4 +1,4 @@
-/** 두 번째 리뷰(5ce52c3..c788193): 되돌아간 것, 새로 생긴 결함, claude-web 의 교훈. 재현부터. */
+/** 두 번째 리뷰(5ce52c3..c788193): 되돌아간 것, 새로 생긴 결함. 재현부터. */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { appendFileSync } from 'node:fs'

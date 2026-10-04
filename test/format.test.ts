@@ -340,7 +340,7 @@ test('extractChoices: 답 끝의 ```choices 블록을 떼어 최대 6개까지 (
   assert.equal(many.choices!.length, 6)
 })
 
-test('sameMessage: 이미지/파일 첨부 표시가 붙거나 바뀌어도 같은 메시지로 본다 (claude-web 이관: P3-28)', () => {
+test('sameMessage: 이미지/파일 첨부 표시가 붙거나 바뀌어도 같은 메시지로 본다', () => {
   assert.ok(sameMessage('이거 봐줘 [Image attached: /tmp/img-1.png]', '이거 봐줘 [Image #1]'), 'Claude Code 자체 표시와도 같게 본다')
   assert.ok(sameMessage('[File attached: /tmp/log.txt] 로그 확인해줘', '로그 확인해줘'), '우리 쪽 첨부 표시를 떼고 비교한다')
   assert.ok(!sameMessage('이거 봐줘 [Image #1]', '저거 봐줘 [Image #1]'), '본문이 다르면 여전히 다른 메시지다')

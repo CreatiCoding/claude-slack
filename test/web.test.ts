@@ -54,7 +54,7 @@ test('웹에서 보낸 메시지는 스레드에 🌐 로 남고 스레드 답�
   t.close()
 })
 
-test('웹에서 보낸 그림: 장수·용량·형식·장당 크기 한도를 브로커에서도 거절한다 (claude-web 이관: 18)', async () => {
+test('웹에서 보낸 그림: 장수·용량·형식·장당 크기 한도를 브로커에서도 거절한다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   const png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYJg=='
@@ -137,7 +137,7 @@ test('답변·도구·할 일은 자기 이벤트로 가고 Slack 스트림 메�
   t.close()
 })
 
-test('사람이 지은 이름은 Claude Code 자동 제목에 덮이지 않는다 — 웹도 Slack 도 (claude-web 이관: P3-23)', async () => {
+test('사람이 지은 이름은 Claude Code 자동 제목에 덮이지 않는다 — 웹도 Slack 도', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, {})
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)

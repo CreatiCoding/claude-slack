@@ -97,7 +97,7 @@ test('4-1 스킬 줄은 읽은 위치에서 이어 읽는다', async () => {
   assert.ok((r as unknown as { offset: number }).offset > offset)
 })
 
-// ---- 5. 커밋 단위 마켓 (claude-web 의 교훈)
+// ---- 5. 커밋 단위 마켓
 function commitWorld() {
   const dir = mkdtempSync(join(tmpdir(), 'plug-'))
   writeFileSync(join(dir, 'known_marketplaces.json'), JSON.stringify({ 'cdt-skills': { source: { repo: 'me/cdt-skills' } } }))

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseClaudeProcessLine } from '../scripts/doctor.ts'
 
-test('parseClaudeProcessLine: 실제 claude 실행만 잡고, claude-slack 경로를 가진 자식 프로세스는 거른다 (claude-web 이관: P4-29)', () => {
+test('parseClaudeProcessLine: 실제 claude 실행만 잡고, claude-slack 경로를 가진 자식 프로세스는 거른다', () => {
   const real = '59305 Fri Oct  3 09:00:00 2026 CLAUDE_SLACK_SESSION=4965937a-4a09-4896-8f0a-8f9a10fe089c CLAUDE_SLACK_THREAD_TS=1790234076.094219 /opt/homebrew/bin/claude --resume abc'
   const hit = parseClaudeProcessLine(real)
   assert.ok(hit)

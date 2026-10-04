@@ -1655,7 +1655,7 @@ test('어드민 이어서 하기: 보관된 세션의 id 로도 같은 대화를
   t.close()
 })
 
-test('어드민 보관 기록 삭제: 그 스레드의 이벤트 로그·웹 그림도 함께 지우고, 스레드가 아직 살아 있으면 거부한다 (claude-web 이관: P4-33)', async () => {
+test('어드민 보관 기록 삭제: 그 스레드의 이벤트 로그·웹 그림도 함께 지우고, 스레드가 아직 살아 있으면 거부한다', async () => {
   const { writeArchive } = await import('../src/archive.ts')
   const eventsDir = mkdtempSync(join(tmpdir(), 'cs-events-'))
   const webImagesDir = mkdtempSync(join(tmpdir(), 'cs-web-images-'))
@@ -1976,7 +1976,7 @@ test('주입 확인: Enter 로 다시 거는 재시도는 횟수가 이어져 3�
   t.close()
 })
 
-test('브로커 재시작 직후 몇 초 동안은, 다시 붙기 전에 온 답글을 버리지 않고 기다렸다가 전달한다 (claude-web 이관: REQ-F-050)', async () => {
+test('브로커 재시작 직후 몇 초 동안은, 다시 붙기 전에 온 답글을 버리지 않고 기다렸다가 전달한다', async () => {
   const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
   const t = await setup({ revivePath })
   const s = await shim(t.socketPath, { tmuxPane: '%3', sessionId: 'sess-wait', cwd: '/home/u/proj' })
@@ -2052,7 +2052,7 @@ test('같은 실행 키인데 기존 pid 가 이미 죽었으면, 새 프로세�
   t.close()
 })
 
-test('되살리기 전에 그 세션의 tmux 창이 아직 있으면, 다시 띄우지 않고 기다린다 (claude-web 이관: P0-5)', async () => {
+test('되살리기 전에 그 세션의 tmux 창이 아직 있으면, 다시 띄우지 않고 기다린다', async () => {
   const revivePath = join(tmpdir(), `cs-live-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
   const t = await setup({ revivePath })
   const s = await shim(t.socketPath, { tmuxPane: '%51', sessionId: 'sess-slow', cwd: '/home/u/proj' })
@@ -2087,7 +2087,7 @@ test('되살리기: tmux 창이 이미 없으면 평소처럼 다시 띄운다',
   t2.close()
 })
 
-test('유령 프로세스가 끝나도, 같은 스레드에 살아 있는 세션이 있으면 "종료됨"으로 보이지 않는다 (claude-web 이관: P0-6)', async () => {
+test('유령 프로세스가 끝나도, 같은 스레드에 살아 있는 세션이 있으면 "종료됨"으로 보이지 않는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%3', sessionId: 'sess-a', cwd: '/home/u/proj' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -2117,7 +2117,7 @@ test('유령 프로세스가 끝나도, 같은 스레드에 살아 있는 세션
   t.close()
 })
 
-test('세션 연결이 늦어도, tmux 창이 아직 있으면 포기하지 않고 기다린다 (claude-web 이관: P0-7)', async () => {
+test('세션 연결이 늦어도, tmux 창이 아직 있으면 포기하지 않고 기다린다', async () => {
   const t = await setup({ launchTimeoutMs: 40 })
   const dir = tmpdir()
   t.tmux.alivePanes = new Set(['%9']) // FakeTmux.launch 는 항상 pane '%9' 를 돌려준다.
@@ -2149,7 +2149,7 @@ test('재개로 띄울 때 이미 있던 트랜스크립트 크기를 기억해 
   t.close()
 })
 
-test('전부 허용은 터미널을 manual 모드로 돌릴 수 있을 때만 켜진다 (claude-web 이관: P1-8)', async () => {
+test('전부 허용은 터미널을 manual 모드로 돌릴 수 있을 때만 켜진다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%3' })
   // 기본 화면은 auto 모드: shift+tab 네 번으로 manual 에 닿을 수 있다.
@@ -2174,7 +2174,7 @@ test('전부 허용: manual 로 못 돌리면 켜지지 않고 이유를 알린�
   t.close()
 })
 
-test('전부 허용: 켜진 동안 터미널이 manual 을 벗어나면 되돌리거나(성공) 전부 허용을 끈다(실패) (claude-web 이관: P1-8)', async () => {
+test('전부 허용: 켜진 동안 터미널이 manual 을 벗어나면 되돌리거나(성공) 전부 허용을 끈다(실패)', async () => {
   const t = await setup({ autoAllowCheckMs: 30 })
   const s = await shim(t.socketPath, { tmuxPane: '%3' })
   await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '9.1', threadTs: s.ack, channel: 'C1' })
@@ -2192,7 +2192,7 @@ test('전부 허용: 켜진 동안 터미널이 manual 을 벗어나면 되돌�
   t.close()
 })
 
-test('질문 카드가 열린 채 글로 답하면, Esc 로 터미널 다이얼로그를 닫고 카드를 접은 뒤 메시지를 전달한다 (claude-web 이관: P1-9)', async () => {
+test('질문 카드가 열린 채 글로 답하면, Esc 로 터미널 다이얼로그를 닫고 카드를 접은 뒤 메시지를 전달한다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%7' })
   await hook(t.socketPath, 100, {
@@ -2231,7 +2231,7 @@ test('권한 요청(예/아니오) 카드가 열려 있을 때는 글로 답해�
   t.close()
 })
 
-test('질문이 여러 개면 모두 답한 뒤 터미널의 "Submit answers" 를 찾아 누른다 (claude-web 이관: P1-10)', async () => {
+test('질문이 여러 개면 모두 답한 뒤 터미널의 "Submit answers" 를 찾아 누른다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, {
@@ -2261,7 +2261,7 @@ test('질문이 여러 개면 모두 답한 뒤 터미널의 "Submit answers" �
   t.close()
 })
 
-test('예전(이미 넘어간) 질문 카드의 버튼은, 화면에 같은 번호가 있어도 누르지 않는다 (claude-web 이관: P1-10)', async () => {
+test('예전(이미 넘어간) 질문 카드의 버튼은, 화면에 같은 번호가 있어도 누르지 않는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, {
@@ -2289,7 +2289,7 @@ test('예전(이미 넘어간) 질문 카드의 버튼은, 화면에 같은 번�
   t.close()
 })
 
-test('번호 없는 창: 여러 선택지를 각각 누를 수 있고, Esc 는 작업 중단이 아니라 키만 보내며, 누른 뒤 카드를 접고 대기를 푼다 (claude-web 이관: P1-11)', async () => {
+test('번호 없는 창: 여러 선택지를 각각 누를 수 있고, Esc 는 작업 중단이 아니라 키만 보내며, 누른 뒤 카드를 접고 대기를 푼다', async () => {
   const t = await setup({ stallMs: 60, quietMs: 100_000 })
   const s = await shim(t.socketPath, { tmuxPane: '%61' })
   await tick(100)
@@ -2331,7 +2331,7 @@ test('번호 없는 창의 Esc 버튼은 `:esc`(작업 중단) 가 아니라 Esc
   t.close()
 })
 
-test('전부 허용: 터미널 확인 창을 누르다 한 번 실패해도 바로 사람에게 묻지 않고 1초 간격으로 3번까지 다시 누른다 (claude-web 이관: P1-12)', async () => {
+test('전부 허용: 터미널 확인 창을 누르다 한 번 실패해도 바로 사람에게 묻지 않고 1초 간격으로 3번까지 다시 누른다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%96' })
   await t.broker.handleSlackMessage({ user: 'U1', text: ':auto on', ts: '5.1', threadTs: s.ack, channel: 'C1' })
@@ -2368,7 +2368,7 @@ test('전부 허용: 세 번 다 실패하면 포기하고 이유를 로그에 �
   t.close()
 })
 
-test('새 턴이 시작되면, 화면에서 사라진 열린 질문/플랜 카드도 접는다 (claude-web 이관: P1-12)', async () => {
+test('새 턴이 시작되면, 화면에서 사라진 열린 질문/플랜 카드도 접는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, {
@@ -2386,7 +2386,7 @@ test('새 턴이 시작되면, 화면에서 사라진 열린 질문/플랜 카�
   t.close()
 })
 
-test('플랜 승인 카드에 플랜 본문을 싣는다 (claude-web 이관: P1-13)', async () => {
+test('플랜 승인 카드에 플랜 본문을 싣는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, { hook_event_name: 'PreToolUse', tool_name: 'ExitPlanMode', tool_input: { plan: '1. 스키마 변경\n2. 핸들러 작성' } })
@@ -2406,7 +2406,7 @@ test('플랜 본문이 길면(3000자 한도) 여러 section 으로 나눠 싣�
   assert.equal(sections.map((sec) => sec.text!.text).join('').includes('x'.repeat(100)), true)
 })
 
-test('턴이 끝날 때 결과 없이 남은 도구는 "(중단됨)" 으로 닫히고, 이벤트 로그에도 남는다 (claude-web 이관: P1-13)', async () => {
+test('턴이 끝날 때 결과 없이 남은 도구는 "(중단됨)" 으로 닫히고, 이벤트 로그에도 남는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%3' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -2424,7 +2424,7 @@ test('턴이 끝날 때 결과 없이 남은 도구는 "(중단됨)" 으로 닫�
   t.close()
 })
 
-test('사람이 지은 이름은 ai-title 이 와도 덮이지 않는다 (claude-web 이관: P3-23)', async () => {
+test('사람이 지은 이름은 ai-title 이 와도 덮이지 않는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1', sessionId: 'sess-named' })
   await t.broker.handleSlackMessage({ user: 'U1', text: ':rename 내가 지은 이름', ts: '9.1', threadTs: s.ack, channel: 'C1' })
@@ -2439,7 +2439,7 @@ test('사람이 지은 이름은 ai-title 이 와도 덮이지 않는다 (claude
   t.close()
 })
 
-test('사람이 지은 이름은 재시작·재개 뒤에도 남는다 (claude-web 이관: P3-23)', async () => {
+test('사람이 지은 이름은 재시작·재개 뒤에도 남는다', async () => {
   const titlesPath = join(tmpdir(), `cs-titles-${process.pid}-${Math.random().toString(36).slice(2)}.json`)
   const t = await setup({ titlesPath })
   const s = await shim(t.socketPath, { tmuxPane: '%1', sessionId: 'sess-named-2', cwd: '/home/u/proj' })
@@ -2459,7 +2459,7 @@ test('사람이 지은 이름은 재시작·재개 뒤에도 남는다 (claude-w
   t2.close()
 })
 
-test('/btw 는 작업 중에도 받고, 카드 하나에 화면에서 읽은 답을 올린다 (claude-web 이관: P3-24, 52)', async () => {
+test('/btw 는 작업 중에도 받고, 카드 하나에 화면에서 읽은 답을 올린다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -2496,7 +2496,7 @@ test(':btw 는 스피너만 있는 화면을 답으로 올리지 않고, 같은 
   t.close()
 })
 
-test('백그라운드 작업이 끝나면 스레드에 한 줄로 알리고, 같은 알림을 두 번 올리지 않는다 (claude-web 이관: P3-25)', async () => {
+test('백그라운드 작업이 끝나면 스레드에 한 줄로 알리고, 같은 알림을 두 번 올리지 않는다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -2520,7 +2520,7 @@ test('백그라운드 작업이 끝나면 스레드에 한 줄로 알리고, 같
   t.close()
 })
 
-test(':retract: 턴이 도는 중이면 Esc 로 끊고, 보낸 메시지에 ✖ 를 달고, 정정 메시지를 새로 보낸다 (claude-web 이관: P3-26)', async () => {
+test(':retract: 턴이 도는 중이면 Esc 로 끊고, 보낸 메시지에 ✖ 를 달고, 정정 메시지를 새로 보낸다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
@@ -2554,7 +2554,7 @@ test(':retract: 세션이 쉬는 중이면 Esc 를 누르지 않는다. 이미 �
   t.close()
 })
 
-test('read_session: 스레드 ts·세션 id 접두어로 다른 대화를 찾아 최근 트랜스크립트를 글로 돌려준다 (claude-web 이관: P3-27)', async () => {
+test('read_session: 스레드 ts·세션 id 접두어로 다른 대화를 찾아 최근 트랜스크립트를 글로 돌려준다', async () => {
   const transcript = join(mkdtempSync(join(tmpdir(), 'read-session-')), 'other.jsonl')
   writeFileSync(
     transcript,
@@ -2589,7 +2589,7 @@ test('read_session: 스레드 ts·세션 id 접두어로 다른 대화를 찾아
   t.close()
 })
 
-test('안전한 재시작: 데몬이 아니면 예약을 거절한다 (claude-web 이관: P4-30)', async () => {
+test('안전한 재시작: 데몬이 아니면 예약을 거절한다', async () => {
   const t = await setup()
   delete process.env.CLAUDE_SLACK_DAEMON
   const r = (t.broker as unknown as { adminScheduleRestart: () => { ok: boolean; note: string } }).adminScheduleRestart()
@@ -2638,7 +2638,7 @@ test('안전한 재시작: 데몬이면 예약하고, 모든 세션이 두 번 �
   }
 })
 
-test('세션별 --settings 전달: statusLine 파일을 써 두면 띄울 때 --settings 로 넘긴다 (claude-web 이관: P4-31)', async () => {
+test('세션별 --settings 전달: statusLine 파일을 써 두면 띄울 때 --settings 로 넘긴다', async () => {
   const settingsPath = join(tmpdir(), `cs-statusline-${Math.random().toString(36).slice(2)}.json`)
   try {
     const t = await setup({ statusLineSettingsPath: settingsPath })
@@ -2666,7 +2666,7 @@ test('세션별 --settings 전달: 글로벌 설정이 아니므로 settingsPath
   t.close()
 })
 
-test('트랜스크립트 크기: 50MB 는 경고 한 번, 100MB 는 Slack·웹 입력을 막는다 (claude-web 이관: P4-32)', async () => {
+test('트랜스크립트 크기: 50MB 는 경고 한 번, 100MB 는 Slack·웹 입력을 막는다', async () => {
   const t = await setup({ sizeCheckMs: 20 })
   const transcript = t.transcript
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
@@ -2691,7 +2691,7 @@ test('트랜스크립트 크기: 50MB 는 경고 한 번, 100MB 는 Slack·웹 �
   t.close()
 })
 
-test(':lightfork — SESSION.md 가 쓰이면 그 내용으로 새 세션을 띄우고, 원래 세션은 넘겨졌다고 표시한다 (claude-web 이관: P4-32)', async () => {
+test(':lightfork — SESSION.md 가 쓰이면 그 내용으로 새 세션을 띄우고, 원래 세션은 넘겨졌다고 표시한다', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cs-lightfork-'))
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1', cwd: dir })
@@ -2736,7 +2736,7 @@ test('webLive: 바쁠 때 글 블록이면 markdown, 블록이 없으면(생각 
   t.close()
 })
 
-test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근접 여부를 보여준다 (claude-web 이관: P4-31)', async () => {
+test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근접 여부를 보여준다', async () => {
   const statusDir = join(tmpdir(), `cs-status-ctx-${Math.random().toString(36).slice(2)}`)
   mkdirSync(statusDir, { recursive: true })
   const t = await setup({ statusDir })
@@ -2752,7 +2752,7 @@ test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근�
   t.close()
 })
 
-test('41: 번호 다이얼로그가 떠 있을 때 사람 글은 Esc 로 닫고 전달한다. 권한 진행 창은 Esc 를 누르지 않는다 (claude-web 이관: 41)', async () => {
+test('41: 번호 다이얼로그가 떠 있을 때 사람 글은 Esc 로 닫고 전달한다. 권한 진행 창은 Esc 를 누르지 않는다', async () => {
   const t = await setup({ stallMs: 60, quietMs: 100_000 })
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await tick(100)
@@ -2776,7 +2776,7 @@ test('41: 번호 다이얼로그가 떠 있을 때 사람 글은 Esc 로 닫고 
   t.close()
 })
 
-test('42: 같은 모델·effort 를 다시 고르면 아무것도 치지 않고 ok 를 돌려준다 (claude-web 이관: 42)', async () => {
+test('42: 같은 모델·effort 를 다시 고르면 아무것도 치지 않고 ok 를 돌려준다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:model opus' })
@@ -2788,7 +2788,7 @@ test('42: 같은 모델·effort 를 다시 고르면 아무것도 치지 않고 
   t.close()
 })
 
-test('42: 권한 모드 전부 허용은 웹 버튼으로 켜고, 다른 모드를 고르면 꺼진다 (claude-web 이관: 42)', async () => {
+test('42: 권한 모드 전부 허용은 웹 버튼으로 켜고, 다른 모드를 고르면 꺼진다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   const on = await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:mode autoAllow' })
@@ -2801,7 +2801,7 @@ test('42: 권한 모드 전부 허용은 웹 버튼으로 켜고, 다른 모드�
   t.close()
 })
 
-test('45: 휴면은 켜고 끌 수 있고, 글이 가거나 터미널에서 입력하면 풀린다 (claude-web 이관: 45)', async () => {
+test('45: 휴면은 켜고 끌 수 있고, 글이 가거나 터미널에서 입력하면 풀린다', async () => {
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1' })
   await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:rest on' })
@@ -2815,7 +2815,7 @@ test('45: 휴면은 켜고 끌 수 있고, 글이 가거나 터미널에서 입�
   t.close()
 })
 
-test('46: 가벼운 복제 — SESSION.md 가 20KB 를 넘으면 묻고, 앞부분만이면 잘라서 넘기고 원래 세션은 쉰다 (claude-web 이관: 46)', async () => {
+test('46: 가벼운 복제 — SESSION.md 가 20KB 를 넘으면 묻고, 앞부분만이면 잘라서 넘기고 원래 세션은 쉰다', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cs-lf46-'))
   const t = await setup()
   const s = await shim(t.socketPath, { tmuxPane: '%1', cwd: dir })
