@@ -904,8 +904,9 @@ function liveRow(s, groupId) {
   wireRow(row, () => open(s.thread), (at) => openMenu(at, sessionItems(s)), { exit: endItem ? { label: '종료', run: endItem.run } : undefined })
   if (groupId === null) row.dataset.loose = '1'
   if (hasMouse) {
-    row.draggable = true
-    row.addEventListener('dragstart', (e) => startDrag(e, { thread: s.thread }, nameOf(s)))
+    // Only the grouped view takes a drag (13): the newest-first view is sorted by time, so a drop has no place.
+    row.draggable = listView === 'group'
+    row.addEventListener('dragstart', (e) => listView === 'group' && startDrag(e, { thread: s.thread }, nameOf(s)))
     dropTarget(row, { kind: 'row', group: groupId, thread: s.thread })
   }
   return row
