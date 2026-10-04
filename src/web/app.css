@@ -419,6 +419,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .sec-sub { display: block; color: var(--muted); font-size: var(--fs-s); }
 .chip.pr-draft { color: var(--muted); }
 .chip.pr-missing { color: var(--muted); opacity: .7; }
+.codebox .dc { position: absolute; top: 6px; left: 10px; font-size: var(--fs-time); color: var(--muted); }
 .codebox .add { color: var(--green); }
 .codebox .del { color: var(--red); }
 .row { position: relative; background: var(--side); transition: transform .18s ease; }

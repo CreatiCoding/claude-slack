@@ -2056,7 +2056,14 @@ function openHtmlViewer(html, name) {
 
 // A diff (a hunk header or +++/--- lines) gets its added and removed lines coloured (55).
 const diffInner = (inner) => (/^(@@ |\+\+\+ |--- )/m.test(inner) ? inner.split('\n').map((l) => (/^\+(?!\+\+ )/.test(l) ? `<span class="add">${l}</span>` : /^-(?!-- )/.test(l) ? `<span class="del">${l}</span>` : l)).join('\n') : inner)
-const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${diffInner(inner)}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
+// A diff block shows its +N −M counts in the corner (72).
+const diffCounts = (inner) => {
+  const lines = inner.split('\n')
+  const add = lines.filter((l) => /^\+(?!\+\+ )/.test(l)).length
+  const del = lines.filter((l) => /^-(?!-- )/.test(l)).length
+  return `<span class="dc">+${add} −${del}</span>`
+}
+const codeBoxHtml = (inner) => `<div class="codebox">${/^(@@ |\+\+\+ |--- )/m.test(inner) ? diffCounts(inner) : ''}<pre><code>${diffInner(inner)}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
 
 function noticeEl(ic, text, { markdown = false } = {}) {
   const el = document.createElement('div')
