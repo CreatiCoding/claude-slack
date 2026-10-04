@@ -460,7 +460,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .todos .t.done { color: var(--muted); text-decoration: line-through; }
 .todos .t.now { color: var(--accent); font-weight: 600; }
 .waiting-note { display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--yellow); margin-bottom: 6px; }
-.chips { display: flex; gap: 6px; overflow-x: auto; margin: 6px 0; padding: 0 20px; scrollbar-width: none; }
+.chips { min-height: 44px; display: flex; gap: 6px; overflow-x: auto; margin: 6px 0; padding: 0 20px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
 .chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 2px 11px; border: 0; border-radius: var(--r-pill); background: var(--chip-bg); color: var(--chip-text); font-size: var(--fs-s); font-weight: 600; }
 .chip:hover { background: var(--soft); }

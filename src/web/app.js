@@ -2536,10 +2536,13 @@ function renderComposerBits() {
   // PR and Slack thread: one link opens at once, several open a small list (above the chip on a PC, a sheet on a phone).
   // On a phone a PR opens in a window here (50); on a PC it is a new tab, as before.
   const openLink = (url) => (hasMouse ? window.open(url, '_blank', 'noopener') : openPrWindow(url))
-  const linkChip = (ic, label, list, fallback) => {
+  const linkChip = (ic, label0, list, fallback) => {
     if (!list?.length && !fallback) return
+    // The PR chip carries its number: 'PR #123', or 'PR #123 ▾ 3' with several (73).
+    const first = list?.[0]
+    const label = ic === 'pr' && first?.number ? `PR #${first.number}` : label0
     if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, list?.length && ic === 'pr' && !hasMouse ? () => openLink(list[0].url) : null, { href: hasMouse || ic !== 'pr' ? (list?.[0]?.url ?? fallback) : undefined, cls: list?.[0]?.state ? 'pr-' + list[0].state.toLowerCase() : '' })
-    chip(ic, `${label} ${list.length}`, (e) => {
+    chip(ic, ic === 'pr' ? `${label} ▾ ${list.length}` : `${label} ${list.length}`, (e) => {
       const r = e.currentTarget.getBoundingClientRect()
       openMenu({ x: r.left, y: r.top, above: true }, list.map((l) => ({ label: l.label, icon: ic, cls: l.state ? 'pr-' + l.state.toLowerCase() : '', run: () => (ic === 'pr' ? openLink(l.url) : window.open(l.url, '_blank', 'noopener')) })))
     })
