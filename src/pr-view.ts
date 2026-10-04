@@ -4,6 +4,7 @@
  * Drawn in the same sandbox as the HTML preview (no scripts), so it is shown, not run.
  */
 import { execFile } from 'node:child_process'
+import { md } from './web/markdown.js'
 
 const FIELDS = 'number,title,body,state,isDraft,author,baseRefName,headRefName,createdAt,mergedAt,closedAt,additions,deletions,changedFiles,url,reviewDecision,statusCheckRollup,reviews,comments,files,mergedBy,labels'
 const DIFF_MAX = 400_000
@@ -42,7 +43,7 @@ export async function prViewHtml(url: string): Promise<string> {
 body{font:15px/1.5 system-ui,sans-serif;margin:0;padding:14px;color:#1f2328;background:#fff}
 .badge{display:inline-block;color:#fff;border-radius:999px;padding:1px 10px;font-size:13px}
 h1{font-size:19px;margin:8px 0}.meta{color:#656d76;font-size:13px}pre{white-space:pre-wrap;background:#f6f8fa;border-radius:8px;padding:10px;font-size:12px;overflow-x:auto}
-details{margin:6px 0;border:1px solid #d1d9e0;border-radius:8px;padding:6px 10px}summary{cursor:pointer;word-break:break-all}h2{font-size:15px;margin-top:18px}
+details{margin:6px 0;border:1px solid #d1d9e0;border-radius:8px;padding:6px 10px}summary{cursor:pointer;word-break:break-all}h2{font-size:15px;margin-top:18px}.md{word-break:break-word}.md pre{white-space:pre-wrap}
 .none{color:#656d76}@media (prefers-color-scheme:dark){body{background:#0d1117;color:#e6edf3}pre{background:#161b22}details{border-color:#30363d}.meta,.none{color:#8b949e}}
 </style></head><body>
 <span class="badge" style="background:${color[state] ?? '#6e7781'}">${esc(({ OPEN: '열림', MERGED: '머지됨', CLOSED: '닫힘', DRAFT: '초안' } as Record<string, string>)[state] ?? state)}</span>
@@ -50,7 +51,7 @@ details{margin:6px 0;border:1px solid #d1d9e0;border-radius:8px;padding:6px 10px
 <div class="meta">${esc(pr.author?.login)} · ${esc(pr.headRefName)} → ${esc(pr.baseRefName)} · ${esc(String(pr.createdAt ?? '').slice(0, 10))}</div>
 <div class="meta">+${esc(pr.additions)} −${esc(pr.deletions)} · 파일 ${esc(pr.changedFiles)}개 · 리뷰 ${esc(pr.reviewDecision || '없음')}${(pr.labels ?? []).length ? ' · ' + (pr.labels as Array<{ name: string }>).map((l) => esc(l.name)).join(', ') : ''}</div>
 <h2>체크</h2>${checks.length ? `<details${failed.length ? ' open' : ''}><summary>${checks.length}개${failed.length ? ` · 실패 ${failed.length}개` : ''}</summary><pre>${esc(checks.map((c) => `${c.name ?? ''}: ${c.conclusion || c.status || ''}`).join('\n'))}</pre></details>` : '<div class="none">체크가 없어요</div>'}
-<h2>설명</h2>${pr.body ? `<pre>${esc(pr.body)}</pre>` : '<div class="none">설명이 없어요</div>'}
+<h2>설명</h2>${pr.body ? `<div class="md">${md(String(pr.body))}</div>` : '<div class="none">설명이 없어요</div>'}
 <h2>리뷰</h2>${reviews.length ? reviews.map((r) => `<div>${esc(r.author?.login)} · ${esc(r.state)}</div>`).join('') : '<div class="none">리뷰가 없어요</div>'}
 <h2>바뀐 파일</h2>${files.length ? files.map((f) => `<div>${esc(f.path)} <span class="meta">+${esc(f.additions)} −${esc(f.deletions)}</span></div>`).join('') : '<div class="none">없어요</div>'}
 <h2>변경 내용</h2>${tooBig ? '<div class="meta">(앞부분만)</div>' : ''}${diffHtml.join('') || '<div class="none">변경 내용을 읽지 못했어요</div>'}
