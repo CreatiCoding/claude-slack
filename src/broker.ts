@@ -4090,6 +4090,8 @@ export class Broker {
     // Still mid-turn (held only until the running tool finished): type it, so it is not labelled as external.
     const midTurn = !!session.turn && !!session.pane && session.state !== 'waiting' && (this.cfg.midTurnKeys ?? true)
     await this.deliver(session, held.map((m) => m.text).join('\n\n'), last.user, last.ts, midTurn ? 'keys' : 'channel')
+    // The bubbles move to where they were actually delivered, below the answers that came meanwhile (79).
+    for (const m of held) this.emitEvent(session.threadTs, this.userEvent(session.threadTs, m.ts, m.text, m.user === this.defaultRecipient ? 'web' : 'slack'))
   }
 
   /** "지금 보내기": interrupt the turn, as Claude Code's Ctrl+Enter does, and deliver the held messages at once. */

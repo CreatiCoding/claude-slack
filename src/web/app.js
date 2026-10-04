@@ -1532,6 +1532,12 @@ function apply(ev, live) {
       // The real echo of a message this page itself just sent (17): image-only sends match the first
       // one after, a text send matches on trimmed text so an earlier identical message is not mistaken.
       if (optimistic && ev.seq > optimistic.after && (optimistic.text ? ev.text?.trim() === optimistic.text : true)) dropOptimisticBubble()
+      // The same message again (79): a held one re-sent at its delivery moves to that place; the old bubble goes.
+      const before = view.users.get(ev.ts)
+      if (before) {
+        before.deleted = true
+        before.el?.remove()
+      }
       view.users.set(ev.ts, addRow('user', ev))
       return
     }
