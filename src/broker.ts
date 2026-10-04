@@ -1253,7 +1253,7 @@ export class Broker {
     this.lastWebThread = undefined
     await this.handleAction({ user: this.defaultRecipient, channel: this.cfg.channelId, actionId: a.actionId, value: a.value, messageTs: a.messageTs ?? '', ...(thread ? { threadTs: thread } : {}), ...(a.blocks ? { blocks: a.blocks } : {}) })
     // The result of what was pressed, as a toast (42); a press with no result of its own still says 눌렀습니다.
-    const note = this.lastWebNote ?? '눌렀습니다.'
+    const note = this.lastWebNote ?? '눌렀어요'
     const opened = this.lastWebThread
     this.lastWebNote = undefined
     this.lastWebThread = undefined
@@ -2173,7 +2173,7 @@ export class Broker {
       case 'SessionStart': {
         session.sessionId = event.session_id
         this.applyStoredTitle(session)
-        if (event.source === 'clear') await post('🧹 `/clear` · 대화가 초기화되었습니다')
+        if (event.source === 'clear') await post('🧹 `/clear` · 대화가 초기화됐어요')
         else if (event.source === 'compact') await post('📦 컨텍스트 압축 완료')
         break
       }
@@ -4888,7 +4888,7 @@ export class Broker {
         session.turn = undefined
       }
       session.stuckShown = `stuck|interrupted`
-      await c.ack('⏹️ 멈췄습니다. 다음 지시를 기다립니다.')
+      await c.ack('⏹️ 멈췄어요. 다음 지시를 기다려요')
       this.markWaiting(session, 'instruction')
       await this.setStatus(session, 'suspended')
       // Claude Code keeps what was queued and sends it right after Esc; so do we. Not when a refresh is reserved:

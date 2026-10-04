@@ -416,7 +416,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const conn = randomBytes(8).toString('hex')
     const me: { thread: string | null; live?: string; thinking?: boolean; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
-    write('hello', { conn, webHash: WEB_HASH })
+    // What this broker can do, from its settings, not from the address the page was opened on (60).
+    write('hello', { conn, webHash: WEB_HASH, caps: { phoneAccess: !!opts?.publicUrl, tools: [] } })
     const offEvent = api.events.subscribe((thread, ev) => {
       if (me.thread === thread) write('ev', { thread, ev }, `ev:${ev.type}`)
     })
@@ -434,8 +435,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   if (req.method === 'POST' && url.pathname === '/api/qr-code') {
     const proto = req.headers['x-forwarded-proto'] ?? ((req.socket as { encrypted?: boolean }).encrypted ? 'https' : 'http')
     const origin = (opts?.publicUrl ?? `${proto}://${req.headers.host ?? 'localhost'}`).replace(/\/+$/, '')
-    // Opened as localhost with no outside address: a QR a phone cannot use. Say so instead, token or not.
-    if (!opts?.publicUrl && /^(localhost|127\.|\[?::1)/.test(String(req.headers.host ?? ''))) return send(res, 200, { url: origin + '/', local: true })
+    // No outside address configured: a QR a phone cannot use. Say so instead, token or not (60: the setting decides).
+    if (!opts?.publicUrl) return send(res, 200, { url: origin + '/', local: true })
     if (!token) return send(res, 200, { url: origin + '/' })
     for (const [c, at] of qrCodes) if (Date.now() - at > QR_CODE_MS) qrCodes.delete(c)
     if (qrCodes.size > 100) qrCodes.delete(qrCodes.keys().next().value!)
@@ -479,10 +480,10 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
   }
   // An error on a page (a listener that threw, a draw that failed): one summary line, the stack indented under it.
   if (req.method === 'POST' && url.pathname === '/api/client-error') {
-    // A page stuck in an error loop must not fill the disk: at most 60 a minute, the rest refused.
+    // A page stuck in an error loop must not fill the disk: at most 120 a minute, the rest refused (59).
     const now = Date.now()
     while (clientErrorTimes.length && now - clientErrorTimes[0]! > 60_000) clientErrorTimes.shift()
-    if (clientErrorTimes.length >= 60) return send(res, 429, { error: '화면 오류가 너무 많아 잠시 받지 않습니다.' })
+    if (clientErrorTimes.length >= 120) return send(res, 429, { error: '화면 오류가 너무 많아 잠시 받지 않아요.' })
     clientErrorTimes.push(now)
     const b = await readJson(req, 16 * 1024)
     // Every field on one line (no control characters): a newline in where/view/url could forge a log line.
@@ -641,6 +642,12 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     return
   }
   // The conversation as a chat: the page itself, and the messages it draws.
+  // The recovery guide (60): symptoms and what to check, with a prompt that can be copied into an assistant.
+  if (req.method === 'GET' && url.pathname === '/recovery') {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(readFileSync(new URL('./recovery.html', import.meta.url), 'utf8'))
+    return
+  }
   if (req.method === 'GET' && url.pathname === '/view') {
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
     res.end(readFileSync(new URL('./viewer.html', import.meta.url), 'utf8'))

@@ -355,7 +355,7 @@ test(':esc 는 멈췄는지 확인해서 말한다', async () => {
   await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.2', threadTs: s.ack, channel: 'C1' })
   t.tmux.screen = '  ⎿  Interrupted · What should Claude do instead?\n\n❯ \n'
   await t.broker.handleSlackMessage({ user: 'U1', text: ':esc', ts: '9.3', threadTs: s.ack, channel: 'C1' })
-  assert.match(t.slack.posts.at(-1)!.text, /멈췄습니다/)
+  assert.match(t.slack.posts.at(-1)!.text, /멈췄어요/)
   assert.equal(t.slack.statuses.at(-1), `suspended@${s.ack}`)
 
   await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.4', threadTs: s.ack, channel: 'C1' })

@@ -4,7 +4,7 @@
  *   node scripts/doctor.ts              diagnosis only, changes nothing
  *   node scripts/doctor.ts restart      restart the broker the way launchd does, wait for it to answer
  *   node scripts/doctor.ts dedupe [--yes]  kill the newer of each pair of Claude processes sharing a run
- *   node scripts/doctor.ts logs [n]     the last n WARN/ERROR lines (default 20)
+ *   node scripts/doctor.ts logs [n]     the last n lines of the log, any level (default 60)
  *
  * Each diagnosis line that points at a problem is followed by a `→` suggesting what to run next.
  */
@@ -191,10 +191,12 @@ async function dedupe(autoYes: boolean): Promise<void> {
     .filter((parts) => parts.length === 2)
     .map(([pid, pane]) => ({ pid: Number(pid), pane: pane! }))
   for (const [key, list] of dupes) {
-    const sorted = [...list].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
+    // The one started last stays (60): the page and the Slack channel wait on the newer broker, which took the
+    // socket and the channel shim after the older one was already up; closing the newer one left them with nothing.
+    const sorted = [...list].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
     const keep = sorted[0]!
     const kill = sorted.slice(1)
-    console.log(`${key}: ${sorted.length}개 — 가장 오래된 pid ${keep.pid} 만 남깁니다.`)
+    console.log(`${key}: ${sorted.length}개 — 가장 나중에 뜬 pid ${keep.pid} 만 남깁니다.`)
     for (const p of kill) {
       const pane = panes.find((x) => x.pid === p.pid)?.pane
       if (!pane) {
@@ -224,9 +226,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   else if (cmd === 'restart') await restart()
   else if (cmd === 'dedupe') await dedupe(rest.includes('--yes'))
   else if (cmd === 'logs') {
-    const n = Number(rest[0]) || 20
+    // The end of the log, any level (60): a WARN-only view hid what came just before it (60).
+    const n = Number(rest[0]) || 60
     const logFile = join(DEFAULT_LOG_DIR, 'broker.log')
-    for (const line of tailLog(logFile, n, { minLevel: 'WARN' })) console.log(line)
+    for (const line of tailLog(logFile, n)) console.log(line)
   } else {
     console.log(`사용법: node scripts/doctor.ts [restart|dedupe [--yes]|logs [n]]`)
     process.exit(1)

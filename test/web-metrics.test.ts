@@ -294,8 +294,9 @@ test('4-3 화면 오류: where·view·url 의 줄바꿈으로 로그 줄을 꾸�
     assert.ok(!rest.length, entries[0])
     assert.ok(head!.includes('sse 2026-10-01'), head)
     let refused = 0
-    for (let i = 0; i < 70; i++) if ((await post({ where: 'w', message: `m${i}` })).status === 429) refused++
-    assert.ok(entries.length <= 61 && refused >= 9, `기록 ${entries.length}, 거절 ${refused}`)
+    // 120 a minute now (59): 130 posts keep 120 and refuse 10.
+    for (let i = 0; i < 130; i++) if ((await post({ where: 'w', message: `m${i}` })).status === 429) refused++
+    assert.ok(entries.length <= 121 && refused >= 9, `기록 ${entries.length}, 거절 ${refused}`)
   } finally {
     server.close()
   }

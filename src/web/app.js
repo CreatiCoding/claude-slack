@@ -273,6 +273,7 @@ function brokerAway() {
   restarting = true
 }
 let connId = null
+let phoneAccess = true // from the broker's hello (60)
 let webHash = null // this load's baseline (21); a later `hello` with a different one means new code is up
 let newVersionSeen = false
 async function subscribe(ts) {
@@ -307,6 +308,8 @@ function connect() {
   on('hello', (e) => {
     const hello = JSON.parse(e.data)
     connId = hello.conn
+    // The broker says whether a phone can reach it (60): the setting decides, not where this page was opened.
+    if (hello.caps) phoneAccess = !!hello.caps.phoneAccess
     // The broker restarting with new code (21): a tab open from before has no reason to notice on its
     // own otherwise. First value seen this load is the baseline — a later, different one is the new code.
     if (hello.webHash) {
@@ -463,7 +466,7 @@ async function drawQr() {
   clearTimeout(qrTimer)
   try {
     const r = await api('/api/qr-code', {})
-    if (r.local) {
+    if (r.local || !phoneAccess) {
       box.innerHTML = `<div class="qr-note">폰에서 열 주소가 설정되지 않았어요 (CLAUDE_SLACK_WEB_PUBLIC_URL)</div>`
       return
     }
@@ -547,7 +550,8 @@ function addEvents(ts, evs, { live = false } = {}) {
 let keepTimer = null
 function keepTimeline(ts) {
   clearTimeout(keepTimer)
-  keepTimer = setTimeout(() => saveTimeline(ts, thread(ts).events), 1000)
+  // The device keeps a conversation 1,500 ms after the last change (59).
+  keepTimer = setTimeout(() => saveTimeline(ts, thread(ts).events), 1500)
 }
 
 function markSeen(ts) {
@@ -2007,7 +2011,7 @@ function buttonEl(x, ev, all) {
     row?.querySelectorAll('button').forEach((b) => (b.disabled = true))
     try {
       const r = await api('/api/action', { actionId: x.action_id, value: x.value ?? '', ...(ev.ephemeral || String(ev.ts).startsWith('up-') ? {} : { messageTs: ev.ts }), blocks: all })
-      if (r.note && r.note !== '눌렀습니다.') toast(r.note)
+      if (r.note && r.note !== '눌렀어요') toast(r.note) // the press's own result (42)
     } catch (err) {
       toast(err.message, 'err')
     } finally {
@@ -2035,7 +2039,7 @@ $('log').addEventListener('click', async (e) => {
       toast(err.message, 'err')
     }
   } else if (b.dataset.act === 'retract') {
-    if (!confirm('잘못 보냈다고 알릴까요?\n작업을 멈추고, 이 메시지를 따르지 말라고 보냅니다. 이미 한 일은 무엇인지 알려 달라고 합니다.')) return
+    if (!confirm('잘못 보냈다고 알릴까요?\n작업을 멈추고, 이 메시지를 따르지 말라고 보내요. 이미 한 일은 무엇인지 알려 달라고 해요.')) return
     try {
       toast((await api(`/api/session/${s.pid}/retract`, { ts })).note)
     } catch (err) {
@@ -2274,10 +2278,10 @@ async function pasteFromClipboard() {
     const files = []
     for (const item of await navigator.clipboard.read())
       for (const type of item.types.filter((t) => t.startsWith('image/'))) files.push(new File([await item.getType(type)], `붙여넣기.${type.split('/')[1]}`, { type }))
-    if (!files.length) return toast('클립보드에 그림이 없어요', 'err')
+    if (!files.length) return toast('클립보드에 이미지가 없어요', 'err')
     addPictures(files)
   } catch {
-    toast('클립보드를 읽지 못했어요. 입력칸에 붙여넣어 보세요', 'err')
+    toast('클립보드를 읽지 못했어요. 입력칸을 길게 눌러 붙여넣어 보세요', 'err')
   }
 }
 const linkCache = new Map()
@@ -2365,7 +2369,7 @@ async function addPictures(files) {
     const list = pending.get(thread) ?? []
     for (const f of files) {
       if (list.length >= PIC_MAX) {
-        toast(`한 메시지에 그림은 ${PIC_MAX}장까지예요`, 'err')
+        toast(`이미지는 한 번에 ${PIC_MAX}장까지 보낼 수 있어요`, 'err')
         break
       }
       if (!PIC_TYPES.has(f.type)) {
@@ -2385,7 +2389,7 @@ async function addPictures(files) {
         }
         list.push(pic)
       } catch {
-        toast(`${f.name} 을(를) 읽지 못했어요`, 'err')
+        toast(`이미지를 읽지 못했어요: ${f.name}`, 'err')
       }
     }
     pending.set(thread, list)
@@ -2819,6 +2823,7 @@ function globalItems() {
   const items = [
     { label: '새 세션', icon: 'plus', run: newSession },
     { label: '사용 통계', icon: 'spark', run: () => openStats(7) },
+    { label: '문제가 생겼을 때 · 복구 가이드', icon: 'undo', run: () => window.open('/recovery', '_blank') },
     { label: '새 그룹', icon: 'folder', run: () => newGroup() },
     { label: '기본 프롬프트', icon: 'edit', run: editDefaultPrompt },
     {
