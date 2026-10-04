@@ -256,9 +256,12 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .md p { margin: 0; }
 .md p + *, .md * + p, .md > * + * { margin-top: 8px; }
 .md ul, .md ol { margin: 0; padding-left: 20px; }
-.md li { padding-left: 2px; }
+/* Bullets (65): a mark at least 14px wide in --text-2, 6px before the text, 4px between items, 14px per level. */
+.md ul, .md ol { list-style: none; padding-left: 0; }
+.md li { position: relative; padding-left: 20px; }
 .md li + li { margin-top: 4px; }
 .md li > ul, .md li > ol { margin-top: 4px; }
+.md li > .li-mark { position: absolute; left: 0; min-width: 14px; color: var(--text-2); text-align: right; }
 .md blockquote { margin: 4px 0; padding: 0 0 0 10px; border-left: 3px solid var(--line-strong); color: var(--text-2); }
 .md .md-h { margin: 0; line-height: 1.35; font-size: 15px; font-weight: 700; }
 .md h1.md-h, .md h2.md-h { font-size: 17px; line-height: 25.5px; }

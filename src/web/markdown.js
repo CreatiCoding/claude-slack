@@ -190,7 +190,7 @@ function blocks(text, opts) {
         items.push((m[1].length >= 2 ? '<span class="indent"></span>' : '') + body)
         i++
       }
-      out.push(`<${ordered ? 'ol' : 'ul'}>${items.map((x) => `<li>${x}</li>`).join('')}</${ordered ? 'ol' : 'ul'}>`)
+      out.push(`<${ordered ? 'ol' : 'ul'}>${items.map((x, i) => `<li><span class="li-mark" aria-hidden="true">${ordered ? `${i + 1}.` : '•'}</span>${x}</li>`).join('')}</${ordered ? 'ol' : 'ul'}>`)
       continue
     }
     if (/^\s*(---+|\*\*\*+)\s*$/.test(line) && !opts.slack) {
