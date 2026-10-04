@@ -606,11 +606,12 @@ const nameOf = (s) => s.title || (s.cwd || '').split('/').pop() || s.cwd || '세
 const folderOf = (cwd) => (cwd || '').replace(/^\/Users\/[^/]+/, '~')
 // How long a session has waited on a person (55): seconds, minutes, then hours and minutes.
 function waitedFor(s) {
+  // The wait (72): seconds under a minute, minutes (rounded) under an hour, then hours and minutes.
   if (!s.waitingSince) return s.waiting || STATE.waiting
   const sec = Math.max(0, Math.floor((Date.now() - s.waitingSince) / 1000))
-  if (sec < 60) return `${sec}초째`
-  if (sec < 3600) return `${Math.floor(sec / 60)}분째`
-  return `${Math.floor(sec / 3600)}시간 ${Math.floor((sec % 3600) / 60)}분째 기다리는 중`
+  if (sec < 60) return `${sec}초째 기다리는 중`
+  if (sec < 3600) return `${Math.round(sec / 60)}분째 기다리는 중`
+  return `${Math.floor(sec / 3600)}시간 ${Math.round((sec % 3600) / 60)}분째 기다리는 중`
 }
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
