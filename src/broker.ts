@@ -4341,7 +4341,8 @@ export class Broker {
       })
     } catch (err) {
       await this.slack.post({ threadTs, text: `❌ 세션을 띄우지 못했습니다. ${describeError(err)}` })
-      return threadTs
+      // Nothing started, so the caller must not treat it as a new thread (18): a lightfork keeps its original as it was.
+      return undefined
     }
     const starting = controlPanel({ pid: 0, cwd, origin: 'slack', hasPane: true, window: launched.window, state: 'starting' })
     const statusTs = await this.slack.post({ threadTs, text: starting.text, blocks: starting.blocks })
