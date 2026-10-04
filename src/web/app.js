@@ -329,6 +329,8 @@ function connect() {
     if (current) subscribe(current).then(() => catchUp(current))
   })
   on('error', () => {
+    // A dropped connection is one kind of error record (59), once a minute like the others.
+    if (connected) reportError('connection', 'live connection lost')
     if (connected || !lostAt) lostAt = Date.now()
     connected = false
     renderConn()
