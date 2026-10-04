@@ -508,10 +508,11 @@ html.kbd-open .composer { padding-bottom: 10px; }
 /* ---------------------------------------------------------------- menus, sheets, toast */
 .scrim { position: fixed; inset: 0; z-index: 40; }
 .scrim.dim { background: var(--scrim); }
-.menu { position: fixed; z-index: var(--z-menu); min-width: 180px; max-width: min(66vw, 320px); max-height: 60vh; overflow-y: auto; scrollbar-width: none; background: var(--bg); border-radius: var(--r-20); box-shadow: var(--sh-menu); padding: 10px 20px; }
+.menu { position: fixed; z-index: var(--z-menu); min-width: 180px; max-width: min(66vw, 320px); max-height: 60vh; overflow-y: auto; scrollbar-width: none; background: var(--bg); border-radius: var(--r-20); box-shadow: var(--sh-menu); padding: 10px 20px; border: 1px solid rgba(253, 253, 255, .75); }
+@media (prefers-color-scheme: dark) { .menu { border-color: rgba(255, 255, 255, .06); } }
 .menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 0; border-radius: var(--r-8); text-align: left; color: var(--text); font-size: var(--fs-m); line-height: 22.5px; }
 .menu .mi:focus-visible { background: var(--hover); outline: none; }
-@media (hover: hover) and (pointer: fine) { .menu .mi:hover { background: var(--hover); } }
+@media (hover: hover) and (pointer: fine) { .menu .mi:hover { background: var(--press); margin: 0 -20px; padding-left: 20px; padding-right: 20px; border-radius: 8px; } }
 .menu .mi .ic { color: var(--muted); }
 .menu .mi.danger, .menu .mi.danger .ic { color: var(--red); }
 .menu .mi .end { margin-left: auto; color: var(--muted); font-size: var(--fs-s); display: inline-flex; align-items: center; gap: 4px; }
