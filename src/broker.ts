@@ -1979,7 +1979,6 @@ export class Broker {
       session.lastReplyText = msg.text.trim()
       this.logAt('INFO', 'reply', 'reply tool', this.tag(session, { chars: msg.text.length, files: msg.files?.length ?? 0, notify: !!msg.notify }))
       // `notify` is the model asking for a push, as Remote Control's "notify me when the tests finish".
-      if (msg.notify) this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: '🔔 확인이 필요해요', tone: 'info' })
       const who = msg.notify && (session.notify ?? 'decisions') !== 'off' ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const text = who ? who + msg.text : msg.text
       const images = (msg.files ?? []).map((f) => this.images.putFile(session.threadTs, f)).filter((x): x is WebImage => !!x)
@@ -2003,7 +2002,7 @@ export class Broker {
         try {
           statSync(f)
         } catch {
-          this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: `첨부 파일을 읽지 못했어요: ${shortenHome(f)}`, tone: 'info' })
+          this.emitEvent(session.threadTs, { type: 'notice', text: `첨부 파일을 읽지 못했어요: ${shortenHome(f)}`, icon: 'alert' })
         }
       }
       this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}), ...(html.length ? { html } : {}), ...(textFiles.length ? { textFiles } : {}) })
@@ -3120,7 +3119,9 @@ export class Broker {
       const failed = n.status !== 'completed' || /exit code [1-9]|failed|error/i.test(n.summary ?? '')
       const label = truncate((n.summary ?? n.taskId ?? n.toolUseId ?? '').split('\n')[0]!, 200)
       const who = failed && this.mentionFor(session, 'all') ? `<@${this.mentionFor(session, 'all')}> ` : ''
-      this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: n.summary ? truncate(n.summary.split('\n')[0]!, 200) : `백그라운드 작업이 끝났어요 (${n.status})`, tone: failed ? 'fail' : 'ok' }, `${key}|${n.status}`)
+      const headline = n.summary ? truncate(n.summary.split('\n')[0]!, 200) : `백그라운드 작업이 끝났어요 (${n.status})`
+      // The notification centre takes only an alpha/deploy-style result (49); the rest is a conversation notice.
+      if (/알파|alpha/i.test(headline) && /배포|deploy|publish/i.test(headline)) this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: headline, tone: failed ? 'fail' : 'ok' }, `${key}|${n.status}`)
       await this.slack.post({ threadTs: session.threadTs, text: `${who}${failed ? '⚠️' : '✅'} 백그라운드 작업 ${failed ? '실패' : '완료'}: ${label}` }).catch(() => {})
     }
   }
