@@ -609,11 +609,14 @@ const folderOf = (cwd) => (cwd || '').replace(/^\/Users\/[^/]+/, '~')
 // How long a session has waited on a person (55): seconds, minutes, then hours and minutes.
 function waitedFor(s) {
   // The wait (72): seconds under a minute, minutes (rounded) under an hour, then hours and minutes.
-  if (!s.waitingSince) return s.waiting || STATE.waiting
+  // No start time: nothing to add (the badge already names the wait), so no second label (17).
+  if (!s.waitingSince) return ''
   const sec = Math.max(0, Math.floor((Date.now() - s.waitingSince) / 1000))
   if (sec < 60) return `${sec}초째 기다리는 중`
-  if (sec < 3600) return `${Math.round(sec / 60)}분째 기다리는 중`
-  return `${Math.floor(sec / 3600)}시간 ${Math.round((sec % 3600) / 60)}분째 기다리는 중`
+  // Minutes are rounded first, so 59 min 30 s reads as an hour, not "60분" (17).
+  const min = Math.round(sec / 60)
+  if (min < 60) return `${min}분째 기다리는 중`
+  return `${Math.floor(min / 60)}시간 ${min % 60}분째 기다리는 중`
 }
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
@@ -1310,7 +1313,7 @@ function renderHeader() {
   sub.hidden = !current
   if (current) {
     // The header badge names the wait (72); how long is said beside it, not inside the badge.
-    $('badge').innerHTML = s ? badgeHtml(s) + (s.state === 'waiting' ? ` <span class="wait-desc">${esc(waitedFor(s))}</span>` : '') + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
+    $('badge').innerHTML = s ? badgeHtml(s) + (s.state === 'waiting' && waitedFor(s) ? ` <span class="wait-desc">${esc(waitedFor(s))}</span>` : '') + (s.autoAllow ? ` <span class="badge auto">${icon('bolt')}전부 허용</span>` : '') : `<span class="badge ended">${STATE.ended}</span>`
     renderMeta(s)
     // A reserved refresh is shown where the session's state is, with a way to take it back.
     let plan = $('subbar').querySelector('.refresh-plan')
