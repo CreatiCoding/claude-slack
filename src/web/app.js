@@ -835,13 +835,13 @@ function renderList() {
     if (!live.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">${q ? '찾는 세션이 없어요' : '실행 중인 세션이 없어요'}</div>`)
   }
 
-  // The list shows up to 15 of the recent conversations and 20 of the past records (47).
+  // The list shows up to 30 of the recent conversations (47) and 20 of the past records.
   const rec = recent.filter((r) => match(r.title, r.preview, r.cwd))
   const hr = secHead('recent', '이어서 하기', rec.length, { dropOut: true, menu: [clearRecentItem()] })
   list.append(hr.el)
   if (hr.open && !rec.length) list.insertAdjacentHTML('beforeend', `<div class="empty-note">이어서 할 대화가 없어요</div>`)
   if (hr.open)
-    for (const r of rec.slice(0, 15))
+    for (const r of rec.slice(0, 30))
       list.append(
         plainRow({ lead: icon('play'), name: r.title, sub: r.preview, where: `${folderOf(r.cwd)} · ${ago(r.mtime)}`, when: ago(r.mtime), title: `${r.cwd}\n${r.preview || ''}` }, () => previewResume(r), (at) => openMenu(at, [{ label: '이어서 하기', icon: 'play', run: () => resume(r) }])),
       )
