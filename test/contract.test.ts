@@ -249,3 +249,15 @@ test('every rendered button is routed: clicking it always has an observable effe
     }
   }
 })
+
+test('Slack 블록 한도(60 확인 중 발견): 넘침 메뉴는 옵션 5개 이하, 패널 버튼 행은 한 행에 25개 이하', async () => {
+  const { controlPanel } = await import('../src/panel.ts')
+  for (const state of [PANEL_STATE, { ...PANEL_STATE, resting: true }]) {
+    const blocks = controlPanel(state).blocks as Array<{ type: string; elements?: Array<{ type: string; options?: unknown[] }> }>
+    for (const b of blocks) {
+      if (b.type !== 'actions') continue
+      assert.ok((b.elements ?? []).length <= 25)
+      for (const e of b.elements ?? []) if (e.type === 'overflow') assert.ok((e.options ?? []).length <= 5, `overflow ${e.options?.length}`)
+    }
+  }
+})

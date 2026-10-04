@@ -109,6 +109,8 @@ export function controlPanel(s: PanelState): { text: string; blocks: unknown[] }
         block_id: panelBlockId(s.pid),
         elements: [
           btn('⚙️ 설정', ACTION.ctlSettings, v('settings')),
+          // Its own button: the overflow menu holds five at most (Slack's limit), and this one is used often (45).
+          btn(s.resting ? '▶️ 휴면 풀기' : '💤 휴면', ACTION.ctlBtn, v(s.resting ? 'rest off' : 'rest on')),
           {
             type: 'overflow',
             action_id: ACTION.ctlMore,
@@ -116,7 +118,6 @@ export function controlPanel(s: PanelState): { text: string; blocks: unknown[] }
               opt('🖥 터미널 화면 보기', v('screen')),
               opt('🔄 세션 새로고침 (스킬·플러그인 반영)', v('confirm refresh')),
               opt('📦 컨텍스트 압축 (/compact)', v('confirm compact')),
-              opt(s.resting ? '▶️ 휴면 풀기' : '💤 휴면으로 두기', v(s.resting ? 'rest off' : 'rest on')),
               opt('⚫ 세션 종료', v('confirm exit')),
               opt('🗑 종료하고 Slack에서 지우기', v('confirm purge')),
             ],
