@@ -1075,13 +1075,13 @@ export class Broker {
         return { ok: true, note: '세션이 뜨면 바로 전달할게요' }
       }
       await this.wakeDormant(this.dormant.get(threadTs)!, msg)
-      return { ok: true, note: '보냈습니다.' }
+      return { ok: true, note: '보냈어요' }
     }
     // Same routing as a thread reply. In the web app `/` needs no `:` in front: nothing intercepts it there.
     if (text.startsWith(':')) await this.runThreadCommand(session, text.slice(1).trim())
     else if (text.startsWith('/') || text.startsWith('!')) await this.runCommand(session, text)
     else await this.inject(session, text, this.defaultRecipient, ts)
-    return { ok: true, note: '보냈습니다.' }
+    return { ok: true, note: '보냈어요' }
   }
 
   /**
@@ -1121,7 +1121,7 @@ export class Broker {
       .since(session.threadTs, Math.max(0, last - 3000))
       .reverse()
       .find((e) => e.type === 'user' && e.ts === ts)
-    if (!said || said.type !== 'user') return { ok: false, note: '그 메시지를 찾지 못했습니다.' }
+    if (!said || said.type !== 'user') return { ok: false, note: '그 메시지를 찾지 못했어요' }
     // The web's own wording and length (48): 80 characters, in double quotes.
     const quoted = truncate(said.text.replace(/\s+/g, ' ').trim(), 80)
     if (session.pane) await this.interrupt(this.ctx(session, 'esc'))
@@ -1131,7 +1131,7 @@ export class Broker {
     // The wrong message is marked as dropped in the log, so every page and device shows it faded (48).
     this.emitEvent(session.threadTs, { type: 'react', ts, name: 'x', on: true })
     await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
-    return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
+    return { ok: true, note: '멈추고 잘못 보냈다고 알렸어요' }
   }
 
   /** Folders that must never go to the Trash: home, the default folder, the broker's own and its state. */
@@ -1328,7 +1328,7 @@ export class Broker {
     const name = session.manualTitle ?? session.title ?? basename(session.cwd)
     const thread = await this.launchSession({ cwd: session.cwd, prompt: '', user: this.defaultRecipient, resumeId: session.sessionId, extraArgs: [...this.settingsArgs(session), '--fork-session'], title: `${name}의 사본`, fork: { fromThread: session.threadTs, transcript: session.transcriptPath, fromId: session.sessionId?.slice(0, 8) } })
     if (thread) this.copyGroup(session.threadTs, thread)
-    return thread ? { ok: true, note: '복제한 세션을 띄웁니다.', thread } : { ok: false, note: '세션을 띄우지 못했습니다.' }
+    return thread ? { ok: true, note: '복제한 세션을 띄워요', thread } : { ok: false, note: '세션을 띄우지 못했어요' }
   }
 
   /** A button in the web app: the very handler a Slack click reaches, as the owner. */
@@ -1442,7 +1442,7 @@ export class Broker {
     const recent = (await (this.cfg.listSessions ?? listRecentSessions)(25)).find((r) => r.id === id)
     const archived = listArchives(1000, this.cfg.archiveDir).find((a) => a.sessionId === id)
     const hit = recent ?? (archived && { id: archived.sessionId, cwd: archived.cwd })
-    if (!hit) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없습니다.' }
+    if (!hit) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없어요' }
     // `thread` rides along even on this "failure": already running is somewhere to go to, not nothing (19).
     const busy = this.runningOf(hit.id)
     if (busy) return { ok: false, note: await this.alreadyRunningText(busy.threadTs), thread: busy.threadTs }
@@ -1466,9 +1466,9 @@ export class Broker {
   async adminKill(pid: number): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
-    if (!session.pane) return { ok: false, note: 'tmux 밖 세션이라 종료할 수 없습니다.' }
+    if (!session.pane) return { ok: false, note: 'tmux 밖 세션이라 종료할 수 없어요' }
     await this.tmux.killPane(session.pane)
-    return { ok: true, note: '종료를 요청했습니다.' }
+    return { ok: true, note: '종료를 요청했어요' }
   }
 
   private pinStore: PinStore
@@ -1583,16 +1583,16 @@ export class Broker {
   async adminResumeOrphan(ts: string): Promise<{ ok: boolean; note: string }> {
     const orphan = (await this.adminOrphans()).find((o) => o.ts === ts)
     if (!orphan) return { ok: false, note: '이 스레드는 더 이상 잔재가 아닙니다. 목록을 새로고침하세요.' }
-    if (!orphan.sessionId) return { ok: false, note: '이어서 할 대화 정보가 없는 스레드입니다. 정리만 할 수 있습니다.' }
+    if (!orphan.sessionId) return { ok: false, note: '이어서 할 대화 정보가 없는 스레드입니다. 정리만 할 수 있어요' }
     const busy = this.runningOf(orphan.sessionId, ts)
     if (busy) return { ok: false, note: await this.alreadyRunningText(busy.threadTs) }
     if (orphan.kind === 'dormant') {
       const entry = this.dormant.get(ts)
-      if (!entry) return { ok: false, note: '대기 중이던 세션 정보가 사라졌습니다. 목록을 새로고침하세요.' }
+      if (!entry) return { ok: false, note: '대기 중이던 세션 정보가 사라졌어요. 목록을 새로고침하세요' }
       await this.wakeDormant(entry, { text: '', user: this.defaultRecipient, ts })
     } else {
       const ended = this.registry.byThreadTs(ts)
-      if (!ended) return { ok: false, note: '끝난 세션 정보가 사라졌습니다. 목록을 새로고침하세요.' }
+      if (!ended) return { ok: false, note: '끝난 세션 정보가 사라졌어요. 목록을 새로고침하세요' }
       // The old panel's buttons address a pid that no longer exists.
       if (ended.panelTs) await this.slack.delete(ended.panelTs).catch(() => {})
       await this.launchSession({ cwd: ended.cwd, prompt: '', resumeId: orphan.sessionId, user: this.defaultRecipient, threadTs: ts, rootTs: ended.rootTs, extraArgs: this.settingsArgs(ended) })
@@ -1604,7 +1604,7 @@ export class Broker {
   /** Clean up every leftover thread whose session is over or unknown. Threads waiting to be woken (dormant) are left alone. */
   async adminPurgeOrphans(): Promise<{ ok: boolean; note: string }> {
     const targets = (await this.adminOrphans(true)).filter((o) => o.kind !== 'dormant')
-    if (!targets.length) return { ok: true, note: '정리할 잔재 스레드가 없습니다.' }
+    if (!targets.length) return { ok: true, note: '정리할 잔재 스레드가 없어요' }
     // One after another: they share Slack's rate limit, and running them together only makes each slower.
     void (async () => {
       for (const o of targets) await this.runOrphanPurge(o)
@@ -1652,7 +1652,7 @@ export class Broker {
     const session = this.registry.byPid(pid)
     const name = title.trim()
     if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
-    if (!name) return { ok: false, note: '이름이 비어 있습니다.' }
+    if (!name) return { ok: false, note: '이름이 비어 있어요' }
     await this.applyTitle(session, name)
     await this.slack.post({ threadTs: session.threadTs, text: `✏️ 이름: *${name}*` }).catch(() => {})
     return { ok: true, note: `이름을 "${name}" 으로 바꿨습니다.` }
@@ -1661,7 +1661,7 @@ export class Broker {
   /** Rename one archived session. Only files the archive listing offers. */
   async adminRenameArchive(path: string, title: string): Promise<{ ok: boolean; note: string }> {
     const known = listArchives(1000, this.cfg.archiveDir).find((a) => a.path === path)
-    if (!known || !renameArchive(path, title, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했거나 이름이 비어 있습니다.' }
+    if (!known || !renameArchive(path, title, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했거나 이름이 비어 있어요' }
     // So a later resume starts already carrying the name, not whatever ai-title the resumed run comes up with.
     this.titles.set(known.sessionId, title.trim())
     return { ok: true, note: `이름을 "${title.trim()}" 으로 바꿨습니다.` }
@@ -1670,11 +1670,11 @@ export class Broker {
   /** Delete a saved conversation from the "이어서 하기" list, so it can no longer be resumed. Never one that is running. */
   async adminDeleteRecent(id: string): Promise<{ ok: boolean; note: string }> {
     const known = (await (this.cfg.listSessions ?? listRecentSessions)(25)).some((r) => r.id === id)
-    if (!known) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없습니다.' }
+    if (!known) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없어요' }
     if (this.registry.live.some((s) => !s.ended && s.sessionId === id)) return { ok: false, note: '지금 실행 중인 세션입니다. 먼저 종료하세요.' }
-    if (!(await (this.cfg.deleteSession ?? deleteRecentSession)(id))) return { ok: false, note: '대화 파일을 찾지 못했습니다.' }
+    if (!(await (this.cfg.deleteSession ?? deleteRecentSession)(id))) return { ok: false, note: '대화 파일을 찾지 못했어요' }
     this.logAt('INFO', 'admin', `deleted saved conversation ${id.slice(0, 8)}`)
-    return { ok: true, note: '대화를 삭제했습니다. 더 이상 이어서 할 수 없습니다.' }
+    return { ok: true, note: '대화를 삭제했어요. 더 이상 이어서 할 수 없어요' }
   }
 
   /**
@@ -1685,29 +1685,29 @@ export class Broker {
    */
   async adminDeleteArchive(path: string): Promise<{ ok: boolean; note: string }> {
     const known = listArchives(1000, this.cfg.archiveDir).some((a) => a.path === path)
-    if (!known) return { ok: false, note: '보관 기록을 찾지 못했습니다.' }
+    if (!known) return { ok: false, note: '보관 기록을 찾지 못했어요' }
     let threadTs: string | undefined
     try {
       threadTs = (JSON.parse(readFileSync(path, 'utf8')) as { threadTs?: string }).threadTs
     } catch {}
-    if (threadTs && this.registry.byThreadTs(threadTs)?.ended === false) return { ok: false, note: '이 보관 기록의 스레드가 아직 살아 있습니다. 먼저 세션을 종료하세요.' }
-    if (!deleteArchive(path, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했습니다.' }
+    if (threadTs && this.registry.byThreadTs(threadTs)?.ended === false) return { ok: false, note: '이 보관 기록의 스레드가 아직 살아 있어요. 먼저 세션을 종료하세요' }
+    if (!deleteArchive(path, this.cfg.archiveDir)) return { ok: false, note: '보관 기록을 찾지 못했어요' }
     if (threadTs) {
       this.events.forgetThread(threadTs)
       this.images.forgetThread(threadTs)
     }
     this.logAt('INFO', 'admin', `deleted archive ${basename(path)}`)
-    return { ok: true, note: '보관 기록을 삭제했습니다.' }
+    return { ok: true, note: '보관 기록을 삭제했어요' }
   }
 
   /** Archive and delete a thread. A live session is ended first, and the thread goes when it reports SessionEnd. */
   async adminPurge(pid: number): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
-    if (!session) return { ok: false, note: '세션을 찾지 못했습니다.' }
+    if (!session) return { ok: false, note: '세션을 찾지 못했어요' }
     if (!session.ended) {
-      if (!session.pane) return { ok: false, note: 'tmux 밖 세션이라 종료할 수 없습니다. 터미널에서 종료한 뒤 다시 하세요.' }
+      if (!session.pane) return { ok: false, note: 'tmux 밖 세션이라 종료할 수 없어요. 터미널에서 종료한 뒤 다시 하세요' }
       await this.runCommand(session, 'purge')
-      return { ok: true, note: '세션을 종료하는 중입니다. 끝나면 스레드를 보관하고 지웁니다.' }
+      return { ok: true, note: '세션을 종료하는 중입니다. 끝나면 스레드를 보관하고 지워요' }
     }
     const result = await this.purges.run(session)
     if (!result.error) session.panelTs = undefined
@@ -2124,21 +2124,21 @@ export class Broker {
    * broker — launchd's KeepAlive is what brings it back; anywhere else this would just turn the broker off.
    */
   adminScheduleRestart(): { ok: boolean; note: string } {
-    if (!this.isDaemonManaged) return { ok: false, note: '데몬(launchd)이 띄운 브로커가 아니라서 예약할 수 없습니다. 재시작하면 꺼진 채로 남습니다.' }
-    if (this.restartTimer) return { ok: true, note: '이미 예약되어 있습니다.' }
+    if (!this.isDaemonManaged) return { ok: false, note: '데몬(launchd)이 띄운 브로커가 아니라서 예약할 수 없어요. 재시작하면 꺼진 채로 남어요' }
+    if (this.restartTimer) return { ok: true, note: '이미 예약되어 있어요' }
     this.restartIdleStreak = 0
     this.restartTimer = setInterval(() => this.checkRestartWhenIdle(), this.cfg.restartCheckMs ?? RESTART_CHECK_MS)
     this.restartTimer.unref?.()
     this.logAt('INFO', 'broker', 'restart-when-idle scheduled')
-    return { ok: true, note: '모든 세션이 쉬면 재시작하도록 예약했습니다.' }
+    return { ok: true, note: '모든 세션이 쉬면 재시작하도록 예약했어요' }
   }
 
   adminCancelRestart(): { ok: boolean; note: string } {
-    if (!this.restartTimer) return { ok: false, note: '예약된 재시작이 없습니다.' }
+    if (!this.restartTimer) return { ok: false, note: '예약된 재시작이 없어요' }
     clearInterval(this.restartTimer)
     this.restartTimer = undefined
     this.logAt('INFO', 'broker', 'restart-when-idle cancelled')
-    return { ok: true, note: '예약을 취소했습니다.' }
+    return { ok: true, note: '예약을 취소했어요' }
   }
 
   adminRestartStatus(): { scheduled: boolean; waitingOn: string[] } {
