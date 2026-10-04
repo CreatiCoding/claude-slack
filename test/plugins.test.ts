@@ -9,7 +9,7 @@ function plugins() {
   const dir = mkdtempSync(join(tmpdir(), 'plug-'))
   writeFileSync(
     join(dir, 'known_marketplaces.json'),
-    JSON.stringify({ 'cdt-skills': { source: { source: 'github', repo: 'alice/cdt-skills' } }, official: { source: { source: 'github', repo: 'anthropics/official' } }, solo: { source: { source: 'git', url: 'git@github.com:creaticoding/solo.git' } } }),
+    JSON.stringify({ 'cdt-skills': { source: { source: 'github', repo: 'alice/cdt-skills' } }, official: { source: { source: 'github', repo: 'anthropics/official' } }, solo: { source: { source: 'git', url: 'git@github.com:alice/solo.git' } } }),
   )
   const v = (market: string, plugin: string, version: string) => mkdirSync(join(dir, 'cache', market, plugin, version), { recursive: true })
   return { dir, v }
@@ -18,7 +18,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 test('내 계정 마켓만(주소 경로에 사용자명)', () => {
   const { dir } = plugins()
-  assert.deepEqual(userMarkets(dir, 'creaticoding').sort(), ['cdt-skills', 'solo'])
+  assert.deepEqual(userMarkets(dir, 'alice').sort(), ['cdt-skills', 'solo'])
 })
 
 test('세션이 쓰는 버전 = 프로세스 시작 전에 있던 가장 새 버전; 더 새 게 있으면 새로고침하면; 스킬별로 나뉜 마켓은 번들 이름·버전 한 줄', async () => {
@@ -49,7 +49,7 @@ test('대화에 Claude Code 가 쓴 "Base directory for this skill" 만 증거�
   // A command's output printing the newer path is not what this process loaded.
   const output = JSON.stringify({ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: 'u', content: `Base directory for this skill: ${dir}/cache/solo/solo/1.1.0/skills/x` }] } })
   writeFileSync(t, [skill('1.0.0'), output].join('\n') + '\n')
-  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'creaticoding', processStart: started, transcript: t }), [{ market: 'solo', version: '1.0.0', latest: '1.1.0' }])
+  assert.deepEqual(sessionPlugins({ pluginsDir: dir, user: 'alice', processStart: started, transcript: t }), [{ market: 'solo', version: '1.0.0', latest: '1.1.0' }])
 })
 
 test('브로커: 목록에 세션이 쓰는 플러그인 버전과 "새로고침하면"', async () => {
