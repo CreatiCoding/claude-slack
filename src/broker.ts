@@ -762,6 +762,8 @@ export class Broker {
       this.liveShown.delete(thread)
       return ''
     }
+    // A session that is not working (no open turn) and shows no block has nothing to write: no screen read (15).
+    if (s.state !== 'busy' && !s.turn && !this.liveShown.get(thread)) return ''
     try {
       const block = writingPreview(await this.tmux.captureAnsi(s.pane, LIVE_HISTORY), this.liveShown.get(thread))
       if (block === '') return undefined
