@@ -628,7 +628,9 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const known = (await api.adminState()).archives.some((a) => a.path === path)
     if (!known) return send(res, 404, { error: 'unknown archive' })
     try {
-      return send(res, 200, { markdown: readFileSync(path.replace(/\.json$/, '.md'), 'utf8') })
+      // The whole record as events (47) when it has them, so the page reads it as the conversation.
+      const events = (JSON.parse(readFileSync(path, 'utf8')).messages ?? []).map((m: { event?: unknown }) => m.event).filter(Boolean)
+      return send(res, 200, { markdown: readFileSync(path.replace(/\.json$/, '.md'), 'utf8'), events })
     } catch (err) {
       return send(res, 404, { error: String(err) })
     }

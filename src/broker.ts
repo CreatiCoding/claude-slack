@@ -5221,7 +5221,7 @@ export class Broker {
       const { seq: _seq, at, ...body } = e
       const text = 'text' in body && typeof body.text === 'string' ? body.text : 'output' in body && typeof body.output === 'string' ? body.output : 'title' in body ? String(body.title) : ''
       const user = e.type === 'user' ? e.via : undefined
-      messages.push({ ts: e.type === 'user' || e.type === 'msg' ? (e.ts as string) : String(at), user, bot: e.type !== 'user', text, event: body as Record<string, unknown> })
+      messages.push({ ts: e.type === 'user' || e.type === 'msg' ? (e.ts as string) : String(at), user, bot: e.type !== 'user', text, event: { ...body, at } as Record<string, unknown> })
     }
     if (!messages.length || findArchiveByThread(session.threadTs, dir)) return
     try {

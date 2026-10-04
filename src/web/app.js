@@ -1065,10 +1065,32 @@ function viewArchive(a) {
   win.innerHTML = `<div class="pr-bar"><span class="pr-title"></span><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="pr-body"></div>`
   win.querySelector('.pr-title').textContent = a.title || folderOf(a.cwd)
   win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
-  const frame = document.createElement('iframe')
-  frame.src = withToken('/view?kind=archive&path=' + encodeURIComponent(a.path))
-  win.querySelector('.pr-body').append(frame)
+  const body = win.querySelector('.pr-body')
   document.body.append(win)
+  // The record is read as the conversation (47): read-only, in the same timeline as a live one. An old record with
+  // no events falls back to the saved Markdown page.
+  fetch(withToken('/api/archive?path=' + encodeURIComponent(a.path)), { headers: authHeaders }).then((r) => r.json()).then((d) => {
+    if (d.events?.length) return body.replaceChildren(timelineEl(d.events))
+    const frame = document.createElement('iframe')
+    frame.src = withToken('/view?kind=archive&path=' + encodeURIComponent(a.path))
+    body.replaceChildren(frame)
+  }, (err) => toast(err.message, 'err'))
+}
+
+/** A past record's events drawn in the timeline (47): the same rows as a live conversation, with no input and no buttons that act. */
+function timelineEl(events) {
+  const wrap = document.createElement('div')
+  wrap.className = 'timeline'
+  const saved = view
+  view = { rows: [], tools: new Map(), msgs: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0, start: 0, dirty: new Set(), opened: true, thread: null }
+  try {
+    for (const ev of events) apply(ev, false)
+    for (const row of view.rows) if (!row.deleted) wrap.append(draw(row))
+  } finally {
+    view = saved
+  }
+  wrap.prepend(Object.assign(document.createElement('p'), { className: 'archive-note', textContent: '지난 기록이에요 · 읽기 전용' }))
+  return wrap
 }
 
 // ------------------------------------------------------------------ opening a session
