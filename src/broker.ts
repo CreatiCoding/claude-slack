@@ -3651,14 +3651,27 @@ export class Broker {
     if ((session.waitingReason === 'question' || session.waitingReason === 'plan') && session.pane) {
       await this.closeOpenDialog(session)
     }
+    // A numbered terminal dialog that is not a permission progress window (41): the same Esc, then deliver.
+    else if (session.waitingReason === 'dialog' && session.pane && (await this.numberedNonProceedOpen(session))) {
+      await this.closeOpenDialog(session)
+    }
     await this.deliver(session, text, user, ts)
+  }
+
+  /** A numbered dialog is on screen and it is not a yes/no permission progress window. */
+  private async numberedNonProceedOpen(session: Session): Promise<boolean> {
+    if (!session.pane) return false
+    const d = parseDialog(await this.tmux.capture(session.pane))
+    return !!d && !isProceedDialog(d)
   }
 
   /** Esc until a question/plan card's terminal dialog is gone (up to 5 tries), then fold the card as "메시지로 답함". */
   private async closeOpenDialog(session: Session): Promise<void> {
     if (!session.pane) return
     for (let i = 0; i < DIALOG_CLOSE_TRIES; i++) {
-      if (!parseDialog(await this.tmux.capture(session.pane))) break
+      const d = parseDialog(await this.tmux.capture(session.pane))
+      // Esc on a yes/no permission window means "deny": never press it there, whatever was asked.
+      if (!d || isProceedDialog(d)) break
       await this.tmux.sendKeys(session.pane, ['Escape'])
       await sleep(DIALOG_CLOSE_SETTLE_MS)
     }
@@ -4127,6 +4140,8 @@ export class Broker {
     continue: {
       run: async (c) => {
         c.session.stuckShown = undefined
+        const ts = (Date.now() / 1000).toFixed(6)
+        this.emitEvent(c.session.threadTs, this.userEvent(c.session.threadTs, ts, '계속해', 'web'))
         await this.deliver(c.session, '계속해', this.defaultRecipient, c.session.threadTs)
         // The card's job is done: fold it to its result, like an answered permission card.
         if (c.messageTs) {
@@ -4395,8 +4410,23 @@ export class Broker {
      *  confirm, or `esc` to just send Escape. Internal only — panel.ts is the only thing that encodes this. */
     dlgkey: {
       run: async (c) => {
+        // Look at the screen before pressing anything (41): if the window is gone, send nothing and say so.
+        const keyed = parseKeyedDialog(await this.tmux.capture(c.pane))
         const arg = c.arg.trim()
-        await this.tmux.sendKeys(c.pane, arg === 'esc' ? ['Escape'] : cursorKeys(Number(arg) || 0))
+        const label = arg.startsWith('to ') ? arg.slice(3) : undefined
+        // Whitespace runs are the same as one space here: the command's words are joined that way on the way in.
+        const squash = (x: string) => x.replace(/\s+/g, ' ').trim()
+        const at = label === undefined ? -1 : keyed?.options.findIndex((o) => squash(o) === squash(label)) ?? -1
+        if (!keyed || (arg !== 'esc' && at < 0)) {
+          if (c.messageTs && c.messageTs === c.session.openDialogTs) {
+            await this.slack.update(c.messageTs, '⌨️ 이미 닫힌 창', [{ type: 'section', text: { type: 'mrkdwn', text: '⌨️ 이미 닫힌 창' } }]).catch(() => {})
+            c.session.openDialogTs = undefined
+          }
+          this.clearWaiting(c.session)
+          return void (await c.ack('이미 닫힌 창이에요'))
+        }
+        // The cursor moves to the line with exactly this label, from wherever the cursor is now.
+        await this.tmux.sendKeys(c.pane, arg === 'esc' ? ['Escape'] : cursorKeys(at - keyed.selected))
         if (c.messageTs && c.messageTs === c.session.openDialogTs) {
           await this.slack.update(c.messageTs, '⌨️ 답함', [{ type: 'section', text: { type: 'mrkdwn', text: '⌨️ 답함' } }]).catch(() => {})
           c.session.openDialogTs = undefined

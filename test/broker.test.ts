@@ -2745,3 +2745,27 @@ test(':context — 통계는 StatusStore 에서 읽어 비용·모델·200k 근�
   s.conn.close()
   t.close()
 })
+
+test('41: 번호 다이얼로그가 떠 있을 때 사람 글은 Esc 로 닫고 전달한다. 권한 진행 창은 Esc 를 누르지 않는다 (claude-web 이관: 41)', async () => {
+  const t = await setup({ stallMs: 60, quietMs: 100_000 })
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await tick(100)
+  const session = (t.broker as unknown as { registry: { live: Array<{ state: string; waitingReason?: string; threadTs: string; pid: number }> } }).registry.live[0]!
+  // A numbered question on screen, with the session waiting on it.
+  ;(session as { waitingReason?: string }).waitingReason = 'dialog'
+  t.tmux.screen = ' 어느 쪽?\n ❯ 1. A\n   2. B\n'
+  const before = t.tmux.keys.length
+  await t.broker.webSend(session.pid, '그냥 B 로 해 줘')
+  await tick(120)
+  const sent = t.tmux.keys.slice(before)
+  assert.ok(sent.includes('%1:Escape'), `Esc 로 닫는다: ${sent}`)
+
+  // A permission progress window (yes/no): nothing is pressed, the message is not typed over it.
+  t.tmux.screen = ' Allow Bash?\n ❯ 1. Yes\n   2. No\n'
+  const mid = t.tmux.keys.length
+  await t.broker.webSend(session.pid, '권한 창 옆 글')
+  await tick(120)
+  assert.ok(!t.tmux.keys.slice(mid).includes('%1:Escape'), `권한 창에는 Esc 를 누르지 않는다: ${t.tmux.keys.slice(mid)}`)
+  s.conn.close()
+  t.close()
+})

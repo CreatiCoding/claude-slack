@@ -242,10 +242,10 @@ export function keyedDialogBlocks(pid: number, d: { question: string; body?: str
   const who = mention ? `<@${mention}> ` : ''
   const text = `${who}⌨️ *터미널이 입력을 기다립니다*\n${d.question}`
   // One button per choice line, not just the one the cursor happens to sit on: moving there is
-  // `dlgkey <moves>` (↑/↓ the cursor to it, then Enter), handled as its own command so it can fold
+  // `dlgkey to <label>` (↑/↓ the cursor to the line with exactly that label, then Enter), handled as its own command so it can fold
   // the card and clear the wait, which a raw `:key` press never did.
   const moveButtons = d.options.slice(0, 5).map((label, i) =>
-    btn(truncate(label, 75), ACTION.dlgKey, encodeValue(pid, `dlgkey ${i - d.selected}`), i === d.selected ? 'primary' : undefined),
+    btn(truncate(label, 75), ACTION.dlgKey, encodeValue(pid, `dlgkey to ${label}`), i === d.selected ? 'primary' : undefined),
   )
   return {
     text,
