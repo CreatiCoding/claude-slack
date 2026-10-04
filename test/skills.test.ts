@@ -228,6 +228,7 @@ test('플러그인 스킬(78): 맨 위 SKILL.md 는 플러그인 이름으로, p
   writeFileSync(join(claude, 'plugins', 'installed_plugins.json'), JSON.stringify({ plugins: { 'tool@mkt': [{ installPath: install, scope: 'user' }] } }))
   writeFileSync(join(claude, 'settings.json'), JSON.stringify({ enabledPlugins: { 'tool@mkt': true } }))
   const names = availableSkills(root, { home: root, claudeDir: claude }).map((x) => x.name)
-  assert.ok(names.includes('tool:1.0'), names.join(','))
+  assert.ok(names.includes('tool:tool'), names.join(',')) // the skill's own name, not the version folder 1.0 (78)
+  assert.ok(!names.includes('tool:1.0'), names.join(','))
   assert.ok(names.includes('tool:deep'), names.join(','))
 })

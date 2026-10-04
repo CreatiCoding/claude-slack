@@ -64,7 +64,9 @@ function scanDir(base: string, source: SkillInfo['source'], prefix = ''): SkillI
   // A SKILL.md at the top of the install folder is the plugin's own skill (78).
   if (existsSync(join(base, 'SKILL.md')) && !hiddenFromUser(join(base, 'SKILL.md'))) {
     const top = join(base, 'SKILL.md')
-    out.push({ name: prefix + basename(base), kind: 'skill', source, ...(frontmatterDescription(top) ? { description: frontmatterDescription(top) } : {}) })
+    // Named by the skill's own name, else the plugin's (78): not the version folder it was installed in.
+    const own = /^name:\s*(.+)$/m.exec(readFileSync(top, 'utf8').slice(0, 4000).match(/^---\n([\s\S]*?)\n---/)?.[1] ?? '')?.[1]?.trim().replace(/^["']|["']$/g, '')
+    out.push({ name: prefix + (own || prefix.replace(/:$/, '')), kind: 'skill', source, ...(frontmatterDescription(top) ? { description: frontmatterDescription(top) } : {}) })
   }
   for (const skills of [join(base, 'skills'), ...manifestSkills]) {
     try {
