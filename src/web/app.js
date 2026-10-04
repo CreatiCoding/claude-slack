@@ -2274,7 +2274,8 @@ function cardEl(ev, blocks) {
     el.append(blk)
   }
   // Asking for accessibility access (72): the setting's path, and a box to copy it.
-  if (/손쉬운 사용|Accessibility/i.test(plainText(ev.text))) {
+  // Only a terminal dialog that asks for the permission (21), not any card that happens to name it.
+  if (blocks && JSON.stringify(blocks).includes('dlgkey') && /손쉬운 사용 권한/.test(plainText(ev.text))) {
     const path = '시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용'
     el.insertAdjacentHTML('beforeend', `<div class="blk md"><p>손쉬운 사용 권한이 필요해요. 아래 경로에서 허용해 주세요.</p></div>` + codeBoxHtml(path))
   }
