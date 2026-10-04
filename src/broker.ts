@@ -1038,7 +1038,8 @@ export class Broker {
     const typed = raw.trim()
     if (!typed && !pictures.length) return { ok: false, note: '보낼 내용이 없어요' }
     // The same text again within 1,500 ms is a double send (17/40); commands (`:`) are not held back by it.
-    if (!typed.startsWith(':') && this.recentWebSends.isRepeat(`${threadTs}\n${typed}\n${pictures.length}`)) return { ok: false, note: '방금 보낸 글이에요. 잠시 뒤 다시 보내 주세요' }
+    // Only read commands are exempt (74): a repeated write command within 1.5 s is a double send.
+    if (!/^:(screen|status|context|help|stats)(\s|$)/.test(typed) && this.recentWebSends.isRepeat(`${threadTs}\n${typed}\n${pictures.length}`)) return { ok: false, note: '방금 보낸 글이에요. 잠시 뒤 다시 보내 주세요' }
     if (session?.handedOffTo && !typed.startsWith(':')) return { ok: false, note: '🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌어요. 거기서 이어가세요.' }
     if (session?.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 트랜스크립트가 100MB 를 넘어 입력을 막았어요. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
     if (!session && (typed.startsWith(':') || typed.startsWith('!')) && this.dormant.has(threadTs) && !this.pendingLaunches.has(threadTs) && !this.waking.has(threadTs)) {
