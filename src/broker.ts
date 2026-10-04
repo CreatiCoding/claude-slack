@@ -40,7 +40,9 @@ import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
 import { NoticeStore, type Notice } from './notices.ts'
 import { parseSlackLink, ThreadInfoStore } from './thread-info.ts'
-import { computeStats, type StatDays, type StatThread } from './stats.ts'
+import { computeStats, prSummary, type StatDays, type StatThread } from './stats.ts'
+import { prViewHtml } from './pr-view.ts'
+import { prHosts } from './links.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
@@ -1179,6 +1181,34 @@ export class Broker {
     return this.notices.list()
   }
 
+  /**
+   * Usage statistics (53): the logs' numbers, plus the person's pull requests from gh. The PR part is left out when
+   * gh cannot say (no login, offline): the rest still shows.
+   */
+  async webStatsWithPr(days: StatDays): Promise<ReturnType<typeof computeStats> & { pr?: ReturnType<typeof prSummary> }> {
+    const base = this.webStats(days)
+    const gh = (args: string[]) =>
+      new Promise<Array<{ url: string; createdAt: string; closedAt?: string | null }>>((resolve, reject) =>
+        execFile('gh', ['search', 'prs', '--author', '@me', ...args, '--json', 'url,createdAt,closedAt', '--limit', '300'], { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, out) => {
+          if (err) return reject(err)
+          try {
+            resolve(JSON.parse(out))
+          } catch (e) {
+            reject(e)
+          }
+        }),
+      )
+    try {
+      const [merged, all] = await Promise.all([gh(['--merged']), gh(['--state', 'all'])])
+      const byUrl = new Map<string, { url: string; createdAt: string; mergedAt?: string }>()
+      for (const p of all) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt })
+      for (const p of merged) byUrl.set(p.url, { url: p.url, createdAt: p.createdAt, mergedAt: p.closedAt ?? undefined })
+      return { ...base, pr: prSummary([...byUrl.values()], Date.now(), days) }
+    } catch {
+      return base
+    }
+  }
+
   /** Usage statistics for the last 1, 7, 30 or 90 days (53), from every thread's event log. */
   webStats(days: StatDays): ReturnType<typeof computeStats> {
     const cwds = new Map<string, string>()
@@ -1190,6 +1220,22 @@ export class Broker {
       events: this.events.since(thread, 0).map((e) => ({ type: e.type, at: e.at, via: 'via' in e ? (e as { via?: string }).via : undefined, name: 'name' in e ? (e as { name?: string }).name : undefined, state: 'state' in e ? (e as { state?: string }).state : undefined })),
     }))
     return computeStats(threads, Date.now(), days)
+  }
+
+  /** A pull request as the phone's page (50), kept 600 s. Only GitHub-style pull request addresses are asked. */
+  private prViews = new Map<string, { at: number; html: string }>()
+  async webPrView(url: string): Promise<{ ok: boolean; html?: string; note?: string }> {
+    const host = /^https:\/\/([\w.-]+)\/[\w.-]+\/[\w.-]+\/pull\/\d+$/.exec(url)?.[1]
+    if (!host || !prHosts().includes(host)) return { ok: false, note: 'PR 주소가 아니에요' }
+    const hit = this.prViews.get(url)
+    if (hit && Date.now() - hit.at < 600_000) return { ok: true, html: hit.html }
+    try {
+      const html = await prViewHtml(url)
+      this.prViews.set(url, { at: Date.now(), html })
+      return { ok: true, html }
+    } catch (err) {
+      return { ok: false, note: `PR 을 읽지 못했어요: ${describeError(err)}` }
+    }
   }
 
   /** Clear one notice, or all (49). */
@@ -1914,7 +1960,22 @@ export class Broker {
           return []
         }
       })
-      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}), ...(html.length ? { html } : {}) })
+      // Text files up to 400 KB ride along, shown folded on the page (49); one that cannot be read says so.
+      const textFiles = (msg.files ?? []).filter((f) => /\.(md|txt|json|csv|log|ya?ml)$/i.test(f)).flatMap((f) => {
+        try {
+          return statSync(f).size <= 400_000 ? [{ name: basename(f), path: shortenHome(f), content: readFileSync(f, 'utf8') }] : []
+        } catch {
+          return []
+        }
+      })
+      for (const f of msg.files ?? []) {
+        try {
+          statSync(f)
+        } catch {
+          this.addNotice({ thread: session.threadTs, title: session.title ?? basename(session.cwd), text: `첨부 파일을 읽지 못했어요: ${shortenHome(f)}`, tone: 'info' })
+        }
+      }
+      this.emitEvent(session.threadTs, { type: 'text', text: msg.text, ...(msg.files?.length ? { files: msg.files } : {}), ...(images.length ? { images } : {}), ...(html.length ? { html } : {}), ...(textFiles.length ? { textFiles } : {}) })
       if (!msg.files?.length) {
         for (const part of chunk(toMrkdwn(text))) await this.quietSlack.post({ threadTs: session.threadTs, text: part })
         return

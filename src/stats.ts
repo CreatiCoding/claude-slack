@@ -91,6 +91,27 @@ export function bucketMs(days: StatDays): number {
   return 3 * 3_600_000
 }
 
+/** The pull requests of the person in the window (53): merged, opened, merge time, and the lines added and removed. */
+export interface PrStat {
+  mergedAt?: string
+  createdAt: string
+  url: string
+}
+export function prSummary(prs: PrStat[], now: number, days: StatDays) {
+  const from = now - days * DAY
+  const inWin = (t?: string) => !!t && Date.parse(t) >= from && Date.parse(t) <= now
+  const merged = prs.filter((p) => inWin(p.mergedAt))
+  const created = prs.filter((p) => inWin(p.createdAt))
+  const times = merged.map((p) => Date.parse(p.mergedAt!) - Date.parse(p.createdAt)).filter((x) => x >= 0).sort((a, b) => a - b)
+  return {
+    merged: merged.length,
+    created: created.length,
+    medianMergeMs: quantile(times, 0.5),
+    p90MergeMs: quantile(times, 0.9),
+    recent: [...created].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20).map((p) => ({ url: p.url, createdAt: p.createdAt, mergedAt: p.mergedAt })),
+  }
+}
+
 export function computeStats(threads: StatThread[], now: number, days: StatDays) {
   const from = now - days * DAY
   const spans = turnSpans(threads, now, from)

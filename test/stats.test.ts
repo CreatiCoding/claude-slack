@@ -35,3 +35,18 @@ test('사용 통계(53): 계산 결과에 총·바쁜·평균 동시성, 일별,
   assert.equal(r.topTools[0]!.name, 'Bash')
   assert.equal(r.series.length, 96, '1일은 15분 칸 96개')
 })
+
+test('사용 통계(53): PR 절 — 머지·생성 수, 머지까지 시간(머지 시각 − 생성 시각), 최근 20개', async () => {
+  const { prSummary } = await import('../src/stats.ts')
+  const now = Date.UTC(2026, 9, 4)
+  const day = 86_400_000
+  const prs = [
+    { url: 'a', createdAt: new Date(now - 2 * day).toISOString(), mergedAt: new Date(now - day).toISOString() },
+    { url: 'b', createdAt: new Date(now - 1 * day).toISOString() },
+  ]
+  const r = prSummary(prs, now, 7)
+  assert.equal(r.merged, 1)
+  assert.equal(r.created, 2)
+  assert.equal(r.medianMergeMs, day)
+  assert.equal(r.recent.length, 2)
+})

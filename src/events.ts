@@ -25,7 +25,7 @@ export type EventBody =
   /** Something a person said: typed in Slack, in the web app, or in the terminal. */
   | { type: 'user'; ts: string; text: string; via: 'slack' | 'web' | 'terminal'; images?: WebImage[] }
   /** Claude's answer text, as markdown. */
-  | { type: 'text'; text: string; files?: string[]; images?: WebImage[]; html?: Array<{ name: string; content: string }> }
+  | { type: 'text'; text: string; files?: string[]; images?: WebImage[]; html?: Array<{ name: string; content: string }>; textFiles?: Array<{ name: string; path: string; content: string }> }
   | { type: 'tool'; id: string; name: string; title: string; detail?: string }
   | { type: 'tool_end'; id: string; ok: boolean; output: string; images?: WebImage[] }
   | { type: 'todos'; todos: Array<{ content: string; status: string; activeForm?: string }> }

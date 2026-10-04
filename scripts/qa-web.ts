@@ -438,7 +438,8 @@ for (const [label, size, phone] of [
   check(`${label}: 응답 대기 배지`, ((await page.locator(`.row[data-thread="${B}"] .badge`).first().textContent()) ?? '').includes('권한 대기'))
   // 19: waiting no longer moves a row to the top — only the badge says so — so the order here is by
   // startedAt (C started earliest, then B, then A), unaffected by B being the one waiting.
-  check(`${label}: 정렬은 시작 순(waiting 이라고 맨 위로 안 간다, 19)`, ((await page.locator('.row[data-loose] .name').first().textContent()) ?? '') === '긴 세션')
+  // On a phone a session waiting on a person comes first (56); on a PC the order is still the order it was put in.
+  check(`${label}: 정렬: 폰은 기다리는 세션이 맨 위(56), PC 는 시작 순`, phone ? (await page.locator('.row[data-loose]').first().locator('.sdot.waiting').count()) === 1 : ((await page.locator('.row[data-loose] .name').first().textContent()) ?? '') === '긴 세션')
   if (phone) check(`${label}: 처음엔 대화 화면이 안 보임`, !(await page.locator('#main').isVisible()))
 
   // B waits for a permission, so a modal asks about it on whatever screen this is; tapping outside dismisses it.
@@ -535,7 +536,7 @@ for (const [label, size, phone] of [
 
   // A reload draws what the page kept, asks only for what came after it, and does not fetch a picture again.
   if (!phone) {
-    await page.waitForTimeout(1300) // the timeline is kept a second after the last change
+    await page.waitForTimeout(1700) // the timeline is kept 1.5 s after the last change (59)
     const asked: string[] = []
     const onReq = (r: { url(): string }) => asked.push(r.url())
     page.on('request', onReq)

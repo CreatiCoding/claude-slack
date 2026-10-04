@@ -54,7 +54,9 @@ export interface AdminApi {
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webTrashInfo?(pid: number): { ok: boolean; note: string; folder?: string; repos?: Array<{ path: string; uncommitted: number; unpushed: number }> }
   webNotices?(): unknown[]
+  webPrView?(url: string): Promise<{ ok: boolean; html?: string; note?: string }>
   webStats?(days: 1 | 7 | 30 | 90): unknown
+  webStatsWithPr?(days: 1 | 7 | 30 | 90): Promise<unknown>
   webNoticeDismiss?(id?: string): { ok: boolean; note: string }
   webTrash?(pid: number, expectPath?: string): Promise<{ ok: boolean; note: string }>
   webFork?(pid: number): Promise<{ ok: boolean; note: string; thread?: string }>
@@ -510,10 +512,19 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const result = await api.webSend(Number(sendTo[1]), String(body.text ?? ''), images)
     return send(res, result.ok ? 200 : 400, result)
   }
+  // A pull request as a page (50), for the phone's window: no scripts, drawn in a sandbox.
+  if (req.method === 'GET' && url.pathname === '/api/pr-view' && api.webPrView) {
+    const r = await api.webPrView(url.searchParams.get('url') ?? '')
+    if (!r.ok || !r.html) return send(res, 400, { ok: false, note: r.note ?? 'PR 을 읽지 못했어요' })
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+    res.end(r.html)
+    return
+  }
   // Usage statistics (53): ?days=1|7|30|90.
   if (req.method === 'GET' && url.pathname === '/api/stats' && api.webStats) {
     const days = Number(url.searchParams.get('days') ?? 7)
-    return send(res, 200, api.webStats(([1, 7, 30, 90] as const).includes(days as 1) ? (days as 1) : 7))
+    const d = ([1, 7, 30, 90] as const).includes(days as 1) ? (days as 1) : 7
+    return send(res, 200, api.webStatsWithPr ? await api.webStatsWithPr(d) : api.webStats!(d))
   }
   // The notification center (49): clear one (by id) or all.
   if (req.method === 'POST' && url.pathname === '/api/notices/dismiss' && api.webNoticeDismiss) {

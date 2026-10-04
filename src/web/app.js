@@ -584,6 +584,12 @@ function ago(ms) {
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
 const hhmm = (at) => new Date(at).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
+// When a message was sent (55): today as HH:mm (24-hour), another day as M/D HH:mm; the full time on hover.
+const stamp = (at) => {
+  const d = new Date(at)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return d.toDateString() === new Date().toDateString() ? hm : `${d.getMonth() + 1}/${d.getDate()} ${hm}`
+}
 
 // ------------------------------------------------------------------ list
 const STATE = { starting: '뜨는 중', idle: '대기', busy: '작업 중', waiting: '응답 대기', ended: '종료됨' }
@@ -777,7 +783,8 @@ function renderList() {
   // Only two keys (19; `waiting` and `lastAt` used to be a third and fourth): a row's own position in the
   // list no longer shifts while it works, which used to move whatever a person was about to click out from
   // under the pointer and drop keyboard focus. "기다리는 중" shows as a badge/colour (liveRow), not a move.
-  const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => rank(a) - rank(b) || a.startedAt - b.startedAt)
+  // On a phone the sessions waiting on a person come first (56).
+  const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => (isPhone() ? (b.state === 'waiting') - (a.state === 'waiting') : 0) || rank(a) - rank(b) || a.startedAt - b.startedAt)
   const h = secHead('live', '진행 중', live.length, { dropOut: true })
   list.append(h.el)
   if (h.open) {
@@ -793,7 +800,7 @@ function renderList() {
   if (hr.open)
     for (const r of rec.slice(0, 15))
       list.append(
-        plainRow({ lead: icon('play'), name: r.title, sub: r.preview, where: `${folderOf(r.cwd)} · ${ago(r.mtime)}`, when: ago(r.mtime), title: `${r.cwd}\n${r.preview || ''}` }, () => resume(r), (at) => openMenu(at, [{ label: '이어서 하기', icon: 'play', run: () => resume(r) }])),
+        plainRow({ lead: icon('play'), name: r.title, sub: r.preview, where: `${folderOf(r.cwd)} · ${ago(r.mtime)}`, when: ago(r.mtime), title: `${r.cwd}\n${r.preview || ''}` }, () => previewResume(r), (at) => openMenu(at, [{ label: '이어서 하기', icon: 'play', run: () => resume(r) }])),
       )
 
   const arc = archives.filter((a) => match(a.title, a.preview, a.cwd))
@@ -804,6 +811,15 @@ function renderList() {
       const at = Date.parse(a.archivedAt)
       list.append(plainRow({ lead: icon('clipboard'), name: a.title || folderOf(a.cwd), sub: a.preview, where: `${folderOf(a.cwd)} · ${ago(at)}`, when: ago(at), title: a.cwd }, () => viewArchive(a), (p) => openMenu(p, [{ label: '기록 보기', icon: 'file', run: () => viewArchive(a) }])))
     }
+  // A fixed line under the list (54): a new group, always there to reach.
+  if (!list.querySelector('.new-group-line')) {
+    const add = document.createElement('button')
+    add.type = 'button'
+    add.className = 'new-group-line'
+    add.textContent = '＋ 새 그룹'
+    add.addEventListener('click', () => newGroup())
+    list.append(add)
+  }
   list.scrollTop = keepScroll
   if (focusedThread) list.querySelector(`.row[data-thread="${focusedThread}"]`)?.focus()
 }
@@ -821,8 +837,14 @@ function liveRow(s, groupId) {
     s.state === 'waiting' && !isPhone() ? `<span class="badge waiting">${esc(s.waiting || '응답 대기')}</span>` : `<span class="when">${ago(s.lastAt)}</span>`
   }<span class="sub last"></span><span class="sub where"></span>${isPhone() ? badgeHtml(s) : ''}<span class="chev">${icon('chevron')}</span>`
   row.querySelector('.name').textContent = nameOf(s)
-  row.querySelector('.sub.last').textContent = last
-  row.querySelector('.sub.where').textContent = `${folderOf(s.cwd)} · ${ago(s.lastAt)}`
+  // A phone row (56): line 2 is the first message, line 3 the state (or the wait) · folder · when.
+  if (isPhone()) {
+    row.querySelector('.sub.last').textContent = s.preview || last
+    row.querySelector('.sub.where').textContent = `${s.state === 'waiting' ? s.waiting || STATE.waiting : STATE[s.state] || s.state} · ${folderOf(s.cwd)} · ${ago(s.lastAt)}`
+  } else {
+    row.querySelector('.sub.last').textContent = last
+    row.querySelector('.sub.where').textContent = `${folderOf(s.cwd)} · ${ago(s.lastAt)}`
+  }
   wireRow(row, () => open(s.thread), (at) => openMenu(at, sessionItems(s)))
   if (groupId === null) row.dataset.loose = '1'
   if (hasMouse) {
@@ -913,10 +935,25 @@ setInterval(() => {
   renderHeader()
 }, 30_000)
 
-async function resume(r) {
-  // 19: a confirm first (this codebase's own convention for a start-something action, not a separate
-  // sheet component), then go straight to the thread — success or "already running" both land somewhere.
-  if (!confirm(`"${r.title || folderOf(r.cwd)}" 대화를 이어서 할까요?`)) return
+// A row press (47) opens a preview first: the name, the folder, the last thing said and when; 이어서 하기 is the
+// button that starts it. (The menu's own 열기 goes straight to the thread.)
+function previewResume(r) {
+  document.querySelector('.resume-window')?.remove()
+  const win = document.createElement('div')
+  win.className = 'resume-window'
+  win.innerHTML = `<div class="stats-card resume-card" role="dialog" aria-modal="true"><div class="stats-head"><b></b><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="stats-body"><div class="sub-line"></div><p class="rc-preview"></p><div class="size-actions"><button type="button" class="primary" data-act="go">이어서 하기</button></div></div></div>`
+  win.querySelector('b').textContent = r.title || folderOf(r.cwd)
+  win.querySelector('.sub-line').textContent = `${folderOf(r.cwd)} · ${ago(r.mtime)}`
+  win.querySelector('.rc-preview').textContent = r.preview || '(내용 없음)'
+  const close = () => win.remove()
+  win.querySelector('[data-act="close"]').addEventListener('click', close)
+  win.addEventListener('click', (e) => e.target === win && close())
+  win.querySelector('[data-act="go"]').addEventListener('click', () => (close(), resume(r, { confirmed: true })))
+  document.body.append(win)
+}
+async function resume(r, { confirmed = false } = {}) {
+  // Started from the preview (47) it needs no second question; a press anywhere else still asks (19).
+  if (!confirmed && !confirm(`"${r.title || folderOf(r.cwd)}" 대화를 이어서 할까요?`)) return
   try {
     const res = await api('/api/session/resume', { id: r.id })
     toast(res.note)
@@ -1200,7 +1237,7 @@ function resetConvo() {
   if (optimistic) clearTimeout(optimistic.timer), (optimistic = null) // its #log is about to be wiped below
   $('log').innerHTML = ''
   $('todos').hidden = true
-  view = { rows: [], tools: new Map(), msgs: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0, start: 0, dirty: new Set(), opened: false }
+  view = { rows: [], tools: new Map(), msgs: new Map(), users: new Map(), reacts: new Map(), todos: null, turnAt: 0, lastAt: 0, start: 0, dirty: new Set(), opened: false, thread: current }
 }
 
 const scroller = $('scroller')
@@ -1391,7 +1428,7 @@ function apply(ev, live) {
       return
     case 'end':
       closeRunningTools()
-      addRow('notice', ev, { icon: 'ended', text: `세션 ${ev.why}` })
+      addRow('notice', ev, { icon: 'ended', text: `세션이 끝났어요 · ${ev.why}` })
       return
     case 'notice':
       addRow('notice', ev, { icon: ev.icon || 'bell', text: ev.text })
@@ -1447,14 +1484,33 @@ function flush(before) {
  * Picking one sends it as a message (§4.3.14's chips do the same: `sendText` directly, no composer round
  * trip); the X remembers (`dismissed-choices`, last 50) so a closed set does not come back on reopen.
  */
+// An answer that ends in a yes-or-no question ("…까요?") gets the two answers as buttons (55). A question that
+// asks which or what does not: the person has to say it.
+function yesNoOf(text) {
+  const last = (text || '').trim().split('\n').filter((l) => l.trim()).at(-1) ?? ''
+  if (!/까요\?\s*$/.test(last) || /무엇|어느|어떤|어디|언제/.test(last)) return []
+  return ['좋아, 진행해', '아니, 멈춰']
+}
+// The ↑↓ recall (57): the person's own words in this conversation, newest last, with an identical one in a row
+// and a correction ([정정]) left out. Until the conversation is loaded, the device's own list is the fallback.
+function historyOf(thread) {
+  const own = (view && view.thread === thread ? view.rows : [])
+    .filter((r) => r.kind === 'user' && !r.deleted && r.ev.via !== 'slack' && r.ev.text && !/^\[정정\]/.test(r.ev.text))
+    .map((r) => r.ev.text)
+  const out = []
+  for (const t of own) if (out.at(-1) !== t) out.push(t)
+  return out.length ? out : store.get('history:' + thread, [])
+}
 function renderChoiceChips() {
   $('log').querySelector('.choice-chips')?.remove()
   const last = view.rows.at(-1)
-  if (!last || last.deleted || last.kind !== 'text' || !last.ev.choices?.length || !last.el) return
+  if (!last || last.deleted || last.kind !== 'text' || !last.el) return
+  const choices = last.ev.choices?.length ? last.ev.choices : yesNoOf(last.ev.text)
+  if (!choices.length) return
   if (store.get('dismissed-choices', []).includes(last.ev.ts)) return
   const box = document.createElement('div')
   box.className = 'choice-chips'
-  for (const c of last.ev.choices) {
+  for (const c of choices) {
     const b = document.createElement('button')
     b.type = 'button'
     b.className = 'chip'
@@ -1515,6 +1571,7 @@ function draw(row) {
         box.hidden = true
       }
       for (const h of row.ev.html || []) el.firstElementChild.after(htmlPreview(h.content, h.content, null, h.name))
+      for (const f of row.ev.textFiles || []) el.firstElementChild.after(textFileEl(f))
       el.append(timeEl(row.ev.at))
       return el
     }
@@ -1527,12 +1584,37 @@ function draw(row) {
   }
 }
 
+// An attached text file (49): its name and where it is, the first 12 lines (Markdown drawn), then 펼치기 and 전체 복사.
+function textFileEl(f) {
+  const box = document.createElement('div')
+  box.className = 'tfile'
+  const lines = f.content.split('\n')
+  const body = (all) => (/\.md$/i.test(f.name) ? md(all ? f.content : lines.slice(0, 12).join('\n')) : `<pre class="tf-code">${esc(all ? f.content : lines.slice(0, 12).join('\n'))}</pre>`)
+  box.innerHTML = `<div class="tf-head">${esc(f.name)} · ${esc(f.path)}</div><div class="tf-body">${body(false)}</div>${lines.length > 12 ? `<button type="button" class="linkish" data-x="more">펼치기 (${lines.length - 12}줄 더)</button>` : ''}<button type="button" class="linkish" data-x="copy">전체 복사</button>`
+  box.querySelector('[data-x="copy"]').addEventListener('click', async (e) => {
+    try {
+      await navigator.clipboard.writeText(f.content)
+      e.currentTarget.textContent = '복사했어요'
+    } catch {
+      e.currentTarget.textContent = '복사 못 함'
+    }
+  })
+  box.querySelector('[data-x="more"]')?.addEventListener('click', (e) => {
+    const open = e.currentTarget.dataset.open === '1'
+    box.querySelector('.tf-body').innerHTML = body(!open)
+    e.currentTarget.dataset.open = open ? '0' : '1'
+    e.currentTarget.textContent = open ? `펼치기 (${lines.length - 12}줄 더)` : '접기'
+  })
+  return box
+}
 function userEl(row) {
   const ev = row.ev
   const el = document.createElement('div')
   el.className = 'item user'
   el.innerHTML = `<div class="bubble"></div><div class="meta"></div>`
   // A long message (over 12 lines or 1200 characters) shows its first 8 lines, with "펼치기 (N줄 더)".
+  // Blank lines in a row count as one (55).
+  ev.text = ev.text.replace(/\n\s*\n(\s*\n)+/g, '\n\n')
   const lines = ev.text.split('\n')
   const long = lines.length > 12 || ev.text.length > 1200
   const head = long ? (lines.length > 12 ? lines.slice(0, 8).join('\n') : ev.text.slice(0, 600) + '…') : ev.text
@@ -1542,12 +1624,12 @@ function userEl(row) {
     const t = document.createElement('button')
     t.type = 'button'
     t.className = 'linkish more-toggle'
-    t.textContent = lines.length > 12 ? `펼치기 (${more}줄 더)` : '펼치기'
+    t.textContent = `전체 보기 · ${more}줄 더`
     let openNow = false
     t.addEventListener('click', () => {
       openNow = !openNow
       el.firstElementChild.innerHTML = linkify(openNow ? ev.text : head)
-      t.textContent = openNow ? '접기' : lines.length > 12 ? `펼치기 (${more}줄 더)` : '펼치기'
+      t.textContent = openNow ? '접기' : `전체 보기 · ${more}줄 더`
     })
     el.firstElementChild.after(t)
   }
@@ -1566,7 +1648,7 @@ function userEl(row) {
         : delivered
           ? `<span>전달됨</span>${ev.via !== 'terminal' ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
           : ''
-  el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${hhmm(ev.at)}</span>${st}`
+  el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${stamp(ev.at)}</span>${st}`
   return el
 }
 
@@ -1941,6 +2023,8 @@ function cardEl(ev, blocks) {
   }
   if (!el.childElementCount) el.innerHTML = `<div class="blk md">${mrkdwn(plainText(ev.text))}</div>`
   if (ev.files?.length) el.insertAdjacentHTML('beforeend', `<div class="files">${icon('attach')} ${ev.files.map((f) => esc(f.split('/').pop())).join(', ')}</div>`)
+  // A permission card (55): on a PC the keys that answer it are said once, under the buttons.
+  if (hasMouse && /perm_allow/.test(JSON.stringify(blocks || []))) el.insertAdjacentHTML('beforeend', '<div class="blk hint">⌘+Enter 로 허용할 수 있어요</div>')
   return el
 }
 function blockEl(b, ev, all, titled) {
@@ -2029,6 +2113,17 @@ function buttonEl(x, ev, all) {
   return btn
 }
 
+async function unholdLast(s, ts) {
+  try {
+    const r = await api(`/api/session/${s.pid}/unhold`, { ts })
+    input.value = r.text + (input.value ? '\n' + input.value : '')
+    autosize()
+    saveDraft()
+    input.focus()
+  } catch (err) {
+    toast(err.message, 'err')
+  }
+}
 // "수정" on a held message takes it back into the field; "잘못 보냄" stops Claude and tells it not to follow.
 $('log').addEventListener('click', async (e) => {
   const b = e.target.closest('[data-act]')
@@ -2050,6 +2145,12 @@ $('log').addEventListener('click', async (e) => {
     if (!confirm('잘못 보냈다고 알릴까요?\n작업을 멈추고, 이 메시지를 따르지 말라고 보내요. 이미 한 일은 무엇인지 알려 달라고 해요.')) return
     try {
       toast((await api(`/api/session/${s.pid}/retract`, { ts })).note)
+      // The wrong message fades and says it was taken back (48), so the page shows what Claude was told.
+      const row = view.rows.find((r) => r.kind === 'user' && r.ev.ts === ts)
+      if (row?.el) {
+        row.el.classList.add('dropped')
+        row.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="dropped-note">잘못 보냄 · 따르지 말라고 전했어요</span>')
+      }
     } catch (err) {
       toast(err.message, 'err')
     }
@@ -2090,12 +2191,15 @@ function renderActivity() {
   }
   // Only this turn's tools: one left without a result from an earlier turn is not "running".
   let running = null
-  for (const t of view.tools.values()) if (!t.end && !t.closed && t.ev.at >= (view.turnAt || 0)) running = t
+  const runningAll = []
+  for (const t of view.tools.values()) if (!t.end && !t.closed && t.ev.at >= (view.turnAt || 0)) (running = t, runningAll.push(t))
   // Text already in the timeline that the terminal still shows is not "being written".
   const live = view.live && !(view.lastText && view.lastText.replace(/\s+/g, ' ').includes(view.live.replace(/\s+/g, ' ').slice(0, 60))) ? view.live : ''
   const thinking = !running && !!view.thinkingAt
   const since = running ? running.ev.at : live && view.liveAt ? view.liveAt : thinking ? view.thinkingAt : Math.max(view.lastAt || 0, view.turnAt || 0) || Date.now()
   const secs = Math.max(0, Math.round((Date.now() - since) / 1000))
+  // Elapsed over a minute reads as N분 M초 (55).
+  const elapsed = secs >= 60 ? `${Math.floor(secs / 60)}분 ${secs % 60}초` : `${secs}초`
   const key = running ? 'tool:' + running.ev.id : live ? 'write' : 'think'
   if (box.dataset.key !== key) {
     box.dataset.key = key
@@ -2122,7 +2226,9 @@ function renderActivity() {
   }
   box.hidden = false
   const secsEl = box.querySelector('.secs') // the 쓰는 중 view has none: its text is the answer itself (15)
-  if (secsEl) secsEl.textContent = `· ${secs}초`
+  if (secsEl) secsEl.textContent = `· ${elapsed}`
+  // Every tool running at once, joined (55); the last one alone used to hide the others.
+  if (running && runningAll.length > 1) box.querySelector('.txt').textContent = `도구 실행 중 · ${runningAll.map((t) => takeEmoji(t.ev.title).rest).join(', ')}`
   if (live) {
     typeInto(box.querySelector('.tail'), live)
     const sub = box.querySelector('.think-sub')
@@ -2225,6 +2331,16 @@ function renderComposerBits() {
   const s = current && sessionOf(current)
   const chips = $('chips')
   chips.innerHTML = ''
+  if (current && !s) {
+    // An ended session (55): the composer's place offers to pick the conversation up again, or says it cannot.
+    const back = recent.find((r) => r.thread === current)
+    const note = document.createElement(back ? 'button' : 'span')
+    note.className = back ? 'chip hot' : 'hint'
+    note.textContent = back ? '이 대화 이어서 하기' : '끝난 세션이에요'
+    if (back) note.addEventListener('click', () => resume(back))
+    chips.append(note)
+    return
+  }
   if (!s) return
   const chip = (ic, label, run, { hot = false, href, cls = '' } = {}) => {
     const c = document.createElement(href ? 'a' : 'button')
@@ -2242,18 +2358,25 @@ function renderComposerBits() {
     chips.append(c)
   }
   // PR and Slack thread: one link opens at once, several open a small list (above the chip on a PC, a sheet on a phone).
+  // On a phone a PR opens in a window here (50); on a PC it is a new tab, as before.
+  const openLink = (url) => (hasMouse ? window.open(url, '_blank', 'noopener') : openPrWindow(url))
   const linkChip = (ic, label, list, fallback) => {
     if (!list?.length && !fallback) return
-    if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, null, { href: list?.[0]?.url ?? fallback, cls: list?.[0]?.state ? 'pr-' + list[0].state.toLowerCase() : '' })
+    if (!list?.length || (list.length === 1 && !fallback)) return chip(ic, label, list?.length && ic === 'pr' && !hasMouse ? () => openLink(list[0].url) : null, { href: hasMouse || ic !== 'pr' ? (list?.[0]?.url ?? fallback) : undefined, cls: list?.[0]?.state ? 'pr-' + list[0].state.toLowerCase() : '' })
     chip(ic, `${label} ${list.length}`, (e) => {
       const r = e.currentTarget.getBoundingClientRect()
-      openMenu({ x: r.left, y: r.top, above: true }, list.map((l) => ({ label: l.label, icon: ic, cls: l.state ? 'pr-' + l.state.toLowerCase() : '', run: () => window.open(l.url, '_blank', 'noopener') })))
+      openMenu({ x: r.left, y: r.top, above: true }, list.map((l) => ({ label: l.label, icon: ic, cls: l.state ? 'pr-' + l.state.toLowerCase() : '', run: () => (ic === 'pr' ? openLink(l.url) : window.open(l.url, '_blank', 'noopener')) })))
     })
   }
   const links = linkCache.get(s.pid)
   linkChip('pr', 'PR', links?.prs)
   linkChip('link', 'Slack 스레드', links?.threads, links ? undefined : withToken('/go/thread?ts=' + encodeURIComponent(s.thread)))
   if (s.held) chip('play', `지금 보내기 (${s.held})`, () => command(s, 'sendnow'), { hot: true })
+  // 보낸 것 취소 (57): the last message still held goes back into the field, as the held note's 수정 does.
+  if (s.held) {
+    const heldRow = [...view.rows].reverse().find((r) => r.kind === 'user' && !r.deleted && view.reacts.get(r.ev.ts)?.has('hourglass_flowing_sand'))
+    if (heldRow) chip('undo', '보낸 것 취소', () => unholdLast(s, heldRow.ev.ts))
+  }
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', hasMouse ? '중단 · Esc' : '중단', () => command(s, 'esc'))
   // Order (57): paste, skills, /btw, then the ones only this app has (화면, /compact, /context, /clear).
   if (navigator.clipboard?.read) chip('image', '이미지 붙여넣기', pasteFromClipboard)
@@ -2487,7 +2610,7 @@ input.addEventListener('keydown', (e) => {
   // to recall only the single last one). Only once the field is empty, or already mid-walk — otherwise a
   // real edit in progress should not be clobbered by the arrow key moving the caret.
   if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && current && !e.isComposing && (histIndex !== null || !input.value)) {
-    const hist = store.get('history:' + current, [])
+    const hist = historyOf(current)
     if (!hist.length) return
     if (e.key === 'ArrowUp') {
       if (histIndex !== null && histIndex >= hist.length - 1) return
@@ -2546,7 +2669,7 @@ async function sendNow() {
   const pics = pending.get(current) ?? []
   if (!text && !pics.length) return
   if (!s) return toast('이미 종료된 세션이에요.', 'err')
-  const hist = store.get('history:' + current, [])
+  const hist = historyOf(current)
   // The same text, no pictures, right after itself: probably a double-tap, not two separate messages (20).
   if (!pics.length && hist.at(-1) === text && repeatArmed !== current) {
     repeatArmed = current
@@ -2716,8 +2839,8 @@ function sessionItems(s) {
     },
     { label: '복제', icon: 'copy', run: () => forkSession(s) },
     { label: '가벼운 복제', icon: 'copy', run: () => command(s, 'lightfork') },
-    { label: s.resting ? '휴면 풀기' : '휴면으로 두기', icon: 'dot', run: () => command(s, s.resting ? 'rest off' : 'rest on') },
     { label: '새로고침', icon: 'refresh', run: () => refreshSession(s) },
+    { label: s.resting ? '휴면 풀기' : '휴면으로 두기', icon: 'dot', run: () => command(s, s.resting ? 'rest off' : 'rest on') },
     {
       label: `그룹: ${groups.groups.find((g) => g.items.includes(s.thread))?.name ?? '없음'}`,
       icon: 'folder',
@@ -2800,6 +2923,24 @@ async function toggleAuto(s) {
   await command(s, on ? 'auto on' : 'auto off')
 }
 
+// A pull request on the phone (50): its page in a window, sandboxed (no scripts), with close.
+async function openPrWindow(url) {
+  const win = document.createElement('div')
+  win.className = 'pr-window'
+  win.innerHTML = `<div class="pr-bar"><span class="pr-title">PR</span><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="pr-body">불러오는 중…</div>`
+  win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
+  document.body.append(win)
+  try {
+    const res = await fetch(withToken('/api/pr-view?url=' + encodeURIComponent(url)))
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).note || 'PR 을 읽지 못했어요')
+    const frame = document.createElement('iframe')
+    frame.setAttribute('sandbox', '')
+    frame.srcdoc = await res.text()
+    win.querySelector('.pr-body').replaceChildren(frame)
+  } catch (err) {
+    win.querySelector('.pr-body').textContent = err.message
+  }
+}
 // Usage statistics (53): the numbers the broker works out from the logs, for 1, 7, 30 or 90 days.
 async function openStats(days) {
   document.querySelector('.stats-window')?.remove()
@@ -2812,6 +2953,7 @@ async function openStats(days) {
   document.body.append(win)
   try {
     const s = await api(`/api/stats?days=${days}`)
+    // The pull request part comes from gh; without it the page simply has no such block.
     const max = Math.max(1, ...s.daily.map((d) => d.workMs))
     win.querySelector('.stats-body').innerHTML = `
       <div class="stats-grid">
@@ -2824,6 +2966,7 @@ async function openStats(days) {
         <div><span>도구 호출</span><b>${s.tools}</b></div>
         <div><span>권한 요청</span><b>${s.permissions}</b></div>
       </div>
+      ${s.pr ? `<h4>풀 리퀘스트</h4><div class="stats-grid"><div><span>머지</span><b>${s.pr.merged}</b></div><div><span>생성</span><b>${s.pr.created}</b></div><div><span>머지까지 중앙값</span><b>${fmt(s.pr.medianMergeMs)}</b></div><div><span>머지까지 p90</span><b>${fmt(s.pr.p90MergeMs)}</b></div></div>` : ''}
       <h4>날마다</h4>
       ${s.daily.map((d) => `<div class="stats-row"><span>${d.day.slice(5)}</span><i style="width:${Math.round((d.workMs / max) * 100)}%"></i><em>${fmt(d.workMs)} · 내 글 ${d.mine} · 세션 ${d.sessions}</em></div>`).join('') || '<p class="stats-none">기록이 없어요</p>'}
       <h4>많이 쓴 폴더</h4>
@@ -2869,14 +3012,14 @@ function openFinder() {
   el.className = 'finder'
   el.setAttribute('role', 'dialog')
   el.setAttribute('aria-modal', 'true')
-  el.innerHTML = `<input class="search" placeholder="세션 찾기" aria-label="세션 찾기"><div class="finder-list" role="listbox"></div>`
+  el.innerHTML = `<input class="search" placeholder="이름·폴더·첫 메시지 (↑↓ 고르기 · Enter 열기 · Esc 닫기)" aria-label="이름·폴더·첫 메시지 찾기"><div class="finder-list" role="listbox"></div>`
   const q = el.querySelector('input')
   let items = []
   let sel = 0
   const draw = () => {
     const t = q.value.trim().toLowerCase()
     const found = sessions.filter((s) => !t || [nameOf(s), STATE[s.state], s.waiting, s.cwd, s.preview].some((v) => (v || '').toLowerCase().includes(t)))
-    items = [{ label: '새 세션', icon: 'plus', run: newSession }, ...found.map((s) => ({ label: nameOf(s), sub: `${STATE[s.state] ?? ''} · ${folderOf(s.cwd)}`, icon: 'chat', run: () => open(s.thread) }))]
+    items = [{ label: '새 세션', icon: 'plus', run: newSession }, ...found.map((s) => ({ label: nameOf(s), sub: `${STATE[s.state] ?? ''} · ${folderOf(s.cwd)} · ${s.preview ?? ''}`.slice(0, 120), icon: 'chat', run: () => open(s.thread) }))]
     sel = Math.max(0, Math.min(sel, items.length - 1))
     const box = el.querySelector('.finder-list')
     box.innerHTML = ''
@@ -3089,6 +3232,64 @@ function newSession() {
   const q = (c) => el.querySelector(c)
   const cwdInput = q('.ns-cwd')
   let parent = null
+  // Folder completion (57): 250 ms after the last key, the folders that start with what is typed (8 at most).
+  // ↑↓ choose, Tab or Enter (with one chosen) fills it in.
+  const sug = document.createElement('div')
+  sug.className = 'ns-suggest'
+  sug.hidden = true
+  cwdInput.after(sug)
+  let sugItems = []
+  let sugAt = -1
+  let sugTimer = null
+  const fillSuggestion = (name) => {
+    const dir = cwdInput.value.slice(0, cwdInput.value.lastIndexOf('/') + 1)
+    cwdInput.value = dir + name + '/'
+    sug.hidden = true
+    sugItems = []
+    sugAt = -1
+    cwdInput.focus()
+  }
+  const paintSuggest = () => {
+    sug.innerHTML = ''
+    sug.hidden = !sugItems.length
+    sugItems.forEach((n, i) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'ns-sug' + (i === sugAt ? ' on' : '')
+      b.textContent = n
+      b.addEventListener('mousedown', (e) => (e.preventDefault(), fillSuggestion(n)))
+      sug.append(b)
+    })
+  }
+  cwdInput.addEventListener('input', () => {
+    clearTimeout(sugTimer)
+    sugTimer = setTimeout(async () => {
+      const typed = cwdInput.value
+      const cut = typed.lastIndexOf('/')
+      const dir = typed.slice(0, cut + 1) || '/'
+      const prefix = typed.slice(cut + 1).toLowerCase()
+      try {
+        const r = await api('/api/folders?path=' + encodeURIComponent(dir))
+        sugItems = r.ok ? r.dirs.map((d) => d.name).filter((n) => n.toLowerCase().startsWith(prefix)).slice(0, 8) : []
+      } catch {
+        sugItems = []
+      }
+      sugAt = -1
+      paintSuggest()
+    }, 250)
+  })
+  cwdInput.addEventListener('keydown', (e) => {
+    if (!sugItems.length) return
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault()
+      sugAt = (sugAt + (e.key === 'ArrowDown' ? 1 : -1) + sugItems.length) % sugItems.length
+      paintSuggest()
+    } else if (e.key === 'Tab' || (e.key === 'Enter' && sugAt >= 0)) {
+      e.preventDefault()
+      e.stopPropagation()
+      fillSuggestion(sugItems[Math.max(0, sugAt)])
+    }
+  })
   const browse = async (path) => {
     let r
     try {
