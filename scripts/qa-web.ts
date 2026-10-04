@@ -808,6 +808,19 @@ for (const [label, size, phone] of [
   }
   check(`${label}: 이어서 하기 비우기·지난 기록 지우기`, calls.includes('group:clearRecent') && calls.includes('clearArchives'))
 
+  // A past record opens as a read-only timeline of its events (47), not a page in a frame.
+  await page.route('**/api/archive?*', (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify({ markdown: '', events: [
+    { type: 'user', ts: '1', text: '옛 질문 QA', via: 'web', at: now - 60_000 },
+    { type: 'tool', id: 't1', name: 'Bash', title: 'ls', at: now - 50_000 },
+    { type: 'text', text: '옛 답 QA', at: now - 40_000 },
+  ] }) }))
+  await page.locator('.row', { hasText: '보관된 것' }).first().click()
+  await page.waitForSelector('.timeline', { timeout: 3000 }).catch(() => {})
+  const tl = (await page.locator('.timeline').count()) ? await page.locator('.timeline').innerText() : ''
+  check(`${label}: 지난 기록은 읽기 전용 타임라인으로 연다`, tl.includes('지난 기록이에요') && tl.includes('옛 질문 QA') && tl.includes('옛 답 QA') && (await page.locator('.pr-window iframe').count()) === 0, tl.slice(0, 80))
+  await page.locator('.pr-window [data-act="close"]').first().click().catch(() => {})
+  await page.unroute('**/api/archive?*')
+
   if (!phone) {
     // ⌘K finds a session; ⌥↓ goes to the next one; ↑ in an empty field brings back the last message.
     await page.keyboard.press('Meta+k')
