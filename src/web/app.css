@@ -162,7 +162,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .icon-btn:hover { background: var(--hover); }
 .icon-btn:disabled { opacity: .35; }
 .icon-btn .ic { width: 18px; height: 18px; }
-.topbar .title { flex: 1; min-width: 0; text-align: center; font-size: var(--fs-l); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 10px; border-radius: 8px; }
+.topbar .title { flex: 1; min-width: 0; text-align: center; font-size: var(--fs-l); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 10px; border-radius: 8px; }
 .topbar .title:not(:disabled):hover { background: var(--hover); }
 .topbar .right { flex: none; display: flex; }
 

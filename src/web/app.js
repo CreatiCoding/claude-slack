@@ -1239,6 +1239,8 @@ function renderHeader() {
   const title = $('title')
   title.textContent = s ? nameOf(s) : current ? '종료된 세션' : 'Claude'
   title.disabled = !s
+  // On a PC the open conversation has no centre title: its name is in the sidebar (62).
+  title.hidden = !isPhone() && !!s
   title.title = s ? '이름 변경' : ''
   const sub = $('subbar')
   sub.hidden = !current
