@@ -4358,7 +4358,7 @@ export class Broker {
       await this.inject(s, mode === 'shrink'
         ? 'SESSION.md 를 20KB 안으로 줄여 다시 써 주세요. 다음 세션이 바로 이어받을 핵심만 남기세요.'
         : '지금까지의 대화를 이어받을 다음 세션이 읽을 SESSION.md 파일을 이 폴더에 써 주세요. 무엇을 하고 있었는지, 왜, 지금 어디까지 됐는지, 다음에 할 일을 정리해 주세요.', user, s.threadTs)
-      if (!(await this.awaitTurnEnd(s, LIGHTFORK_TIMEOUT_MS))) return void (await c.post('SESSION.md 를 제때 쓰지 못했어요(3분 넘게 기다렸어요). 직접 작성을 요청하거나 다시 시도하세요.'))
+      if (!(await this.awaitTurnEnd(s, LIGHTFORK_TIMEOUT_MS))) return void (await c.post('❌ 가벼운 복제로 새 세션을 열지 못했어요. SESSION.md 를 3분 넘게 쓰지 못했어요. 직접 작성을 요청하거나 다시 시도하세요.'))
       s.summaryAt = Date.now()
     }
     if (!existsSync(path)) return void (await c.post('❌ 가벼운 복제로 새 세션을 열지 못했어요. SESSION.md 가 없어요'))
