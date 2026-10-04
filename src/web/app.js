@@ -594,7 +594,6 @@ function ago(ms) {
   const d = new Date(ms)
   return `${d.getMonth() + 1}/${d.getDate()}`
 }
-const hhmm = (at) => new Date(at).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })
 // When a message was sent (55): today as HH:mm (24-hour), another day as M/D HH:mm; the full time on hover.
 const stamp = (at) => {
   const d = new Date(at)
@@ -2096,11 +2095,12 @@ function wireCopyButtons(doc) {
     if (!target) return
     const text = 'value' in target ? target.value : target.textContent
     // 1.5 s of feedback either way (71): a failed copy says so instead of staying silent.
-    const prev = btn.textContent
+    // The label to go back to is kept once: a second press during the 1.5 s must not save "복사했어요" as the label (20).
+    btn.dataset.label ??= btn.textContent
     navigator.clipboard
       .writeText(text ?? '')
-      .then(() => (btn.textContent = '복사했어요'), () => (btn.textContent = '복사하지 못했어요'))
-      .finally(() => setTimeout(() => btn.isConnected && (btn.textContent = prev), 1500))
+      .then(() => (btn.textContent = '복사했어요'), () => (btn.textContent = '복사 못 함'))
+      .finally(() => setTimeout(() => btn.isConnected && (btn.textContent = btn.dataset.label), 1500))
   })
 }
 function htmlPreview(html, code, codeBox, name) {
