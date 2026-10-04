@@ -1767,7 +1767,7 @@ function userEl(row) {
   }
   if (!ev.text) el.firstElementChild.remove()
   // A message taken back (48) is faded, whichever page or device it is read on.
-  if (view.reacts.get(ev.ts)?.has('x')) el.classList.add('dropped')
+  if (view.reacts.get(ev.ts)?.has('x')) el.classList.add('dropped', 'cancelled')
   if (ev.images?.length) el.insertAdjacentHTML('afterbegin', imagesHtml(ev.images))
   const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
   const set = view.reacts.get(ev.ts)
@@ -1780,7 +1780,7 @@ function userEl(row) {
       : set.has('x')
         ? '<span class="failed">취소함</span>'
         : delivered
-          ? `<span>전달됨</span>${ev.via === 'web' && lastWebUserTs() === ev.ts ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
+          ? `${ev.via === 'web' && lastWebUserTs() === ev.ts ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
           : ''
   el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${stamp(ev.at)}</span>${st}`
   return el
@@ -2930,7 +2930,13 @@ async function sendNow() {
     if (optimistic === bubble) bubble.timer = setTimeout(dropOptimisticBubble, 5000)
     return
   }
-  dropOptimisticBubble()
+  const failedBubble = optimistic
+  if (failedBubble?.el) {
+    failedBubble.el.classList.add('undelivered')
+    failedBubble.el.querySelector('.meta')?.insertAdjacentHTML('afterbegin', '<span class="undelivered-note">전달 못 함</span>')
+    setTimeout(() => failedBubble.el.isConnected && failedBubble.el.remove(), 8000)
+    optimistic = null
+  } else dropOptimisticBubble()
   if (!input.value) input.value = keep // not if something new was typed meanwhile
   if (!pending.get(current)?.length) pending.set(current, pics) // not over pictures picked meanwhile
   renderPending()

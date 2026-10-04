@@ -530,7 +530,7 @@ for (const [label, size, phone] of [
   else await page.locator('#input').press('Enter')
   await page.waitForSelector(`.item.text:has-text("받았어요: 안녕 ${label}")`)
   check(`${label}: 보내면 브로커 webSend`, calls.some((c) => c.startsWith('send:11:안녕')))
-  check(`${label}: 보낸 메시지와 전달됨 표시`, ((await page.locator('.item.user').last().textContent()) ?? '').includes('전달됨'), (await page.locator('.item.user').last().textContent()) ?? '')
+  check(`${label}: 보낸 메시지에 잘못 보냄 버튼(전달됨 글자는 없음, 72)`, ((await page.locator('.item.user').last().textContent()) ?? '').includes('잘못 보냄') && !((await page.locator('.item.user').last().textContent()) ?? '').includes('전달됨'), (await page.locator('.item.user').last().textContent()) ?? '')
   check(`${label}: 입력칸 비움`, (await page.locator('#input').inputValue()) === '')
   if (!phone) {
     await page.locator('#input').fill('줄1')

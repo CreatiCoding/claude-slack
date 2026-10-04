@@ -403,7 +403,9 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .tfile .tf-head { color: var(--muted); margin-bottom: 4px; word-break: break-all; }
 .tfile .tf-code { white-space: pre-wrap; margin: 0; font-size: 13px; }
 .new-group-line { display: block; width: 100%; text-align: left; background: none; border: 0; border-top: 1px dashed var(--line); padding: 8px 12px; color: var(--muted); font: inherit; cursor: pointer; }
-.item.user.dropped .bubble { opacity: .5; }
+.item.user.dropped .bubble, .item.user.cancelled .bubble { opacity: .5; }
+.undelivered-note { color: var(--red); margin-right: 6px; }
+.item.user.undelivered .bubble { border: 1px solid var(--red); }
 .dropped-note { color: var(--muted); margin-right: 6px; }
 .pr-window { position: fixed; inset: 0; background: var(--bg); z-index: 58; display: flex; flex-direction: column; }
 .pr-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
