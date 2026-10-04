@@ -3072,7 +3072,7 @@ function openMenu(at, items, { title } = {}) {
     menu.innerHTML = ''
     if (stack.length) {
       const back = document.createElement('button')
-      back.className = 'mi'
+      back.className = 'mi back-row'
       back.type = 'button'
       back.innerHTML = `${icon('back')}<span>${esc(head || '뒤로')}</span>`
       back.addEventListener('click', () => {

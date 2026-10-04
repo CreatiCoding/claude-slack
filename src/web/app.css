@@ -452,6 +452,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .dlg-ok { background: var(--accent); color: #fff; }
 .dlg-ok.danger { background: var(--red); }
 .recovery-line { display: block; padding: 8px 12px; margin: 0 8px; color: var(--muted); font-size: var(--fs-s); }
+.menu .mi.back-row { color: var(--muted); font-size: var(--fs-s); }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }
