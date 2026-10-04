@@ -13,7 +13,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, sta
 import { createHash } from 'node:crypto'
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 
 export interface SkillInfo {
   name: string
@@ -52,13 +52,28 @@ function frontmatterDescription(file: string): string | undefined {
 /** Skills (<dir>/skills/<name>/SKILL.md) and commands (<dir>/commands/**\/*.md, nested as a:b) under one .claude-like folder. */
 function scanDir(base: string, source: SkillInfo['source'], prefix = ''): SkillInfo[] {
   const out: SkillInfo[] = []
-  const skills = join(base, 'skills')
+  // A plugin's manifest may point its skills and commands at other folders (78).
+  let manifestSkills: string[] = []
+  let manifestCommands: string[] = []
   try {
-    for (const n of readdirSync(skills)) {
-      const f = join(skills, n, 'SKILL.md')
-      if (existsSync(f) && !hiddenFromUser(f)) out.push({ name: prefix + n, kind: 'skill', source, ...(frontmatterDescription(f) ? { description: frontmatterDescription(f) } : {}) })
-    }
+    const m = JSON.parse(readFileSync(join(base, '.claude-plugin', 'plugin.json'), 'utf8')) as { skills?: string | string[]; commands?: string | string[] }
+    const list = (v?: string | string[]) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
+    manifestSkills = list(m.skills).map((p) => join(base, p))
+    manifestCommands = list(m.commands).map((p) => join(base, p))
   } catch {}
+  // A SKILL.md at the top of the install folder is the plugin's own skill (78).
+  if (existsSync(join(base, 'SKILL.md')) && !hiddenFromUser(join(base, 'SKILL.md'))) {
+    const top = join(base, 'SKILL.md')
+    out.push({ name: prefix + basename(base), kind: 'skill', source, ...(frontmatterDescription(top) ? { description: frontmatterDescription(top) } : {}) })
+  }
+  for (const skills of [join(base, 'skills'), ...manifestSkills]) {
+    try {
+      for (const n of readdirSync(skills)) {
+        const f = join(skills, n, 'SKILL.md')
+        if (existsSync(f) && !hiddenFromUser(f)) out.push({ name: prefix + n, kind: 'skill', source, ...(frontmatterDescription(f) ? { description: frontmatterDescription(f) } : {}) })
+      }
+    } catch {}
+  }
   const walk = (dir: string, ns: string[]) => {
     let names: string[]
     try {
@@ -78,7 +93,7 @@ function scanDir(base: string, source: SkillInfo['source'], prefix = ''): SkillI
       else if (n.endsWith('.md')) out.push({ name: prefix + [...ns, n.slice(0, -3)].join(':'), kind: 'command', source, ...(frontmatterDescription(p) ? { description: frontmatterDescription(p) } : {}) })
     }
   }
-  walk(join(base, 'commands'), [])
+  for (const c of [join(base, 'commands'), ...manifestCommands]) walk(c, [])
   return out
 }
 
