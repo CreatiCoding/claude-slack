@@ -2717,9 +2717,17 @@ function showScreen(s) {
   scrim.style.padding = '16px'
   scrim.innerHTML = `<img alt="터미널 화면" style="max-width:100%;max-height:100%;border-radius:10px;box-shadow:var(--shadow)">`
   scrim.firstElementChild.src = withToken(`/api/session/${s.pid}/screen.png?part=screen&_=${Date.now()}`)
+  // No picture (59): the text of the screen instead, from the same session.
   scrim.firstElementChild.onerror = () => {
-    scrim.remove()
-    toast('화면을 가져오지 못했어요', 'err')
+    api(`/api/session/${s.pid}/screen`).then(
+      (r) => {
+        scrim.firstElementChild.replaceWith(Object.assign(document.createElement('pre'), { className: 'screen-text', textContent: r.text ?? r.screen ?? '' }))
+      },
+      () => {
+        scrim.remove()
+        toast('화면을 가져오지 못했어요', 'err')
+      },
+    )
   }
   scrim.addEventListener('click', () => scrim.remove())
   addEventListener('keydown', function esc(e) {
