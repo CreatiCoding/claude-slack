@@ -915,6 +915,7 @@ export class Broker {
         autoAllow: !!s.autoAllow,
         ...(s.resting ? { resting: true } : {}),
         ...(s.codingTurn && s.turn ? { coding: true } : {}),
+        ...(!s.turn && s.bgTitles?.length ? { background: [...s.bgTitles] } : {}),
         ...(s.refreshAfter ? { refreshAfter: true } : {}),
         ...(this.pluginsFor(s) ? { plugins: this.pluginsFor(s) } : {}),
         lastSeq: this.events.last(s.threadTs),
@@ -2409,6 +2410,11 @@ export class Broker {
       const abandoned = await turn.end()
       for (const id of abandoned) this.emitEvent(session.threadTs, { type: 'tool_end', id, ok: false, output: '(중단됨)' })
       session.turn = undefined
+      // Work the turn started may still run: the list says 백그라운드 then (75).
+      this.backgroundTasks(session).then((tasks) => {
+        session.bgTitles = tasks.map((t) => t.label)
+        this.changed()
+      }, () => {})
     }
     // "sent" after a reply-tool call is the model narrating the tool result, not an answer.
     const echo = repliedThisTurn && isToolEcho(finalText)

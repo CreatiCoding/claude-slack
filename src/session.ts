@@ -74,6 +74,8 @@ export interface Session {
   stallSince?: number
   /** This turn wrote code (Edit, MultiEdit, Write, NotebookEdit): the list shows 코딩 중 (75). */
   codingTurn?: boolean
+  /** Background work still running after the turn ended: its titles (75). */
+  bgTitles?: string[]
   /** The dialog already surfaced for this screen, so it is not posted twice. */
   stallShown?: string
   /** The "still working" notice for this turn, edited in place instead of reposted. */
