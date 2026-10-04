@@ -1041,7 +1041,7 @@ export class Broker {
     // Only read commands are exempt (74): a repeated write command within 1.5 s is a double send.
     if (!/^:(screen|status|context|help|stats)(\s|$)/.test(typed) && this.recentWebSends.isRepeat(`${threadTs}\n${typed}\n${pictures.length}`)) return { ok: false, note: '방금 보낸 글이에요. 잠시 뒤 다시 보내 주세요' }
     if (session?.handedOffTo && !typed.startsWith(':')) return { ok: false, note: '🧵 이 세션은 더 가벼운 새 스레드로 넘겨졌어요. 거기서 이어가세요.' }
-    if (session?.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 트랜스크립트가 100MB 를 넘어 입력을 막았어요. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
+    if (session?.sizeBlocked && !typed.startsWith(':')) return { ok: false, note: '🚫 대화 기록이 100MB 를 넘어 입력을 막았어요. :lightfork 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' }
     if (!session && (typed.startsWith(':') || typed.startsWith('!')) && this.dormant.has(threadTs) && !this.pendingLaunches.has(threadTs) && !this.waking.has(threadTs)) {
       return { ok: false, note: '쉬고 있는 세션에는 이 명령을 보낼 수 없어요. 일반 글로 보내면 깨어나요' }
     }
@@ -3472,7 +3472,7 @@ export class Broker {
       return
     }
     if (session.sizeBlocked) {
-      await this.slack.post({ threadTs, text: '🚫 트랜스크립트가 100MB 를 넘어 Slack·웹 입력을 막았습니다. `:lightfork` 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' })
+      await this.slack.post({ threadTs, text: '🚫 대화 기록이 100MB 를 넘어 Slack·웹 입력을 막았어요. `:lightfork` 로 가벼운 새 세션을 띄우거나, 터미널에서 직접 입력하세요.' })
       return
     }
     if (text.startsWith('/') || text.startsWith('!')) return this.runCommand(session, text.trim())
