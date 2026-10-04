@@ -74,6 +74,7 @@ export class GroupStore {
       const at = before ? list.indexOf(before) : -1
       at < 0 ? list.push(item) : list.splice(at, 0, item)
     }
+    let clearNote = ''
     switch (o.op) {
       case 'create': {
         if (!name(o.name)) return { ok: false, note: '그룹 이름이 비어 있어요.' }
@@ -129,12 +130,13 @@ export class GroupStore {
       }
       case 'clearRecent':
         st.recentClearedAt = Date.now()
+        clearNote = '이어서 하기 목록을 비웠어요. 대화 파일은 맥에 그대로예요'
         break
       default:
         return { ok: false, note: '알 수 없는 동작이에요.' }
     }
     this.save()
-    return { ok: true, note: '' }
+    return { ok: true, note: clearNote }
   }
 
   private save(): void {

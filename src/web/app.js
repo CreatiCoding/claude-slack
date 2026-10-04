@@ -3578,7 +3578,7 @@ $('btn-more').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect()
   openMenu({ x: r.right, y: r.bottom + 4, end: true }, globalItems())
 })
-const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => askDialog({ title: '이어서 하기 목록을 비울까요?', body: '대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).', ok: '비우기', danger: true }).then((ok) => ok && groupOp({ op: 'clearRecent' }).then(loadSideLists)) })
+const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => askDialog({ title: '이어서 하기 목록을 비울까요?', body: '대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).', ok: '비우기', danger: true }).then((ok) => ok && groupOp({ op: 'clearRecent' }).then((r) => (r?.note && toast(r.note), loadSideLists()))) })
 const clearArchivesItem = () => ({ label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => askDialog({ title: '지난 기록을 모두 지울까요?', body: '실행 중인 세션의 기록은 남겨요.', ok: '모두 지우기', danger: true }).then((ok) => ok && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err'))) })
 // ------------------------------------------------------------------ notification center (49)
 // The newest three show at the top right (PC) or top (phone), then "N개 더". A tap opens the session and clears
