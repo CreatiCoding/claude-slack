@@ -3975,6 +3975,8 @@ export class Broker {
     // between tool calls or at the end. A session waiting on a person (permission, question)
     // is the exception: the message is probably the answer, and nothing runs to be cut short.
     // A refresh is waiting for the work to end: hold it for the relaunched session, even between tools.
+    // A session being refreshed right now takes the message into the queue for the new one (74).
+    if (session.refreshing) return this.hold(session, { text, user, ts }, running)
     if (session.refreshAfter) return this.hold(session, { text, user, ts }, running)
     if (session.turn && session.state !== 'waiting') return this.hold(session, { text, user, ts }, running)
     // A question/plan card is open and keeps the keyboard until Esc: typed straight in, the message lands
