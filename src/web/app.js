@@ -618,14 +618,13 @@ function waitedFor(s) {
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
   if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
-  // PR 리뷰 루프 (75): the loop outranks coding and plain work while it runs.
-  if (s.reviewLoop && s.state !== 'waiting') return `<span class="badge busy">PR 리뷰 루프</span>`
-  // 코딩 중 (75): a busy turn that writes code says so; waiting on a person still wins.
-  // 백그라운드 (75): the turn is over but background work still runs, so 대기 becomes 백그라운드.
-  if (s.background?.length && s.state !== 'busy' && s.state !== 'waiting') return `<span class="badge busy">백그라운드</span>`
-  if (s.coding && s.state === 'busy') return `<span class="badge busy">코딩 중</span>`
-  const text = s.state === 'waiting' ? (isPhone() ? s.waiting || STATE.waiting : waitedFor(s)) : STATE[s.state] || s.state
-  return `<span class="badge ${s.state}">${esc(text)}</span>`
+  // Priority (75): waiting on a person > PR review loop > coding > working > background > idle.
+  if (s.state === 'waiting') return `<span class="badge waiting">${esc(isPhone() ? s.waiting || STATE.waiting : waitedFor(s))}</span>`
+  if (s.reviewLoop) return `<span class="badge busy">PR 리뷰 루프</span>`
+  if (s.state === 'busy' && s.coding) return `<span class="badge busy">코딩 중</span>`
+  if (s.state === 'busy') return `<span class="badge busy">${esc(STATE.busy)}</span>`
+  if (s.background?.length) return `<span class="badge busy">백그라운드</span>`
+  return `<span class="badge ${s.state}">${esc(STATE[s.state] || s.state)}</span>`
 }
 
 function secHead(key, label, n, { group, dropOut, menu: sectionMenu } = {}) {
