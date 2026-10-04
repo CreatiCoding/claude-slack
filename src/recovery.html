@@ -27,7 +27,7 @@ code { background: #f0eee6; padding: 1px 4px; border-radius: 4px; }
 <h3>화면이 안 떠요</h3>
 <p>브로커가 도는지 확인하고(<code>node scripts/doctor.ts</code>), 웹 주소 설정을 봐요. 그다음 <code>node scripts/doctor.ts logs</code> 로 로그 끝을 봐요.</p>
 <h3>브로커가 둘이에요</h3>
-<p><code>node scripts/doctor.ts dedupe</code> 를 실행해요. 가장 나중에 뜬 쪽을 남기고 나머지를 닫아요.</p>
+<p><code>node scripts/doctor.ts dedupe</code> 를 실행해요. 먼저 뜬 쪽(소켓을 쥔 쪽)을 남기고 나머지를 닫아요.</p>
 <h3>세션이 Claude 둘로 갈라졌어요</h3>
 <p>같은 대화를 두 프로세스가 쓰고 있어요. 하나를 끝내고 남은 쪽에서 이어 가요.</p>
 <h3>답이 안 와요</h3>

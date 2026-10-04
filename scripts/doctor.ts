@@ -3,7 +3,7 @@
  *
  *   node scripts/doctor.ts              diagnosis only, changes nothing
  *   node scripts/doctor.ts restart      restart the broker the way launchd does, wait for it to answer
- *   node scripts/doctor.ts dedupe [--yes]  kill the newer of each pair of Claude processes sharing a run
+ *   node scripts/doctor.ts dedupe [--yes]  close the newer of each pair of Claude processes sharing a run (keeps the one that answers)
  *   node scripts/doctor.ts logs [n]     the last n lines of the log, any level (default 60)
  *
  * Each diagnosis line that points at a problem is followed by a `→` suggesting what to run next.
@@ -170,7 +170,7 @@ async function restart(): Promise<void> {
   console.log('20초 안에 응답하지 않았습니다. launchd 상태를 확인하세요: launchctl list | grep claude-slack')
 }
 
-// Claude processes (not brokers) that share one run: the newer one stays, the older is closed (60).
+// Claude processes (not brokers) that share one run: the older one stays (it holds the socket), the newer is closed (60).
 async function dedupe(autoYes: boolean): Promise<void> {
   const procs = await claudeProcesses()
   const byGroup = new Map<string, ClaudeProc[]>()
@@ -192,12 +192,13 @@ async function dedupe(autoYes: boolean): Promise<void> {
     .filter((parts) => parts.length === 2)
     .map(([pid, pane]) => ({ pid: Number(pid), pane: pane! }))
   for (const [key, list] of dupes) {
-    // The one started last stays (60): the page and the Slack channel wait on the newer broker, which took the
-    // socket and the channel shim after the older one was already up; closing the newer one left them with nothing.
-    const sorted = [...list].sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
+    // The one started first stays (60): listen() refuses a second broker while the first answers on the socket
+    // (ipc.ts, ERR-081), so the page and the channel shim are attached to the older one. Closing the older one
+    // would leave them with a dead socket.
+    const sorted = [...list].sort((a, b) => (a.startedAt ?? 0) - (b.startedAt ?? 0))
     const keep = sorted[0]!
     const kill = sorted.slice(1)
-    console.log(`${key}: ${sorted.length}개 — 가장 나중에 뜬 pid ${keep.pid} 만 남깁니다.`)
+    console.log(`${key}: ${sorted.length}개 — 먼저 뜬 pid ${keep.pid} 만 남깁니다(소켓을 쥔 쪽).`)
     for (const p of kill) {
       const pane = panes.find((x) => x.pid === p.pid)?.pane
       if (!pane) {

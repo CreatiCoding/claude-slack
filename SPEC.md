@@ -5704,7 +5704,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
 | AC-181 | REQ-F-111 | 이어서 하기 미리보기, 잘못 보냄 흐림, 텍스트 첨부 펼치기·복사, 폰 PR 창(샌드박스), 점선 옆길 카드, 새 그룹 줄, 끝난 세션 칩, 선택지 버튼, 긴 글, 시각, 활동 상자, 폰 행, 칩 순서, 폴더 자동 완성, ⌘K 안내 | `scripts/qa-web.ts`(230/230), `test/stats.test.ts`(PR 절), 나머지 코드 확인 | 위 규칙대로 나온다 |
 | AC-180 | REQ-F-110 | 입력칸 안내·칩 순서·사진 8장 비활성·긴 변 1,568·지난 시간·대기 시간 표기 | `scripts/qa-web.ts`(230/230), 코드 확인 | 위 규칙대로 나온다 |
-| AC-179 | REQ-F-109 | 웹 문구가 해요체, 1,500 ms 저장, 분당 120 화면 오류 상한, hello.caps 로 QR 안내, /recovery 가 열린다, dedupe 는 나중에 뜬 쪽을 남긴다 | `test/web-metrics.test.ts`(상한), `test/usability.test.ts`(문구), 나머지는 코드 확인 | 위 규칙대로 나온다 |
+| AC-179 | REQ-F-109 | 웹 문구가 해요체, 1,500 ms 저장, 분당 120 화면 오류 상한, hello.caps 로 QR 안내, /recovery 가 열린다, dedupe 는 먼저 뜬 쪽(소켓을 쥔 쪽)을 남긴다 | `test/web-metrics.test.ts`(상한), `test/usability.test.ts`(문구), 나머지는 코드 확인 | 위 규칙대로 나온다 |
 | AC-178 | REQ-F-108 | 그룹 이름 40자, 접힘이 그룹 파일에 남음, 기본 프롬프트는 없으면 기본값·공백 저장은 기본값 | `test/web.test.ts` 그룹·기본 프롬프트(54), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-177 | REQ-F-107 | 열린 턴과 바쁜 시간이 규칙대로 계산되고, 분위수는 floor(q·n), 웹 창이 PC·폰에서 열린다 | `test/stats.test.ts`, `scripts/qa-web.ts` 53 묶음 | 위 규칙대로 나온다 |
 | AC-176 | REQ-F-106 | /btw 와 :btw 가 한 카드로 올라가고 답으로 고쳐지며, 대화 기록에는 남지 않고, 읽지 못하면 안내 | `test/broker.test.ts` /btw 묶음(52), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
