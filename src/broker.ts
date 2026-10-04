@@ -1450,7 +1450,8 @@ export class Broker {
 
   /** Reopen a recent conversation (from the "이어서 하기" list) as a new Slack thread, as `/ccresume` does. */
   async adminResume(id: string): Promise<{ ok: boolean; note: string; thread?: string }> {
-    const recent = (await (this.cfg.listSessions ?? listRecentSessions)(25)).find((r) => r.id === id)
+    // The same reach as the list shows (19): the list keeps 30, so a conversation the list shows can be found here.
+    const recent = (await (this.cfg.listSessions ?? listRecentSessions)(50)).find((r) => r.id === id)
     const archived = listArchives(1000, this.cfg.archiveDir).find((a) => a.sessionId === id)
     const hit = recent ?? (archived && { id: archived.sessionId, cwd: archived.cwd })
     if (!hit) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없어요' }
@@ -1680,7 +1681,7 @@ export class Broker {
 
   /** Delete a saved conversation from the "이어서 하기" list, so it can no longer be resumed. Never one that is running. */
   async adminDeleteRecent(id: string): Promise<{ ok: boolean; note: string }> {
-    const known = (await (this.cfg.listSessions ?? listRecentSessions)(25)).some((r) => r.id === id)
+    const known = (await (this.cfg.listSessions ?? listRecentSessions)(50)).some((r) => r.id === id)
     if (!known) return { ok: false, note: '이어서 할 수 있는 세션 목록에 없어요' }
     if (this.registry.live.some((s) => !s.ended && s.sessionId === id)) return { ok: false, note: '지금 실행 중인 세션입니다. 먼저 종료하세요.' }
     if (!(await (this.cfg.deleteSession ?? deleteRecentSession)(id))) return { ok: false, note: '대화 파일을 찾지 못했어요' }
