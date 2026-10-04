@@ -53,6 +53,13 @@ let sessions = []
 let groups = store.get('groups-cache', { groups: [], loose: [] })
 let recent = []
 let notices = []
+// 그룹 or 최신순 (76): remembered on this device only.
+let listView = (() => { try { return localStorage.getItem('listView') === 'recent' ? 'recent' : 'group' } catch { return 'group' } })()
+function setListView(v) {
+  listView = v
+  try { localStorage.setItem('listView', v) } catch {}
+  renderList()
+}
 let archives = []
 let options = { models: [], efforts: [], modes: [] }
 /** thread → { events: [], last: 0, loading } */
@@ -763,8 +770,30 @@ function renderList() {
   // thrown back to the top of the page by a session simply changing state while busy (19).
   const focusedThread = list.contains(document.activeElement) ? document.activeElement.dataset.thread : null
   list.innerHTML = ''
+  // The 그룹/최신순 switch sits at the top of the list (76).
+  const seg = document.createElement('div')
+  seg.className = 'seg'
+  seg.setAttribute('role', 'tablist')
+  seg.innerHTML = [['group', '그룹'], ['recent', '최신순']].map(([v, l]) => `<button type="button" role="tab" aria-selected="${listView === v}" class="${listView === v ? 'on' : ''}" data-view="${v}">${l}</button>`).join('')
+  seg.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-view]')
+    if (b) setListView(b.dataset.view)
+  })
+  list.append(seg)
 
   const shown = sessions.filter((s) => match(s.title, s.preview, s.cwd, s.last?.text))
+  // 최신순 (76): no groups, every open session by its last movement, newest first, and no dragging.
+  if (listView === 'recent') {
+    const h = secHead('recent-all', '최신순', shown.length, { dropOut: false })
+    list.append(h.el)
+    const note = document.createElement('div')
+    note.className = 'empty-note'
+    note.textContent = '마지막으로 움직인 순서예요'
+    list.append(note)
+    for (const x of [...shown].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))) list.append(liveRow(x, null))
+    list.scrollTop = keepScroll
+    return
+  }
   const byThread = new Map(shown.map((s) => [s.thread, s]))
   const grouped = new Set(groups.groups.flatMap((g) => g.items))
   // Groups first, each in its own order; then the rest: the order they were put in, then waiting first, newest first.

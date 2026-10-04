@@ -424,6 +424,10 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .swipe-actions button { flex: 1; border: 0; color: #fff; font: inherit; }
 .swipe-actions .sw-exit { background: var(--red); }
 .swipe-actions .sw-more { background: var(--muted); }
+.seg { display: flex; gap: 0; background: var(--chip-bg); border-radius: var(--r-10); padding: 3px; margin: 4px 12px 6px; }
+.seg button { flex: 1; height: 33px; padding: 5px 14px; border-radius: var(--r-8); font-size: var(--fs-m); font-weight: 500; color: var(--muted); transition: color var(--t) var(--ease); }
+.seg button.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.09); }
+:root[data-theme="dark"] .seg button.on, :root:not([data-theme="light"]) .seg button.on { background: #4d4d59; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }
