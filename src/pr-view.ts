@@ -36,7 +36,11 @@ export const PAGE_CHARS = 60_000
 /** Pull request URL → its pages of HTML (50). Rejects when gh cannot say. Page 1 has the header; the changes continue on the next. */
 export async function prViewPages(url: string): Promise<{ title: string; pages: string[] }> {
   const [raw, diff] = await Promise.all([run(['pr', 'view', url, '--json', FIELDS]), run(['pr', 'diff', url]).catch(() => '')])
-  const pr = JSON.parse(raw) as Record<string, any>
+  return prPages(JSON.parse(raw) as Record<string, any>, diff)
+}
+
+/** The pages from gh's answer (50): kept apart from the call so a test can give it a PR and a diff. */
+export function prPages(pr: Record<string, any>, diff: string): { title: string; pages: string[] } {
   const state = pr.state === 'OPEN' && pr.isDraft ? 'DRAFT' : pr.state
   const color: Record<string, string> = { OPEN: '#1a7f37', MERGED: '#8250df', CLOSED: '#cf222e', DRAFT: '#6e7781' }
   const checks: Array<{ name?: string; status?: string; conclusion?: string }> = pr.statusCheckRollup ?? []
