@@ -2037,7 +2037,8 @@ function writeFrame(frame, html, zoom = 1) {
   doc.write(safeHtml(html))
   doc.close()
   if (zoom !== 1) doc.documentElement.style.zoom = String(zoom)
-  const fit = () => (frame.style.height = Math.min(4000, Math.max(60, doc.documentElement.scrollHeight || doc.body?.scrollHeight || 0)) + 'px')
+  // 40 to 480 px; taller content scrolls inside the frame (72).
+  const fit = () => (frame.style.height = Math.min(480, Math.max(40, doc.documentElement.scrollHeight || doc.body?.scrollHeight || 0)) + 'px')
   fit()
   for (const img of doc.images) img.addEventListener('load', fit)
   setTimeout(fit, 300)
@@ -2066,7 +2067,7 @@ function wireCopyButtons(doc) {
 function htmlPreview(html, code, codeBox, name) {
   const wrap = document.createElement('div')
   wrap.className = 'htmlprev'
-  wrap.innerHTML = `<div class="hp-bar">${icon('globe')}<span>${esc(name || 'HTML 미리보기')}</span><button class="linkish hp-code" type="button">코드 보기</button><button class="linkish hp-big" type="button">크게 보기</button></div>`
+  wrap.innerHTML = `<div class="hp-bar">${icon('globe')}<span>${esc(name || 'HTML 미리보기')}</span><button class="linkish hp-big" type="button">크게 보기</button><button class="linkish hp-code" type="button">코드 보기</button></div>`
   const frame = document.createElement('iframe')
   frame.setAttribute('sandbox', 'allow-same-origin')
   frame.setAttribute('referrerpolicy', 'no-referrer')
@@ -2084,7 +2085,7 @@ function htmlPreview(html, code, codeBox, name) {
       wrap.after(codeEl)
     }
     codeEl.hidden = !codeEl.hidden
-    e.target.textContent = codeEl.hidden ? '코드 보기' : '코드 숨기기'
+    e.target.textContent = codeEl.hidden ? '코드 보기' : '미리보기'
   })
   wrap.querySelector('.hp-big').addEventListener('click', () => openHtmlViewer(html, name))
   return wrap
