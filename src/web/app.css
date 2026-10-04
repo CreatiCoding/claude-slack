@@ -565,7 +565,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
   .user { max-width: 85%; }
   #input { font-size: 16px; } /* 16px: iOS does not zoom into the field */
   /* The phone input box (66): a soft pill with no border or shadow. */
-  .input-box { background: var(--soft); border: 0; border-radius: 22px; box-shadow: none; }
+  .input-box { background: var(--soft); border: 0; border-radius: 22px; box-shadow: none; min-height: 46px; align-items: center; } /* 46px one line (66); the paddings stay as the SPEC gives them */
   .copy { opacity: 1; }
 }
 @media (hover: none) { .copy { opacity: 1; } }
