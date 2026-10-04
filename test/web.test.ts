@@ -105,7 +105,7 @@ test('권한 카드는 웹에 버튼째 오고, 웹의 허용은 Slack 버튼과
   await t.broker.webAction({ actionId: allow.action_id, value: allow.value, messageTs: card.ts })
   await tick()
   assert.deepEqual(s.inbox.at(-1), { type: 'permission', requestId: 'abcde', behavior: 'allow' })
-  assert.match(t.slack.updates.at(-1)!.text, /✅ 허용/, 'Slack 카드도 접힌다')
+  assert.match(t.slack.updates.at(-1)!.text, /✅ .* · 허용/, 'Slack 카드도 접힌다')
   const upd = t.broker.events.since(s.ack, 0).find((e) => e.type === 'msg_update' && e.ts === card.ts)
   assert.ok(upd, '접힌 카드가 웹에도')
   s.conn.close()

@@ -269,7 +269,7 @@ test('permission requests render buttons, suspend the session, and verdicts flow
   await t.broker.handleAction({ user: 'U1', ...allow, messageTs: prompt.ts, channel: 'C1' })
   await tick()
   assert.deepEqual(s.inbox.at(-1), { type: 'permission', requestId: 'abcde', behavior: 'allow' })
-  assert.match(t.slack.updates.at(-1)!.text, /✅ 허용/)
+  assert.match(t.slack.updates.at(-1)!.text, /✅ .* · 허용/)
 
   await t.broker.handleSlackMessage({ user: 'U1', text: 'no fghij', ts: '1.1', threadTs: s.ack, channel: 'C1' })
   await tick()

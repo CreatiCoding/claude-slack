@@ -3885,7 +3885,9 @@ export class Broker {
     const ts = msgTs ?? pending?.msgTs
     this.clearReminder(key)
     this.pendingPermissions.delete(key)
-    const label = `${behavior === 'allow' ? '✅ 허용' : '⛔ 거부'} · \`${requestId}\` · <@${user}>${terminalNote}`
+    // The answered line names the tool (72): 'Bash · 허용'.
+    const tool = pending?.toolName ? `${pending.toolName} · ` : ''
+    const label = `${behavior === 'allow' ? '✅' : '⛔'} ${tool}${behavior === 'allow' ? '허용' : '거부'} · <@${user}>${terminalNote}`
     // An automatic allow keeps what was allowed on the card: that record is the point of the mode.
     if (ts && record) await this.slack.update(ts, record.text, terminalNote ? [...record.blocks, { type: 'context', elements: [{ type: 'mrkdwn', text: terminalNote.replace(/^ · /, '') }] }] : record.blocks)
     else if (ts) await this.slack.update(ts, label, [{ type: 'section', text: { type: 'mrkdwn', text: label } }])
