@@ -227,7 +227,7 @@ test('되돌려 받기: 붙잡아 둔 메시지 하나를 빼고 글을 돌려�
   await t.broker.handleSlackMessage({ user: 'U1', text: '둘째', ts: '9.3', threadTs: s.ack, channel: 'C1' })
   await tick()
   const r = await t.broker.webUnhold(100, '9.2')
-  assert.deepEqual(r, { ok: true, note: '대기열에서 뺐습니다.', text: '첫째' })
+  assert.deepEqual(r, { ok: true, note: '고치려고 입력칸으로 돌려놨어요', text: '첫째' })
   assert.ok(t.slack.reactions.includes('+x@9.2'), '취소함 표시')
   assert.match(t.slack.updates.at(-1)!.text, /1개/, '안내는 남은 개수로')
   assert.equal((await t.broker.webUnhold(100, '9.2')).ok, false, '두 번은 안 된다')

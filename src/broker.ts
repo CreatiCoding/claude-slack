@@ -1105,7 +1105,7 @@ export class Broker {
       }
     }
     this.changed()
-    return { ok: true, note: '대기열에서 뺐습니다.', text: m!.text }
+    return { ok: true, note: '고치려고 입력칸으로 돌려놨어요', text: m!.text }
   }
 
   /**
@@ -3090,7 +3090,7 @@ export class Broker {
       // wait instead — the shim's own reconnect (or REQ-F-002's pid check) sorts it out without a second process.
       if (e.pane && (await this.tmux.hasPane(e.pane))) {
         this.logAt('WARN', 'revive', 'window still open; not reviving', { t: e.threadTs, pane: e.pane })
-        await this.slack.post({ threadTs: e.threadTs, text: '⏳ 세션 창이 아직 살아 있어 다시 열지 않고 기다립니다.' }).catch(() => {})
+        await this.slack.post({ threadTs: e.threadTs, text: '⏳ 세션 창이 아직 살아 있어 다시 열지 않고 기다려요…' }).catch(() => {})
         continue
       }
       this.revive.forget(e.key)
@@ -3161,10 +3161,10 @@ export class Broker {
     await this.maybeRunScheduledRefresh(s)
   }
   private async cancelScheduledRefresh(s: Session, c: CommandContext): Promise<void> {
-    if (!s.refreshAfter) return void (await c.ack('예약된 새로고침이 없습니다.'))
+    if (!s.refreshAfter) return void (await c.ack('예약된 새로고침이 없어요'))
     s.refreshAfter = undefined
     this.logAt('INFO', 'session', 'scheduled refresh cancelled', this.tag(s))
-    await c.post('↩️ 새로고침 예약을 취소했습니다.')
+    await c.post('↩️ 새로고침 예약을 취소했어요')
     this.changed()
     // What was held for the relaunch goes now, as it would have without the reservation.
     await this.releaseHeldIfIdle(s, 'refresh cancelled', { drain: true })
