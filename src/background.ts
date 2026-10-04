@@ -195,9 +195,22 @@ export function countShells(ps: string, pid: number): number {
 export function claudeRoot(ps: string, pid: number): number {
   for (const l of ps.split('\n')) {
     const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(l)
-    if (m && Number(m[1]) === pid) return /claude/i.test(m[3]!) ? pid : Number(m[2])
+    if (m && Number(m[1]) === pid) return isClaudeCommand(m[3]!) ? pid : Number(m[2])
   }
   return pid
+}
+
+/**
+ * Is this command Claude itself? By the program that runs (the first word, or the script a node runs), not by any
+ * path that contains "claude": the channel shim lives under claude-slack/ and must not count as Claude (60).
+ */
+export function isClaudeCommand(command: string): boolean {
+  const words = command.trim().split(/\s+/)
+  const base = (w: string | undefined) => (w ?? '').split('/').pop() ?? ''
+  const program = base(words[0])
+  if (/^claude$/i.test(program)) return true
+  if (/^(node|bun)(\.exe)?$/i.test(program)) return /^claude(\.m?js)?$/i.test(base(words[1]))
+  return false
 }
 
 /**

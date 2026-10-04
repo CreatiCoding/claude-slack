@@ -201,3 +201,12 @@ test('백그라운드 셸 수(75): Claude 프로세스 아래의 셸을 센다. 
   assert.equal(claudeRoot(ps, 300), 200, '채널 심이면 부모 Claude')
   assert.equal(countShells(ps, claudeRoot(ps, 300)), 2, 'Claude 아래의 셸 둘')
 })
+
+test('Claude 판정(60): 실행 파일로 가리고, 채널 심 경로에 claude 가 있어도 Claude 가 아니다', async () => {
+  const { isClaudeCommand } = await import('../src/background.ts')
+  assert.equal(isClaudeCommand('claude --chrome --resume a0845832'), true)
+  assert.equal(isClaudeCommand('/opt/homebrew/bin/claude --dangerously-load-development-channels server:slack'), true)
+  assert.equal(isClaudeCommand('/opt/homebrew/Cellar/node/26.8.1/bin/node /Users/me/projects/claude-slack/src/channel.ts'), false, '채널 심은 Claude 가 아니다')
+  assert.equal(isClaudeCommand('/bin/zsh -l'), false)
+  assert.equal(isClaudeCommand('/usr/bin/node /usr/local/bin/claude --resume x'), true, 'node 로 실행되는 claude 스크립트')
+})
