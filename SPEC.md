@@ -2709,6 +2709,18 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-102 종료·철회·휴지통 (48)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 처리 규칙:
+  1. 잘못 보냄(`webRetract`, `:retract` 와 같다): 인용은 80자, 큰따옴표. 정정 글은 `[정정] 방금 보낸 "<80자>" 는 잘못 보낸 메시지예요. 그 지시는 따르지 마세요. 이미 파일을 바꾸거나 명령을 실행했다면 무엇을 했는지만 짧게 알려 주세요.`
+  2. 폴더 휴지통: 거절 순서는 (1) 폴더 없음 (2) 홈 밖이거나 홈 자체 (3) 홈 바로 아래 (4) 이미 휴지통 안 (5) 기본 세션 폴더 (6) 다른 살아 있는 세션이 쓰는 폴더. 확인할 때 받은 `path` 가 옮길 폴더와 다르면 거절한다(`POST /api/session/<pid>/trash` 본문 `path`).
+  3. 세션을 끝낸 뒤 800 ms 기다렸다가 옮긴다. 성공 응답: `세션을 끝내고 폴더를 휴지통으로 옮겼어요 · <옮긴 곳>`.
+- 미구현(다음 라운드): 잘못 보냄을 `dropped` 상태로 흐리게 그리는 것과 버튼의 위치(마지막 웹 메시지에만)는 웹 쪽이 아직 바뀌지 않았다. 확인 창의 git 브랜치 표시도 아직 없다.
+- 수용 기준: AC-172
+- 근거: `src/trash.ts` `trashRefusal`, `src/broker.ts` `webRetract`·`webTrash`·`trashRefusalFor`, `src/admin.ts` trash 경로, `src/web/app.js` 휴지통 호출
+- 추적: REQ-F-011(정정 전달)
+
 ### REQ-F-101 이어서 하기와 지난 기록 (47)
 - 의무: MUST
 - 액터: 브로커, 웹
@@ -5562,6 +5574,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-172 | REQ-F-102 | 잘못 보냄 정정 문구·80자, 휴지통 거절 순서, 확인 경로가 다르면 거절, 800 ms 뒤 옮김 | `test/trash.test.ts` 거절 순서 묶음, `test/web.test.ts` 잘못 보냄 | 위 규칙대로 나온다 |
 | AC-171 | REQ-F-101 | 끝난 세션의 대화가 지난 기록에 남고, 같은 스레드는 한 번만, 100개를 넘으면 가장 오래된 것부터 지워진다 | `test/web.test.ts` 지난 기록(47) 묶음 | 위 규칙대로 나온다 |
 | AC-170 | REQ-F-100 | 복제는 이름·그룹·이벤트 종류·알림 문구가 맞고, 가벼운 복제는 20KB 를 넘으면 묻고, 앞부분만이면 잘라 넘기며 원본은 휴면이 된다 | `test/web.test.ts` 복제 묶음, `test/broker.test.ts` 46 묶음, `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-169 | REQ-F-099 | 휴면을 켜면 회색 배지, 글이 가면 풀린다, 터미널 입력도 풀린다. 재시작 기록에 남는다 | `test/broker.test.ts` 의 45 묶음, `scripts/qa-web.ts` 45 묶음(PC·폰) | 위 규칙대로 나온다 |

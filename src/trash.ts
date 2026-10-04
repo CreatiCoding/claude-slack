@@ -6,7 +6,7 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, renameSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { basename, join, resolve, sep } from 'node:path'
+import { basename, dirname, join, resolve, sep } from 'node:path'
 
 export interface RepoState {
   path: string
@@ -25,6 +25,24 @@ export function refuseReason(folder: string, protectedDirs: string[]): string | 
     if (p.startsWith(f + sep)) return `${p} 를 품은 상위 폴더라 버릴 수 없습니다.`
   }
   if (!existsSync(f) || !statSync(f).isDirectory()) return '폴더가 없습니다.'
+  return undefined
+}
+
+/**
+ * Why a folder may not go to the Trash (48), in the order the page explains it: missing, outside home or home
+ * itself, directly under home, already in the Trash, the default folder, another living session's folder.
+ */
+export function trashRefusal(folder: string, o: { home: string; trashDir: string; defaultCwd: string; livingFolders: string[] }): string | undefined {
+  const f = resolve(folder)
+  const home = resolve(o.home)
+  const inside = f.startsWith(home + sep)
+  if (!existsSync(f) || !statSync(f).isDirectory()) return '폴더가 없어요'
+  if (!inside || f === home) return '홈 폴더 밖이거나 홈 폴더 자체라서 버릴 수 없어요'
+  if (dirname(f) === home) return '홈 바로 아래 폴더는 버릴 수 없어요'
+  const trash = resolve(o.trashDir)
+  if (f === trash || f.startsWith(trash + sep)) return '이미 휴지통 안에 있어요'
+  if (f === resolve(o.defaultCwd)) return '기본 세션 폴더는 버릴 수 없어요'
+  if (o.livingFolders.some((x) => resolve(x) === f)) return '다른 살아 있는 세션이 쓰는 폴더라 버릴 수 없어요'
   return undefined
 }
 

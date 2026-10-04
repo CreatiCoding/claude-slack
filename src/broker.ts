@@ -34,7 +34,7 @@ import { countArchives, deleteArchive, findArchiveByThread, listArchives, rename
 import { PurgeService } from './purge.ts'
 import { EventLog, type EventBody, type SessionEvent } from './events.ts'
 import { attachedImagePaths, ImageStore, type WebImage } from './images.ts'
-import { moveToTrash, refuseReason, repoStates, type RepoState } from './trash.ts'
+import { moveToTrash, repoStates, trashRefusal, type RepoState } from './trash.ts'
 import { writingPreview } from './preview.ts'
 import { branchPr, linksIn, prInfo, repos, sortPrs, type Link } from './links.ts'
 import { GroupStore, type GroupOp, type GroupsState } from './groups.ts'
@@ -1077,9 +1077,10 @@ export class Broker {
       .reverse()
       .find((e) => e.type === 'user' && e.ts === ts)
     if (!said || said.type !== 'user') return { ok: false, note: '그 메시지를 찾지 못했습니다.' }
-    const quoted = truncate(said.text.replace(/\s+/g, ' ').trim(), 200)
+    // The web's own wording and length (48): 80 characters, in double quotes.
+    const quoted = truncate(said.text.replace(/\s+/g, ' ').trim(), 80)
     if (session.pane) await this.interrupt(this.ctx(session, 'esc'))
-    const correction = `[정정] 방금 보낸 '${quoted}' 는 잘못 보낸 거예요. 따르지 말고, 이미 바꾼 파일이나 실행한 명령이 있으면 무엇을 했는지만 짧게 알려 줘요.`
+    const correction = `[정정] 방금 보낸 "${quoted}" 는 잘못 보낸 메시지예요. 그 지시는 따르지 마세요. 이미 파일을 바꾸거나 명령을 실행했다면 무엇을 했는지만 짧게 알려 주세요.`
     this.logAt('INFO', 'inject', 'retracted from the web', this.tag(session, { ts }))
     await this.slack.post({ threadTs: session.threadTs, text: `↩️ 웹: '${quoted}' 를 잘못 보냈다고 알렸습니다.` })
     await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
@@ -1094,30 +1095,42 @@ export class Broker {
   /** What "폴더 버리고 종료" would do, for the page to show before it asks. */
   webTrashInfo(pid: number): { ok: boolean; note: string; folder?: string; repos?: RepoState[] } {
     const session = this.registry.byPid(pid)
-    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
-    const refused = refuseReason(session.cwd, this.protectedDirs)
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션이에요' }
+    const refused = this.trashRefusalFor(session)
     if (refused) return { ok: false, note: refused, folder: session.cwd }
     return { ok: true, note: '', folder: session.cwd, repos: repoStates(session.cwd) }
   }
 
   /** End the session and move its folder to the Trash (never deleted). */
-  async webTrash(pid: number): Promise<{ ok: boolean; note: string }> {
+  /** Why this session's folder may not be moved to the Trash (48), or nothing. */
+  private trashRefusalFor(session: Session): string | undefined {
+    return trashRefusal(session.cwd, {
+      home: this.cfg.homeDir ?? homedir(),
+      trashDir: this.cfg.trashDir ?? join(homedir(), '.Trash'),
+      defaultCwd: this.cfg.defaultCwd,
+      livingFolders: this.registry.live.filter((x) => !x.ended && x !== session).map((x) => x.cwd),
+    })
+  }
+
+  async webTrash(pid: number, expectPath?: string): Promise<{ ok: boolean; note: string }> {
     const session = this.registry.byPid(pid)
-    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션입니다.' }
+    if (!session || session.ended) return { ok: false, note: '이미 끝난 세션이에요' }
     const folder = session.cwd
-    const refused = refuseReason(folder, this.protectedDirs)
+    // The page confirmed a path: if that is not the folder that would move, nothing moves (48).
+    if (expectPath !== undefined && resolve(expectPath) !== resolve(folder)) return { ok: false, note: '확인한 폴더와 옮길 폴더가 달라요. 다시 확인해 주세요' }
+    const refused = this.trashRefusalFor(session)
     if (refused) return { ok: false, note: refused }
     if (session.pane) await this.tmux.killPane(session.pane).catch(() => {})
-    await sleep(500)
+    await sleep(800)
     let dest: string
     try {
       dest = moveToTrash(folder, this.cfg.trashDir)
     } catch (err) {
-      return { ok: false, note: `세션은 끝냈지만 폴더를 옮기지 못했습니다: ${describeError(err)}` }
+      return { ok: false, note: `세션은 끝냈지만 폴더를 옮기지 못했어요: ${describeError(err)}` }
     }
     this.logAt('INFO', 'session', 'folder moved to the Trash', this.tag(session, { dest: shortenHome(dest) }))
-    await this.slack.post({ threadTs: session.threadTs, text: `🗑 폴더를 휴지통으로 옮기고 종료했습니다: \`${shortenHome(folder)}\`` }).catch(() => {})
-    return { ok: true, note: `휴지통으로 옮겼습니다: ${shortenHome(dest)}` }
+    await this.slack.post({ threadTs: session.threadTs, text: `🗑 폴더를 휴지통으로 옮기고 종료했어요: \`${shortenHome(folder)}\`` }).catch(() => {})
+    return { ok: true, note: `세션을 끝내고 폴더를 휴지통으로 옮겼어요 · ${shortenHome(dest)}` }
   }
 
   /** 복제: the same conversation continued in a new session (claude --resume <id> --fork-session); the original goes on. */

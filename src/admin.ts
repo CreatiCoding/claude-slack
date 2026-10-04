@@ -53,7 +53,7 @@ export interface AdminApi {
   webSendThread?(thread: string, text: string, images?: Array<{ name?: string; type?: string; data: string }>): Promise<{ ok: boolean; note: string }>
   readonly images?: { file(thread: string, id: string): Promise<{ path: string; type: string } | undefined> }
   webTrashInfo?(pid: number): { ok: boolean; note: string; folder?: string; repos?: Array<{ path: string; uncommitted: number; unpushed: number }> }
-  webTrash?(pid: number): Promise<{ ok: boolean; note: string }>
+  webTrash?(pid: number, expectPath?: string): Promise<{ ok: boolean; note: string }>
   webFork?(pid: number): Promise<{ ok: boolean; note: string; thread?: string }>
   webUnhold?(pid: number, ts: string): Promise<{ ok: boolean; note: string; text?: string }>
   webRetract?(pid: number, ts: string): Promise<{ ok: boolean; note: string }>
@@ -512,7 +512,8 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
       return send(res, 200, info)
     }
     if (req.method === 'POST' && !trash[2]) {
-      const result = await api.webTrash(Number(trash[1]))
+      const body = await readJson(req)
+      const result = await api.webTrash(Number(trash[1]), typeof body.path === 'string' ? body.path : undefined)
       log(`web trash ${trash[1]}: ${result.note}`)
       return send(res, result.ok ? 200 : 400, result)
     }

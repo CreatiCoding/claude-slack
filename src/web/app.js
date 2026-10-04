@@ -2703,7 +2703,7 @@ async function trashFolder(s) {
   const msg = [`${home(info.folder)} 폴더를 휴지통으로 옮기고 세션을 끝낼까요?`, '', ...(lines.length ? lines : ['(git 저장소 없음)']), ...(risky ? ['', '⚠ 저장하지 않은 작업이 있어요. 휴지통에서 되살릴 수는 있어요.'] : [])].join('\n')
   if (!confirm(msg)) return
   try {
-    toast((await api(`/api/session/${s.pid}/trash`, {})).note)
+    toast((await api(`/api/session/${s.pid}/trash`, { path: info.folder })).note)
   } catch (err) {
     toast(err.message, 'err')
   }

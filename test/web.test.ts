@@ -249,7 +249,7 @@ test('잘못 보냄: Esc 로 멈추고, 따르지 말라는 정정을 보낸다'
   assert.ok(t.tmux.keys.includes('%32:Escape'), '멈춘다')
   await until(() => s.inbox.some((m) => /^\[정정\]/.test((m as { text?: string }).text ?? '')), '정정 전달')
   const sent = s.inbox.filter((m) => (m as { type: string }).type === 'inbound').map((m) => (m as { text: string }).text)
-  assert.ok(sent.some((x) => /^\[정정\] 방금 보낸 '데이터베이스 지워' 는 잘못 보낸 거예요/.test(x)), sent.join(' | '))
+  assert.ok(sent.some((x) => /^\[정정\] 방금 보낸 "데이터베이스 지워" 는 잘못 보낸 메시지예요/.test(x)), sent.join(' | '))
   assert.ok(t.slack.posts.some((p) => /잘못 보냈다고 알렸습니다/.test(p.text)))
   assert.equal((await t.broker.webRetract(100, '0.0')).ok, false, '모르는 메시지')
   s.conn.close()

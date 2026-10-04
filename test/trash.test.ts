@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { moveToTrash, refuseReason, repoStates } from '../src/trash.ts'
 
 test('버릴 수 없는 폴더: 루트, 보호 폴더 자신, 보호 폴더를 품은 상위, 없는 폴더', () => {
@@ -62,7 +62,7 @@ test('브로커: 폴더 버리고 종료는 보호 폴더를 거부하고, 저�
   mkdirSync(proj)
   execFileSync('git', ['init', '-q'], { cwd: proj })
   writeFileSync(join(proj, 'a'), '1')
-  const t = await setup({ trashDir: join(root, 'Trash'), folderExists: existsSync, listSessions: async () => [{ id: 'gone', cwd: join(root, 'gone'), title: 'x', mtime: 1, when: '' }, { id: 'here', cwd: proj, title: 'y', mtime: 1, when: '' }] })
+  const t = await setup({ homeDir: dirname(root), trashDir: join(root, 'Trash'), folderExists: existsSync, listSessions: async () => [{ id: 'gone', cwd: join(root, 'gone'), title: 'x', mtime: 1, when: '' }, { id: 'here', cwd: proj, title: 'y', mtime: 1, when: '' }] })
   const s = await shim(t.socketPath, { tmuxPane: '%51', cwd: proj })
   const info = t.broker.webTrashInfo(100)
   assert.ok(info.ok)
@@ -81,4 +81,27 @@ test('브로커: 폴더 버리고 종료는 보호 폴더를 거부하고, 저�
   assert.equal((await u.broker.webTrash(100)).ok, false)
   home.conn.close()
   u.close()
+})
+
+test('휴지통 거절 순서(48): 없음 → 홈 밖·홈 자체 → 홈 바로 아래 → 휴지통 안 → 기본 폴더 → 다른 살아 있는 세션 폴더', async () => {
+  const { trashRefusal } = await import('../src/trash.ts')
+  const root = mkdtempSync(join(tmpdir(), 'trash48-'))
+  const home = join(root, 'home')
+  const deep = join(home, 'works', 'app')
+  const direct = join(home, 'works')
+  mkdirSync(deep, { recursive: true })
+  const trashDir = join(home, 'works', 'Trash')
+  mkdirSync(join(trashDir, 'x'), { recursive: true })
+  const base = { home, trashDir, defaultCwd: join(home, 'works', 'default'), livingFolders: [] as string[] }
+  assert.match(trashRefusal(join(home, 'missing'), base)!, /없어요/)
+  assert.match(trashRefusal(root, base)!, /홈 폴더 밖/)
+  assert.match(trashRefusal(home, base)!, /홈 폴더 자체/)
+  mkdirSync(join(home, 'top'))
+  assert.match(trashRefusal(join(home, 'top'), base)!, /홈 바로 아래/)
+  assert.match(trashRefusal(join(trashDir, 'x'), base)!, /휴지통 안/)
+  mkdirSync(base.defaultCwd, { recursive: true })
+  assert.match(trashRefusal(base.defaultCwd, base)!, /기본 세션/)
+  assert.equal(trashRefusal(deep, base), undefined)
+  assert.match(trashRefusal(deep, { ...base, livingFolders: [deep] })!, /살아 있는/)
+  rmSync(root, { recursive: true, force: true })
 })
