@@ -1388,7 +1388,7 @@ export class Broker {
       live,
       pins: this.pinStore.list(),
       recent: await this.resumable(50),
-      archives: listArchives(50, this.cfg.archiveDir).map((a) => {
+      archives: listArchives(100, this.cfg.archiveDir).map((a) => {
         const stored = this.titles.get(a.sessionId)
         return stored ? { ...a, title: stored } : a
       }),
