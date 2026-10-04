@@ -1,6 +1,6 @@
 /**
  * A pull request as one HTML page (50), for the phone's window: its status, title, who and where, the description,
- * the checks, the reviews, the files, and the changes (per file, the first five open; a diff over 400 KB is cut).
+ * the checks, the reviews, the files, and the changes (per file, the first five open; a diff over 400 KB is cut; the limits count bytes).
  * Drawn in the same sandbox as the HTML preview (no scripts), so it is shown, not run.
  */
 import { execFile } from 'node:child_process'
@@ -8,6 +8,9 @@ import { execFile } from 'node:child_process'
 const FIELDS = 'number,title,body,state,isDraft,author,baseRefName,headRefName,createdAt,mergedAt,closedAt,additions,deletions,changedFiles,url,reviewDecision,statusCheckRollup,reviews,comments,files,mergedBy,labels'
 const DIFF_MAX = 400_000
 const FILE_CHUNK_MAX = 40_000
+
+/** The first `max` bytes of a text (50: the limits are bytes, not characters). */
+const headBytes = (s: string, max: number): string => (Buffer.byteLength(s) <= max ? s : Buffer.from(s).subarray(0, max).toString('utf8'))
 
 const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!)
 
@@ -26,11 +29,12 @@ export async function prViewHtml(url: string): Promise<string> {
   const checks: Array<{ name?: string; status?: string; conclusion?: string }> = pr.statusCheckRollup ?? []
   const failed = checks.filter((c) => c.conclusion && !['SUCCESS', 'NEUTRAL', 'SKIPPED'].includes(c.conclusion))
   const files: Array<{ path: string; additions?: number; deletions?: number }> = pr.files ?? []
-  const chunks = diff.length > DIFF_MAX ? diff.slice(0, DIFF_MAX) : diff
+  const tooBig = Buffer.byteLength(diff) > DIFF_MAX
+  const chunks = tooBig ? headBytes(diff, DIFF_MAX) : diff
   const parts = chunks.split(/^(?=diff --git )/m).filter(Boolean)
   const diffHtml = parts.map((p, i) => {
     const name = /^diff --git a\/(\S+)/.exec(p)?.[1] ?? `파일 ${i + 1}`
-    const body = p.length > FILE_CHUNK_MAX ? p.slice(0, FILE_CHUNK_MAX) + '\n… (이 파일은 여기까지)' : p
+    const body = Buffer.byteLength(p) > FILE_CHUNK_MAX ? headBytes(p, FILE_CHUNK_MAX) + '\n… (이 파일은 여기까지)' : p
     return `<details${i < 5 ? ' open' : ''}><summary>${esc(name)}</summary><pre>${esc(body)}</pre></details>`
   })
   const reviews: Array<{ author?: { login?: string }; state?: string }> = pr.reviews ?? []
@@ -49,6 +53,6 @@ details{margin:6px 0;border:1px solid #d1d9e0;border-radius:8px;padding:6px 10px
 <h2>설명</h2>${pr.body ? `<pre>${esc(pr.body)}</pre>` : '<div class="none">설명이 없어요</div>'}
 <h2>리뷰</h2>${reviews.length ? reviews.map((r) => `<div>${esc(r.author?.login)} · ${esc(r.state)}</div>`).join('') : '<div class="none">리뷰가 없어요</div>'}
 <h2>바뀐 파일</h2>${files.length ? files.map((f) => `<div>${esc(f.path)} <span class="meta">+${esc(f.additions)} −${esc(f.deletions)}</span></div>`).join('') : '<div class="none">없어요</div>'}
-<h2>변경 내용</h2>${diff.length > DIFF_MAX ? '<div class="meta">(앞부분만)</div>' : ''}${diffHtml.join('') || '<div class="none">변경 내용을 읽지 못했어요</div>'}
+<h2>변경 내용</h2>${tooBig ? '<div class="meta">(앞부분만)</div>' : ''}${diffHtml.join('') || '<div class="none">변경 내용을 읽지 못했어요</div>'}
 </body></html>`
 }
