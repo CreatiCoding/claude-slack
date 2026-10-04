@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { classifyOption, detectKnown, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog } from '../src/dialog.ts'
+import { classifyOption, detectKnown, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, questionTag } from '../src/dialog.ts'
 
 const TRUST = `
  Accessing workspace:
@@ -315,4 +315,10 @@ test('confirmKnown 은 Chrome 확장 감지 창을 브라우저 끔으로 넘긴
   const driver = new DialogDriver({ capture: async () => screen, sendKeys: async (_p: string, k: string[]) => void keys.push(...k) } as never)
   assert.equal(await driver.confirmKnown('%1', screen), 'chrome-extension')
   assert.deepEqual(keys, ['Enter'], '커서가 이미 "끔" 에 있으니 Enter 만')
+})
+
+test('질문 꼬리표(41): 같은 질문은 같은 꼬리표, 다른 질문은 다른 꼬리표', () => {
+  // A button made for one question must not press into the next one: the tag tells them apart.
+  assert.equal(questionTag('Do you want to proceed?'), questionTag('Do   you want to\nproceed?'))
+  assert.notEqual(questionTag('Do you want to proceed?'), questionTag('Allow this edit?'))
 })

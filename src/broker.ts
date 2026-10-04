@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
 import type { SlackApi, InMsg, InAction, InStop, InCommand, InView } from './slack.ts'
 import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
-import { cursorKeys, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, promptHoldsFocus } from './dialog.ts'
+import { cursorKeys, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, questionTag, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
 import { TurnStream } from './stream.ts'
 import { lastModelInTranscript, readSessionText, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
@@ -4827,7 +4827,13 @@ export class Broker {
       run: async (c) => {
         // Look at the screen before pressing anything (41): if the window is gone, send nothing and say so.
         const keyed = parseKeyedDialog(await this.tmux.capture(c.pane))
-        const arg = c.arg.trim()
+        // `q=<tag>` names the question the button was made for (41): a different question now is not pressed into.
+        const tagged = /^q=([0-9a-f]+)\s+(.*)$/.exec(c.arg.trim())
+        const arg = (tagged ? tagged[2] : c.arg).trim()
+        if (tagged && keyed && questionTag(keyed.question) !== tagged[1]) {
+          if (c.messageTs && c.messageTs === c.session.openDialogTs) c.session.openDialogTs = undefined
+          return void (await c.ack('이미 다른 질문으로 바뀌었어요. 지금 화면을 확인해 주세요'))
+        }
         const label = arg.startsWith('to ') ? arg.slice(3) : undefined
         // Whitespace runs are the same as one space here: the command's words are joined that way on the way in.
         const squash = (x: string) => x.replace(/\s+/g, ' ').trim()

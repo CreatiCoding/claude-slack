@@ -1,5 +1,6 @@
 import { basename } from 'node:path'
 import { shortenHome, truncate } from './format.ts'
+import { questionTag } from './dialog.ts'
 import { ACTION, encodeAnswer, encodeResume, encodeValue, panelBlockId, questionBlockId, renderActionId, type ActionBase } from './actions.ts'
 
 export const MODEL_OPTIONS: Array<{ label: string; value: string }> = [
@@ -253,7 +254,7 @@ export function keyedDialogBlocks(pid: number, d: { question: string; body?: str
   // `dlgkey to <label>` (↑/↓ the cursor to the line with exactly that label, then Enter), handled as its own command so it can fold
   // the card and clear the wait, which a raw `:key` press never did.
   const moveButtons = d.options.slice(0, 5).map((label, i) =>
-    btn(truncate(label, 75), ACTION.dlgKey, encodeValue(pid, `dlgkey to ${label}`), i === d.selected ? 'primary' : undefined),
+    btn(truncate(label, 75), ACTION.dlgKey, encodeValue(pid, `dlgkey q=${questionTag(d.question)} to ${label}`), i === d.selected ? 'primary' : undefined),
   )
   return {
     text,
@@ -265,7 +266,7 @@ export function keyedDialogBlocks(pid: number, d: { question: string; body?: str
         type: 'actions',
         // Esc sends just the key (`dlgkey esc`), not the `:esc` command — `:esc` means "stop the running
         // turn", which this dialog usually is not.
-        elements: [...moveButtons, btn(d.options.length ? '취소 (Esc)' : '확인 (Enter)', ACTION.dlgKey, encodeValue(pid, d.options.length ? 'dlgkey esc' : 'dlgkey enter'))],
+        elements: [...moveButtons, btn(d.options.length ? '취소 (Esc)' : '확인 (Enter)', ACTION.dlgKey, encodeValue(pid, `dlgkey q=${questionTag(d.question)} ${d.options.length ? 'esc' : 'enter'}`))],
       },
     ],
   }

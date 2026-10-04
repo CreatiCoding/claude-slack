@@ -173,6 +173,13 @@ export interface KeyedDialog {
  * {@link parseDialog} cannot see those, so the session would sit there with
  * nothing actionable in Slack. Recognize them by the key hints they print.
  */
+/** A short tag of a dialog's question (41): a button pressed for one question must not press into the next one. */
+export function questionTag(question: string): string {
+  let h = 7
+  for (const ch of question.replace(/\s+/g, ' ').trim()) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return h.toString(16)
+}
+
 export function parseKeyedDialog(screen: string): KeyedDialog | null {
   const lines = screen.split('\n')
   const foot = lines.findIndex((l) => KEYED_FOOTER_RE.test(l))
