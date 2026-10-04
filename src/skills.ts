@@ -36,6 +36,12 @@ function frontmatterDescription(file: string): string | undefined {
   try {
     const head = readFileSync(file, 'utf8').slice(0, 4000)
     const fm = /^---\n([\s\S]*?)\n---/.exec(head)?.[1] ?? ''
+    // A block description (`>` folded or `|` literal) continues on the lines indented under it (78).
+    const block = /^description:\s*[>|][-+]?\s*\n((?:[ \t]+.*(?:\n|$))+)/m.exec(fm)
+    if (block) {
+      const d = block[1]!.split('\n').map((l) => l.trim()).filter(Boolean).join(' ')
+      return d ? d.slice(0, 200) : undefined
+    }
     const d = /^description:\s*(.+)$/m.exec(fm)?.[1]?.trim().replace(/^["']|["']$/g, '')
     return d ? d.slice(0, 200) : undefined
   } catch {

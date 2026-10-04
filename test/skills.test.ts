@@ -197,3 +197,16 @@ test('7-2 프로젝트 범위 플러그인: 세션 폴더와 위 폴더들의 .c
   assert.deepEqual(names(app), ['chapter:chapter-skill', 'slack:slack-skill'], '가까운 app 이 user-kit 을 끈다')
   assert.deepEqual(names(work), ['slack:slack-skill', 'user-kit:user-kit-skill'])
 })
+
+test('스킬 설명(78): 여러 줄 description(> 또는 |)은 들여쓴 줄을 이어 읽는다', async () => {
+  const { availableSkills } = await import('../src/skills.ts')
+  const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const root = mkdtempSync(join(tmpdir(), 'skills78-'))
+  const dir = join(root, '.claude', 'skills', 'folded')
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), '---\nname: folded\ndescription: >\n  첫 줄\n  둘째 줄\n---\n본문\n')
+  const found = availableSkills(root, { home: root, claudeDir: join(root, '.claude') }).find((x) => x.name === 'folded')
+  assert.equal(found?.description, '첫 줄 둘째 줄')
+})
