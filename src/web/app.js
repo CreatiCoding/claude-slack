@@ -3325,9 +3325,9 @@ function globalItems() {
     {
       label: '테마',
       icon: theme === 'dark' ? 'moon' : 'sun',
-      end: { auto: '자동', light: '밝게', dark: '어둡게' }[theme],
+      end: { auto: '자동(기기 설정)', light: '밝게', dark: '어둡게' }[theme],
       sub: () => [
-        { label: '자동', icon: 'refresh', on: theme === 'auto', run: () => applyTheme('auto') },
+        { label: '자동(기기 설정)', icon: 'refresh', on: theme === 'auto', run: () => applyTheme('auto') },
         { label: '밝게', icon: 'sun', on: theme === 'light', run: () => applyTheme('light') },
         { label: '어둡게', icon: 'moon', on: theme === 'dark', run: () => applyTheme('dark') },
       ],
