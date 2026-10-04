@@ -2876,7 +2876,8 @@ function openMenu(at, items, { title } = {}) {
   const place = () => {
     const r = menu.getBoundingClientRect()
     // `end`: the menu's right edge at x (a button at the right). `above`: its bottom edge at y, opening upward.
-    const x = at.end ? at.x - r.width : Math.min(at.x, innerWidth - r.width - 8)
+    // The end-aligned menu (the ⋯) sits 12 px from the screen's right edge (67).
+    const x = at.end ? innerWidth - r.width - 12 : Math.min(at.x, innerWidth - r.width - 8)
     const y = at.above ? Math.max(8, at.y - 6 - r.height) : at.y + r.height > innerHeight - 8 ? Math.max(8, at.y - r.height) : at.y
     menu.style.left = Math.max(8, Math.min(x, innerWidth - r.width - 8)) + 'px'
     menu.style.top = y + 'px'

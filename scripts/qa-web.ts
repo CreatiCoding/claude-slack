@@ -775,7 +775,7 @@ for (const [label, size, phone] of [
   const btn = await page.locator('#btn-more').boundingBox()
   const gm = await page.locator('.menu').boundingBox()
   const gmText = (await page.locator('.menu').textContent()) ?? ''
-  if (!phone) check(`${label}: 전역 메뉴는 버튼 바로 아래 오른쪽 끝 맞춤`, !!btn && !!gm && Math.abs(gm.x + gm.width - (btn.x + btn.width)) < 2 && gm.y >= btn.y + btn.height, JSON.stringify({ btn, gm }))
+  if (!phone) check(`${label}: 전역 메뉴는 버튼 바로 아래 오른쪽 끝 맞춤`, !!btn && !!gm && Math.abs(gm.x + gm.width - (1440 - 12)) < 2 && gm.y >= btn.y + btn.height, JSON.stringify({ btn, gm }))
   check(`${label}: 전역 메뉴에 비우기·파괴적 세션 항목 없음`, !/이어서 하기 비우기|지난 기록 모두 지우기|강제 종료|폴더 버리고 종료/.test(gmText), gmText)
   await page.keyboard.press('Escape')
   if (phone) await page.goBack()

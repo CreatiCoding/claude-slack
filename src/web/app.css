@@ -1,62 +1,134 @@
-/* Claude Code desktop look. Every size and colour is a token; the rules below never hard-code one. */
+/* Claude Code desktop look. Every size and colour is a token; the rules below never hard-code one.
+   Values follow the 4th-round SPEC (UI tokens, item 61). Status colours are fixed across themes. */
 :root {
   --bg: #faf9f5;
   --side: #f3f1ea;
   --card: #f5f4ed;
   --soft: #f0eee6;
   --line: #e6e3d9;
+  --line-strong: #d2cec2;
   --text: #141413;
   --text-2: #3d3d3a;
   --muted: #87867f;
   --accent: #c96442;
   --accent-soft: color-mix(in srgb, var(--accent) 12%, transparent);
-  --hover: color-mix(in srgb, var(--text) 6%, transparent);
-  --active: color-mix(in srgb, var(--text) 9%, transparent);
-  --green: #3f7d4e;
-  --green-soft: color-mix(in srgb, var(--green) 14%, transparent);
-  --blue: #3d6fd6;
-  --blue-soft: color-mix(in srgb, var(--blue) 13%, transparent);
-  --yellow: #9a6a12;
-  --yellow-soft: color-mix(in srgb, #e0a526 22%, transparent);
-  --red: #b3432f;
-  --red-soft: color-mix(in srgb, var(--red) 13%, transparent);
-  --gray-soft: color-mix(in srgb, var(--muted) 16%, transparent);
-  --shadow: 0 8px 28px rgb(0 0 0 / .12), 0 1px 3px rgb(0 0 0 / .08);
-  --scrim: rgb(20 20 19 / .32);
+  --hover: rgba(20, 20, 19, .05);
+  --active: #e8e5da;
+  --press: rgba(2, 32, 71, .05);
+  --code-inline: rgba(20, 20, 19, .06);
+  --chip-bg: rgba(2, 32, 71, .05);
+  --chip-text: rgba(3, 18, 40, .7);
+  --diff-add-bg: rgba(3, 178, 108, .12);
+  --diff-add-fg: #0a7d4f;
+  --diff-del-bg: rgba(240, 68, 82, .1);
+  --diff-del-fg: #c62a37;
+  --diff-hunk: #3182f6;
+  /* Status colours: the same in both themes. */
+  --green: #03b26c;
+  --green-soft: rgba(3, 178, 108, .14);
+  --blue: #3182f6;
+  --blue-soft: rgba(49, 130, 246, .13);
+  --yellow: #ffb331;
+  --yellow-soft: rgba(255, 179, 49, .2);
+  --orange: #fe9800;
+  --red: #f04452;
+  --red-soft: rgba(240, 68, 82, .13);
+  --teal: #18a5a5;
+  --gray: #b0b8c1;
+  --more-bg: #8b95a1;
+  --gray-soft: rgba(176, 184, 193, .2);
+  /* Badges: text on a .16 tint. */
+  --bd-blue: #1b64da; --bd-blue-bg: rgba(49, 130, 246, .16);
+  --bd-green: #029359; --bd-green-bg: rgba(2, 162, 98, .16);
+  --bd-yellow: #dd7d02; --bd-yellow-bg: rgba(255, 179, 49, .16);
+  --bd-red: #d22030; --bd-red-bg: rgba(244, 67, 54, .16);
+  --bd-teal: #0c8585; --bd-teal-bg: rgba(0, 129, 138, .16);
+  --bd-gray: #4e5968; --bd-gray-bg: rgba(78, 89, 104, .16);
+  --shadow: 0 6px 24px rgba(0, 0, 0, .12);
+  --sh-xs: 0 1px 2px rgba(0, 0, 0, .04);
+  --sh-s: 0 2px 6px rgba(0, 0, 0, .06);
+  --sh-s2: 0 2px 6px rgba(0, 0, 0, .08);
+  --sh-m: 0 6px 24px rgba(0, 0, 0, .12);
+  --sh-l: 0 16px 48px rgba(0, 0, 0, .2);
+  --sh-menu: 0 16px 60px rgba(0, 27, 55, .1);
+  --scrim: rgba(0, 0, 0, .2);
 
+  /* Type: the 11/13/15/17 steps, plus the badge, side-time and sheet-title steps (61). */
   --fs-s: 13px;
   --fs-m: 15px;
   --fs-l: 17px;
   --fs-time: 11px;
-  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-badge-xs: 10px; --lh-badge-xs: 15px;
+  --fs-badge-s: 12px; --lh-badge-s: 18px;
+  --fs-side-time: 12px; --lh-side-time: 20px;
+  --fs-sheet: 20px; --lh-sheet: 29px;
+  --font: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Spacing and radius steps (61). */
+  --sp-2: 2px; --sp-4: 4px; --sp-6: 6px; --sp-8: 8px; --sp-10: 10px; --sp-12: 12px; --sp-14: 14px;
+  --sp-16: 16px; --sp-20: 20px; --sp-24: 24px;
+  --r-4: 4px; --r-6: 6px; --r-8: 8px; --r-10: 10px; --r-12: 12px; --r-14: 14px; --r-16: 16px;
+  --r-20: 20px; --r-22: 22px; --r-24: 24px; --r-28: 28px; --r-pill: 999px;
+
+  /* Motion (61). */
+  --t-fast: .15s;
+  --t: .2s;
+  --ease: cubic-bezier(.25, .1, .25, 1);
+
+  /* Stacking (61). */
+  --z-top: 1; --z-tip: 5; --z-pop: 20; --z-fab: 50; --z-notice: 60; --z-menu: 70; --z-window: 80;
+  --z-viewer: 1000; --z-sheet: 10000; --z-toast: 30000;
 
   --side-w: 272px;
   --side-min: 56px;
-  --top-h: 44px;
+  --top-h: 48px;
   --row-h: 32px;
   --convo-max: 860px;
   --gutter: 24px;
   --radius: 12px;
   color-scheme: light;
 }
-/* Dark: the desktop app's dark theme. Follows the device unless the menu picked one. */
+/* Dark: the same tokens with the dark values of the SPEC table. Follows the device unless the menu picked one. */
 :root[data-theme="dark"] {
   --bg: #262624; --side: #1f1e1d; --card: #30302e; --soft: #34332f; --line: #3a3a37;
-  --text: #f5f4ef; --text-2: #d6d4cc; --muted: #9a988f; --accent: #d97757;
-  --green: #6fb483; --blue: #7ea2ef; --yellow: #e3b55a; --red: #e17b68;
-  --yellow-soft: color-mix(in srgb, #e0a526 18%, transparent);
-  --shadow: 0 10px 32px rgb(0 0 0 / .45), 0 1px 3px rgb(0 0 0 / .3);
-  --scrim: rgb(0 0 0 / .5);
+  --line-strong: #4a4945;
+  --text: #f5f4ef; --text-2: #c2c0b6; --muted: #9a988f; --accent: #d97757;
+  --hover: rgba(255, 255, 255, .05); --active: #3a3935; --press: rgba(217, 217, 255, .11);
+  --code-inline: rgba(255, 255, 255, .08);
+  --chip-bg: rgba(217, 217, 255, .11); --chip-text: rgba(253, 253, 255, .75);
+  --diff-add-bg: rgba(46, 160, 67, .2); --diff-add-fg: #56d364;
+  --diff-del-bg: rgba(248, 81, 73, .18); --diff-del-fg: #ff7b72; --diff-hunk: #79c0ff;
+  --bd-blue: #4593fc; --bd-blue-bg: rgba(69, 147, 252, .16);
+  --bd-green: #15c47e; --bd-green-bg: rgba(21, 196, 126, .16);
+  --bd-yellow: #faa131; --bd-yellow-bg: rgba(255, 209, 88, .16);
+  --bd-red: #f66570; --bd-red-bg: rgba(239, 83, 80, .16);
+  --bd-teal: #30b6b6; --bd-teal-bg: rgba(38, 157, 166, .16);
+  --bd-gray: #c3c3c6; --bd-gray-bg: rgba(195, 195, 198, .16);
+  --shadow: 0 10px 32px rgba(0, 0, 0, .45);
+  --sh-menu: 0 16px 60px rgba(0, 0, 0, .25);
+  --scrim: rgba(0, 0, 0, .56);
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #262624; --side: #1f1e1d; --card: #30302e; --soft: #34332f; --line: #3a3a37;
-    --text: #f5f4ef; --text-2: #d6d4cc; --muted: #9a988f; --accent: #d97757;
-    --green: #6fb483; --blue: #7ea2ef; --yellow: #e3b55a; --red: #e17b68;
-    --yellow-soft: color-mix(in srgb, #e0a526 18%, transparent);
-    --shadow: 0 10px 32px rgb(0 0 0 / .45), 0 1px 3px rgb(0 0 0 / .3);
-    --scrim: rgb(0 0 0 / .5);
+    --line-strong: #4a4945;
+    --text: #f5f4ef; --text-2: #c2c0b6; --muted: #9a988f; --accent: #d97757;
+    --hover: rgba(255, 255, 255, .05); --active: #3a3935; --press: rgba(217, 217, 255, .11);
+    --code-inline: rgba(255, 255, 255, .08);
+    --chip-bg: rgba(217, 217, 255, .11); --chip-text: rgba(253, 253, 255, .75);
+    --diff-add-bg: rgba(46, 160, 67, .2); --diff-add-fg: #56d364;
+    --diff-del-bg: rgba(248, 81, 73, .18); --diff-del-fg: #ff7b72; --diff-hunk: #79c0ff;
+    --bd-blue: #4593fc; --bd-blue-bg: rgba(69, 147, 252, .16);
+    --bd-green: #15c47e; --bd-green-bg: rgba(21, 196, 126, .16);
+    --bd-yellow: #faa131; --bd-yellow-bg: rgba(255, 209, 88, .16);
+    --bd-red: #f66570; --bd-red-bg: rgba(239, 83, 80, .16);
+    --bd-teal: #30b6b6; --bd-teal-bg: rgba(38, 157, 166, .16);
+    --bd-gray: #c3c3c6; --bd-gray-bg: rgba(195, 195, 198, .16);
+    --shadow: 0 10px 32px rgba(0, 0, 0, .45);
+    --sh-menu: 0 16px 60px rgba(0, 0, 0, .25);
+    --scrim: rgba(0, 0, 0, .56);
     color-scheme: dark;
   }
 }
@@ -68,7 +140,7 @@
    anyway, so it is scoped to `(pointer: coarse)`. */
 html { background: var(--side); height: 100%; overscroll-behavior-y: none; }
 @media (pointer: coarse) { html { overscroll-behavior-x: none; } }
-body { margin: 0; height: 100%; color: var(--text); background: var(--side); font: var(--fs-m)/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", Pretendard, system-ui, sans-serif; -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; }
+body { margin: 0; height: 100%; color: var(--text); background: var(--side); font: var(--fs-m)/1.5 var(--font), system-ui, sans-serif; -webkit-text-size-adjust: 100%; -webkit-font-smoothing: antialiased; }
 /* Korean: break between words, not inside them ("있어/요"); only a long path or URL breaks mid-way. */
 body, input, textarea, button { word-break: keep-all; overflow-wrap: anywhere; }
 button { font: inherit; color: inherit; background: none; border: 0; padding: 0; }
@@ -82,7 +154,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .app { display: grid; grid-template-rows: var(--top-h) 1fr; grid-template-columns: var(--side-w) 1fr; height: 100dvh; overflow: hidden; }
 .app.collapsed { grid-template-columns: var(--side-min) 1fr; }
 
-.topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 12px; background: var(--side); border-bottom: 1px solid var(--line); min-width: 0; }
+.topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; height: var(--top-h); padding: env(safe-area-inset-top) 6px 0; background: var(--side); box-shadow: inset 0 -1px 0 var(--line); min-width: 0; }
 .topbar .left { display: flex; align-items: center; gap: 2px; flex: none; }
 .icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--text-2); position: relative; }
 /* 21: a new build is up — noticeable before opening the menu to read why. */
@@ -131,12 +203,12 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .sdot.starting { background: var(--muted); animation: pulse 1.4s ease-in-out infinite; }
 .sdot.ended { background: var(--line); }
 @keyframes pulse { 50% { opacity: .35; } }
-.badge { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 4px; font-size: var(--fs-s); line-height: 18px; padding: 1px 8px; border-radius: 99px; white-space: nowrap; }
-.badge.idle { background: var(--green-soft); color: var(--green); }
-.badge.busy { background: var(--blue-soft); color: var(--blue); }
-.badge.waiting { background: var(--yellow-soft); color: var(--yellow); }
-.badge.starting, .badge.ended { background: var(--gray-soft); color: var(--muted); }
-.badge.auto { background: var(--accent-soft); color: var(--accent); }
+.badge { flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 0; font-size: var(--fs-badge-xs); line-height: var(--lh-badge-xs); font-weight: 600; padding: 3px 7px; border-radius: 9px; }
+.badge.idle { background: var(--bd-green-bg); color: var(--bd-green); }
+.badge.busy { background: var(--bd-blue-bg); color: var(--bd-blue); }
+.badge.waiting { background: var(--bd-yellow-bg); color: var(--bd-yellow); }
+.badge.starting, .badge.ended { background: var(--bd-gray-bg); color: var(--bd-gray); }
+.badge.auto { background: var(--bd-teal-bg); color: var(--bd-teal); }
 .badge .ic { width: 12px; height: 12px; }
 .list .empty-note { font-size: var(--fs-s); color: var(--muted); padding: 4px 12px 8px 34px; }
 .side-bottom { display: none; }
@@ -150,7 +222,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 
 /* ---------------------------------------------------------------- main */
 .main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg); }
-.subbar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 34px; padding: 6px var(--gutter); font-size: var(--fs-s); color: var(--muted); border-bottom: 1px solid var(--line); }
+.subbar { flex: none; display: flex; align-items: center; gap: 8px; min-height: 37px; padding: 6px 16px; font-size: var(--fs-s); color: var(--muted); border-bottom: 1px solid var(--line); }
 .subbar .meta { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .empty { flex: 1; display: grid; place-items: center; color: var(--muted); font-size: var(--fs-m); }
 .convo { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
@@ -269,7 +341,7 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 .activity .now pre { max-height: 200px; }
 
 /* ---------------------------------------------------------------- composer */
-.composer { flex: none; background: var(--bg); padding: 8px var(--gutter) calc(10px + env(safe-area-inset-bottom)); }
+.composer { flex: none; background: var(--bg); padding: 0 var(--gutter) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 /* 20: the on-screen keyboard already covers the home-indicator area, so its own safe-area padding would
    otherwise leave a blank strip between the input and the keyboard. */
 html.kbd-open .composer { padding-bottom: 10px; }
@@ -360,23 +432,23 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .todos .t.done { color: var(--muted); text-decoration: line-through; }
 .todos .t.now { color: var(--accent); font-weight: 600; }
 .waiting-note { display: flex; align-items: center; gap: 6px; font-size: var(--fs-s); color: var(--yellow); margin-bottom: 6px; }
-.chips { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 8px; scrollbar-width: none; }
+.chips { display: flex; gap: 6px; overflow-x: auto; margin: 6px 0; padding: 0 20px; scrollbar-width: none; }
 .chips::-webkit-scrollbar { display: none; }
-.chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 99px; background: var(--bg); font-size: var(--fs-s); color: var(--text-2); white-space: nowrap; text-decoration: none; }
+.chip { flex: none; display: inline-flex; align-items: center; gap: 5px; height: 32px; padding: 2px 11px; border: 0; border-radius: var(--r-pill); background: var(--chip-bg); color: var(--chip-text); font-size: var(--fs-s); font-weight: 600; }
 .chip:hover { background: var(--soft); }
 .chip .ic { width: 13px; height: 13px; }
-.chip.hot { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.chip.hot { background: var(--accent-soft); color: var(--accent); }
 /* 22: a trailing ```choices block's buttons, under the last answer only. */
 .choice-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; align-self: flex-start; margin: -4px 0 4px; }
 .choice-chips .chip-x { width: 24px; height: 24px; }
 .choice-chips .chip-x .ic { width: 14px; height: 14px; }
-.input-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line); border-radius: 16px; background: var(--card); padding: 6px; }
+.input-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line-strong); border-radius: var(--r-14); background: var(--bg); padding: 4px; box-shadow: var(--sh-xs); }
 .input-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 /* 20: a repeated identical send is held back once — this is what says "같은 메시지예요" without words alone. */
 .input-box.shake { animation: shake .3s; }
 @keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 @media (prefers-reduced-motion: reduce) { .input-box.shake { animation: none; } }
-#input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-m); line-height: 1.5; padding: 6px 4px; max-height: 140px; }
+#input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-m); line-height: 20px; padding: 8px 6px; max-height: 140px; caret-color: var(--accent); }
 #input::placeholder { color: var(--muted); }
 .send { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; }
 .send:disabled { opacity: .35; }
@@ -386,8 +458,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 /* ---------------------------------------------------------------- menus, sheets, toast */
 .scrim { position: fixed; inset: 0; z-index: 40; }
 .scrim.dim { background: var(--scrim); }
-.menu { position: fixed; z-index: 41; min-width: 220px; max-width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto; background: var(--card); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; font-size: var(--fs-m); }
-.menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 6px; text-align: left; color: var(--text); }
+.menu { position: fixed; z-index: var(--z-menu); min-width: 180px; max-width: min(66vw, 320px); max-height: 60vh; overflow-y: auto; scrollbar-width: none; background: var(--bg); border-radius: var(--r-20); box-shadow: var(--sh-menu); padding: 10px 20px; }
+.menu .mi { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 8px 0; border-radius: var(--r-8); text-align: left; color: var(--text); font-size: var(--fs-m); line-height: 22.5px; }
 .menu .mi:hover, .menu .mi:focus-visible { background: var(--hover); outline: none; }
 .menu .mi .ic { color: var(--muted); }
 .menu .mi.danger, .menu .mi.danger .ic { color: var(--red); }
@@ -396,12 +468,12 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .menu .sep { height: 1px; background: var(--line); margin: 4px 6px; }
 .menu .mhead { font-size: var(--fs-s); color: var(--muted); padding: 6px 10px 2px; }
 /* Phone: the same menu, as a sheet from the bottom. On a PC, a sheet sits in the middle at 640px. */
-.menu.sheet { left: 0; right: 0; bottom: 0; top: auto; max-width: none; width: 100%; border-radius: 14px 14px 0 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)); max-height: 80vh; }
+.menu.sheet { left: 10px; right: 10px; bottom: 10px; top: auto; max-width: none; width: calc(100% - 20px); border-radius: var(--r-28); padding: 0 8px calc(16px + env(safe-area-inset-bottom)); }
 .menu.sheet .mi { min-height: 44px; }
 .menu.sheet::before { content: ""; display: block; width: 36px; height: 4px; border-radius: 2px; background: var(--line); margin: 2px auto 6px; }
 @media (min-width: 900px) { .menu.sheet { left: 50%; right: auto; width: 640px; transform: translateX(-50%); } }
 
-.toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 60; display: inline-flex; align-items: center; gap: 8px; background: var(--text); color: var(--bg); font-size: var(--fs-m); padding: 8px 14px; border-radius: 10px; box-shadow: var(--shadow); max-width: calc(100vw - 32px); }
+.toast { position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: var(--z-toast); display: inline-flex; align-items: center; gap: 12px; padding: 14px 20px; border-radius: var(--r-pill); background: rgba(78, 89, 104, .92); color: #fff; font-size: var(--fs-m); font-weight: 600; backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); max-width: calc(100vw - 40px); }
 .toast .ic { width: 15px; height: 15px; }
 
 /* ---------------------------------------------------------------- phone */
