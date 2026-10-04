@@ -347,6 +347,11 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .chip.pr-missing { color: var(--muted); opacity: .7; }
 .codebox .add { color: var(--green); }
 .codebox .del { color: var(--red); }
+.row { position: relative; background: var(--side); transition: transform .18s ease; }
+.swipe-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; width: 168px; }
+.swipe-actions button { flex: 1; border: 0; color: #fff; font: inherit; }
+.swipe-actions .sw-exit { background: var(--red); }
+.swipe-actions .sw-more { background: var(--muted); }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

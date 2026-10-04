@@ -1027,6 +1027,26 @@ for (const [label, size, phone] of [
   }
 }
 
+// 56: on a phone, a swipe to the left uncovers the red end button and 더보기 (10 px starts it).
+{
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  const page = await ctx.newPage()
+  await page.goto(base + '/')
+  await page.waitForSelector('.row[data-thread]', { timeout: 5000 }).catch(() => {})
+  const swiped = await page.evaluate(() => {
+    const row = document.querySelector('.row[data-thread]') as HTMLElement
+    const r = row.getBoundingClientRect()
+    const x0 = r.right - 30
+    const y0 = r.top + r.height / 2
+    const t = (x: number) => new Touch({ identifier: 1, target: row, clientX: x, clientY: y0 })
+    row.dispatchEvent(new TouchEvent('touchstart', { touches: [t(x0)], bubbles: true }))
+    row.dispatchEvent(new TouchEvent('touchmove', { touches: [t(x0 - 40)], bubbles: true }))
+    return row.classList.contains('swiped') && !!row.querySelector('.swipe-actions .sw-more')
+  })
+  check('56: 폰에서 밀면 종료·더보기 버튼이 드러난다', swiped)
+  await ctx.close()
+}
+
 await browser.close()
 server.close()
 localServer.close()

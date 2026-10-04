@@ -850,7 +850,8 @@ function liveRow(s, groupId) {
     row.querySelector('.sub.last').textContent = last
     row.querySelector('.sub.where').textContent = `${folderOf(s.cwd)} · ${ago(s.lastAt)}`
   }
-  wireRow(row, () => open(s.thread), (at) => openMenu(at, sessionItems(s)))
+  const endItem = sessionItems(s).find((i) => i.label === '종료')
+  wireRow(row, () => open(s.thread), (at) => openMenu(at, sessionItems(s)), { exit: endItem ? { label: '종료', run: endItem.run } : undefined })
   if (groupId === null) row.dataset.loose = '1'
   if (hasMouse) {
     row.draggable = true
@@ -871,19 +872,42 @@ function plainRow(o, onOpen, onMenu) {
   row.querySelector('.when').textContent = o.when || ''
   row.querySelector('.sub.last').textContent = o.sub || ''
   row.querySelector('.sub.where').textContent = o.where || ''
-  wireRow(row, onOpen, onMenu)
+  wireRow(row, onOpen, onMenu, { exit: o.exit })
   return row
 }
 
 // Click opens; right-click (PC), a long press or a swipe to the left (phone) opens the row's menu.
-function wireRow(row, onOpen, onMenu) {
-  row.addEventListener('click', onOpen)
+function wireRow(row, onOpen, onMenu, { exit } = {}) {
+  // On a phone a swipe to the left uncovers two buttons (56): 종료 (or 삭제) in red, and 더보기 for the menu.
+  // A tap on the open row closes it instead of opening.
+  const phoneSwipe = isPhone() && !hasMouse
+  let strip = null
+  const closeStrip = () => {
+    row.classList.remove('swiped')
+    row.style.transform = ''
+  }
+  const showStrip = () => {
+    if (!strip) {
+      strip = document.createElement('div')
+      strip.className = 'swipe-actions'
+      strip.innerHTML = `${exit ? `<button type="button" class="sw-exit">${esc(exit.label)}</button>` : ''}<button type="button" class="sw-more">더보기</button>`
+      strip.querySelector('.sw-exit')?.addEventListener('click', (e) => (e.stopPropagation(), closeStrip(), exit.run()))
+      strip.querySelector('.sw-more').addEventListener('click', (e) => (e.stopPropagation(), closeStrip(), onMenu(null)))
+      row.append(strip)
+    }
+    row.classList.add('swiped')
+    row.style.transform = `translateX(-${exit ? 168 : 84}px)`
+  }
+  row.addEventListener('click', (e) => {
+    if (row.classList.contains('swiped')) return (e.preventDefault(), e.stopPropagation(), closeStrip())
+    onOpen()
+  })
   row.addEventListener('keydown', (e) => e.key === 'Enter' && onOpen())
   row.addEventListener('contextmenu', (e) => {
     e.preventDefault()
     onMenu({ x: e.clientX, y: e.clientY })
   })
-  longPress(row, () => onMenu(null), { swipeLeft: true })
+  longPress(row, () => onMenu(null), { swipeLeft: phoneSwipe ? false : true, onSwipe: phoneSwipe ? showStrip : undefined })
 }
 
 /**
@@ -892,7 +916,7 @@ function wireRow(row, onOpen, onMenu) {
  * would open the session, on the sheet's backdrop it would close the menu just opened; and one that never comes
  * must not eat the next real tap.
  */
-function longPress(el, onPress, { swipeLeft = false } = {}) {
+function longPress(el, onPress, { swipeLeft = false, onSwipe } = {}) {
   let timer = null
   let x0 = 0
   let y0 = 0
@@ -910,11 +934,17 @@ function longPress(el, onPress, { swipeLeft = false } = {}) {
     x0 = e.touches[0].clientX
     y0 = e.touches[0].clientY
     cancel()
-    timer = setTimeout(fire, 500)
+    timer = setTimeout(fire, 450) // 56: a long press is 450 ms
   }, { passive: true })
   el.addEventListener('touchmove', (e) => {
     const dx = e.touches[0].clientX - x0
     const dy = e.touches[0].clientY - y0
+    if (onSwipe && dx < -10 && Math.abs(dy) < 20 && Math.abs(dx) > Math.abs(dy) && !fired) {
+      fired = true
+      cancel()
+      onSwipe()
+      return
+    }
     if (swipeLeft && dx < -60 && Math.abs(dy) < 30 && !fired) return fire()
     if (Math.hypot(dx, dy) > 10) cancel()
   }, { passive: true })

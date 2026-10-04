@@ -2725,7 +2725,8 @@ cache-control: no-store
   10. 57: 칩 순서(붙여넣기·스킬·/btw·화면·/compact·/context·/clear), 사진 첨부 라벨과 여덟 장 비활성, 사진은 늘 1,568 px 로 줄임, 입력칸 안내, ↑↓ 기록은 대화 기록에서(없으면 기기 목록), `보낸 것 취소` 칩, 새 세션 폴더 경로 자동 완성(250 ms, 여덟 개, ↑↓·Tab·Enter), ⌘K 안내 문구와 줄 설명(상태·폴더·첫 메시지).
 - 마무리 라운드에서 추가: 47 항목별 삭제(`POST /api/archives/delete`), 지난 기록을 창에서 읽기. 48 잘못 보냄은 마지막 웹 메시지에만, 휴지통 확인 창에 브랜치. 50 origin 호스트 자동 인식, 초안·없음 칩 색. 52 카드가 1초마다 대기 시간을 갱신. 53 동시성 그래프·요일×시 히트맵. 55 코드 블록 diff 색, 끝난 빈 대화 문구. 56 폰 구역 머리 문구. 57 AGENTS.md 칩(`GET /api/session/<pid>/agents-md`).
 - 다음 라운드에서 한 것: 57 보낸 그림의 말풍선용 썸네일(긴 변 360 px, JPEG 0.7)을 `images[].thumb` 으로 함께 보낸다. 55 권한 카드에 '항상 허용하면 `<규칙>` 규칙이 기록돼요'.
-- 아직 안 된 것: 55 대화 행의 칩 구성은 명세가 모호해 그대로 두었다. 56 밀기·꾹 누르기는 기존 구현을 확인하지 않았다.
+- 마지막 정리: 56 폰 행 밀기는 종료(또는 삭제)·더보기 두 버튼을 드러내고, 꾹 누르기는 450 ms·10 px 취소. 55 '대화 행 칩'은 끝난 세션 입력칸 칩(이 대화 이어서 하기)과 대기 사유 배지 라벨(WAITING_LABEL)로 구현했다고 본다.
+- 남은 확인: 실제 기기에서의 제스처 체감, 실제 Claude·Slack 세션 동작(흘려 보이기 속도, 번호 다이얼로그 Esc, --permission-mode, 스레드 정보 권한, PR 페이지).
 - 수용 기준: AC-181
 - 근거: `src/web/app.js`(위 항목), `src/pr-view.ts`, `src/stats.ts` `prSummary`, `src/broker.ts` `webPrView`·`webStatsWithPr`·`yesNoOf`, `src/admin.ts` `/api/pr-view`
 - 추적: REQ-F-101, REQ-F-103, REQ-F-104, REQ-F-106, REQ-F-107, REQ-F-108, REQ-F-110
