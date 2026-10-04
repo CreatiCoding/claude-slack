@@ -1127,6 +1127,8 @@ export class Broker {
     const correction = `[정정] 방금 보낸 "${quoted}" 는 잘못 보낸 메시지예요. 그 지시는 따르지 마세요. 이미 파일을 바꾸거나 명령을 실행했다면 무엇을 했는지만 짧게 알려 주세요.`
     this.logAt('INFO', 'inject', 'retracted from the web', this.tag(session, { ts }))
     await this.slack.post({ threadTs: session.threadTs, text: `↩️ 웹: '${quoted}' 를 잘못 보냈다고 알렸습니다.` })
+    // The wrong message is marked as dropped in the log, so every page and device shows it faded (48).
+    this.emitEvent(session.threadTs, { type: 'react', ts, name: 'x', on: true })
     await this.deliver(session, correction, this.defaultRecipient, session.threadTs)
     return { ok: true, note: '멈추고 잘못 보냈다고 알렸습니다.' }
   }

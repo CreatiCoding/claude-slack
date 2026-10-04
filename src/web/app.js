@@ -1763,6 +1763,8 @@ function userEl(row) {
     el.firstElementChild.after(t)
   }
   if (!ev.text) el.firstElementChild.remove()
+  // A message taken back (48) is faded, whichever page or device it is read on.
+  if (view.reacts.get(ev.ts)?.has('x')) el.classList.add('dropped')
   if (ev.images?.length) el.insertAdjacentHTML('afterbegin', imagesHtml(ev.images))
   const via = ev.via === 'terminal' ? `<span title="터미널에서 입력">${icon('keyboard')}</span>` : ev.via === 'slack' ? `<span title="Slack 에서 보냄">${icon('chat')}</span>` : ''
   const set = view.reacts.get(ev.ts)
