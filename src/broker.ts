@@ -2433,7 +2433,13 @@ export class Broker {
       const who = this.wantsMention(session, 'all') ? `<@${session.recipient || this.defaultRecipient}> ` : ''
       const parts = chunk(toMrkdwn(stripped))
       this.emitEvent(session.threadTs, { type: 'text', text: stripped, ...(choices ? { choices } : {}) })
-      for (const [i, part] of parts.entries()) await this.quietSlack.post({ threadTs: session.threadTs, text: i === 0 ? who + part : part })
+      // A turn no person started (a stop-hook continuation, 3-4) that says what the last answer said is not posted
+      // to Slack again: the page keeps it, the thread does not get a second copy.
+      const key = stripped.replace(/[\s*_`#>-]+/g, ' ').trim().slice(0, 200)
+      const repeat = !session.triggerTs && !choices && !!key && key === session.lastPostedKey
+      session.lastPostedKey = key
+      if (repeat) this.logAt('INFO', 'stream', 'repeat of the last answer from a turn no person started: not posted again', this.tag(session))
+      else for (const [i, part] of parts.entries()) await this.quietSlack.post({ threadTs: session.threadTs, text: i === 0 ? who + part : part })
       if (choices) {
         session.lastChoices = choices
         const cb = choiceBlocks(session.pid, choices, this.mentionFor(session, 'decision'))

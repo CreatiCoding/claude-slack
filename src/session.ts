@@ -76,6 +76,8 @@ export interface Session {
   codingTurn?: boolean
   /** Background work still running after the turn ended: its titles (75). */
   bgTitles?: string[]
+  /** The last answer posted to the thread, normalised to 200 characters (3-4). */
+  lastPostedKey?: string
   /** The timer that reads the background list again while work runs (11). */
   bgTimer?: ReturnType<typeof setTimeout>
   /** The PR review loop is running (75): a Skill call for it, until its round says clean or abort. */
