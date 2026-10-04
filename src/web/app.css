@@ -156,12 +156,12 @@ strong, b, em, code, a { display: inline; vertical-align: baseline; }
 
 .topbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; height: var(--top-h); padding: env(safe-area-inset-top) 6px 0; background: var(--side); box-shadow: inset 0 -1px 0 var(--line); min-width: 0; }
 .topbar .left { display: flex; align-items: center; gap: 2px; flex: none; }
-.icon-btn { width: 32px; height: 32px; display: inline-grid; place-items: center; border-radius: 8px; color: var(--text-2); position: relative; }
+.icon-btn { width: 36px; height: 36px; display: inline-grid; place-items: center; border-radius: var(--r-8); color: var(--text-2); position: relative; }
 /* 21: a new build is up — noticeable before opening the menu to read why. */
 .icon-btn.dot::after { content: ""; position: absolute; top: 4px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--bg); }
 .icon-btn:hover { background: var(--hover); }
 .icon-btn:disabled { opacity: .35; }
-.icon-btn .ic { width: 18px; height: 18px; }
+.icon-btn .ic { width: 20px; height: 20px; }
 .topbar .title { flex: 1; min-width: 0; text-align: center; font-size: var(--fs-l); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; padding: 4px 10px; border-radius: 8px; }
 .topbar .title:not(:disabled):hover { background: var(--hover); }
 .topbar .right { flex: none; display: flex; }
@@ -479,7 +479,8 @@ html.kbd-open .composer { padding-bottom: 10px; }
 @media (prefers-reduced-motion: reduce) { .input-box.shake { animation: none; } }
 #input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: inherit; font-size: var(--fs-m); line-height: 20px; padding: 8px 6px; max-height: 140px; caret-color: var(--accent); }
 #input::placeholder { color: var(--muted); }
-.send { flex: none; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.send { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: #fff; }
+.send:disabled { background: var(--line-strong); cursor: default; opacity: 1; }
 .send:disabled { opacity: .35; }
 .jump { position: absolute; left: 0; right: 0; bottom: 8px; display: flex; justify-content: center; pointer-events: none; }
 .jump button { pointer-events: auto; display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 99px; background: var(--card); border: 1px solid var(--line); font-size: var(--fs-s); box-shadow: var(--shadow); }
@@ -665,3 +666,6 @@ button:active:not(:disabled) { transform: scale(.9); transition: transform .2s c
 .gauge .tip .g-line { display: block; font-size: var(--fs-s); color: var(--text-2); }
 .g-folder { display: inline-flex; align-items: center; gap: 4px; max-width: 50%; color: var(--muted); font-size: 11px; background: none; border: 0; padding: 0; overflow: hidden; }
 .g-folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sec-head.group { margin-top: 14px; }
+.sec-head:not(.open) .tw { transform: rotate(0deg); }
+.sec-head .tw { transition: transform var(--t-fast) var(--ease); }
