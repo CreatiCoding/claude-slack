@@ -212,6 +212,7 @@ await new Promise<void>((r) => server.listen(0, '127.0.0.1', r))
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`
 
 let failed = 0
+const STATE_ENDED = '종료됨'
 const check = (name: string, cond: unknown, detail = '') => {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${cond ? '' : ' ' + detail}`)
   if (!cond) failed++
@@ -665,7 +666,7 @@ for (const [label, size, phone] of [
   liveText = '지금 쓰는 중인 글의 앞부분이고\n이어지는 둘째 줄'
   await page.waitForSelector('#activity .tail', { timeout: 5000 }).catch(() => {})
   await page.waitForFunction(() => (document.querySelector('#activity .tail')?.textContent ?? '').includes('둘째 줄'), null, { timeout: 5000 }).catch(() => {})
-  check(`${label}: 쓰는 중 미리보기`, ((await page.locator('#activity .txt').textContent()) ?? '').includes('쓰는 중') && ((await page.locator('#activity .tail').textContent()) ?? '').includes('둘째 줄'))
+  check(`${label}: 쓰는 중 미리보기(머리글 없이 답 모양으로)`, !((await page.locator('#activity').textContent()) ?? '').includes('쓰는 중…') && ((await page.locator('#activity .tail').textContent()) ?? '').includes('둘째 줄'))
   await page.screenshot({ path: join(tmpdir(), `qa-web-${phone ? 'phone' : 'pc'}-busy.png`) })
   liveText = ''
   events.emit(B, { type: 'text', text: '다 쓴 답' })
@@ -915,6 +916,19 @@ for (const [label, size, phone] of [
   const cls = await page.evaluate(() => (window as unknown as { __cls: number }).__cls)
   console.log(`36: CLS 실측(PC, 긴 대화 ${C}, 이벤트 ${1600 * 4}개) = ${cls.toFixed(4)}`)
   check('36: 대화를 여는 동안의 레이아웃 이동(CLS) < 0.1(권장 임계)', cls < 0.1, String(cls))
+  await ctx.close()
+}
+
+// 34: a record that says "ended" for a session the list still shows as alive is not the end — the list decides.
+{
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 820 } })
+  const page = await ctx.newPage()
+  const alive = sessions.find((x) => x.thread === A)!
+  events.emit(alive.thread, { type: 'end', ts: alive.thread, why: '기록상 끝남' } as never)
+  await page.goto(base + '/#' + A)
+  await page.waitForSelector('#badge')
+  await settle(page, 600)
+  check('34: 기록에 ended 가 있어도 목록에 살아 있는 세션이면 산 세션으로 그린다', !((await page.locator('#badge').textContent()) ?? '').includes(STATE_ENDED), (await page.locator('#badge').textContent()) ?? '')
   await ctx.close()
 }
 

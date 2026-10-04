@@ -1975,7 +1975,7 @@ function renderActivity() {
     box.innerHTML = running
       ? `<div class="ahead" role="button" tabindex="0" aria-expanded="false">${icon('chevron')}<span class="txt"></span><span class="secs"></span></div>`
       : live
-        ? `<div class="ahead">${icon('edit')}<span class="txt">쓰는 중…</span><span class="secs"></span></div><div class="tail md"></div><div class="think-sub" hidden>${icon('spark')}<span>생각 중</span> <span class="think-secs"></span></div>`
+        ? `<div class="tail md"></div><div class="think-sub" hidden>${icon('spark')}<span>생각 중</span> <span class="think-secs"></span></div>`
         : `<div class="ahead">${icon('spark')}<span class="txt">생각 중…</span><span class="secs"></span></div>`
     if (running) {
       box.querySelector('.txt').textContent = `도구 실행 중 · ${takeEmoji(running.ev.title).rest}`
@@ -1993,7 +1993,8 @@ function renderActivity() {
     }
   }
   box.hidden = false
-  box.querySelector('.secs').textContent = `· ${secs}초`
+  const secsEl = box.querySelector('.secs') // the 쓰는 중 view has none: its text is the answer itself (15)
+  if (secsEl) secsEl.textContent = `· ${secs}초`
   if (live) {
     typeInto(box.querySelector('.tail'), live)
     const sub = box.querySelector('.think-sub')
@@ -2021,6 +2022,11 @@ function closeOpenMarkup(s) {
 // reference implementation's own constants, which this codebase does not have access to.
 let typed = ''
 let typing = null
+// Pace (39): the reveal runs at the speed the text actually arrives — characters per ms, smoothed
+// (previous 0.6 + new 0.4, never below 0.02) — and a backlog is caught up within 1,200 ms.
+let paceRate = 0
+let paceAt = 0
+let paceLen = 0
 function typeInto(el, target) {
   if (!el) return
   let keep = typed
@@ -2031,6 +2037,14 @@ function typeInto(el, target) {
   }
   const firstReveal = keep === ''
   typed = keep
+  const now = performance.now()
+  if (target.length > paceLen && paceAt) {
+    const fresh = (target.length - paceLen) / Math.max(1, now - paceAt)
+    paceRate = paceRate ? 0.6 * paceRate + 0.4 * fresh : fresh
+  }
+  paceLen = target.length
+  paceAt = now
+  paceRate = Math.max(paceRate, 0.02)
   const draw = () => (el.innerHTML = md(closeOpenMarkup(typed)))
   draw()
   cancelAnimationFrame(typing)
@@ -2041,9 +2055,14 @@ function typeInto(el, target) {
     draw()
     return
   }
-  const step = () => {
+  let last = performance.now()
+  const step = (t) => {
     if (typed.length >= target.length) return
-    typed = target.slice(0, typed.length + Math.max(1, Math.ceil((target.length - typed.length) / 20)))
+    const elapsed = Math.max(0, t - last)
+    last = t
+    const backlog = target.length - typed.length
+    const advance = Math.max(paceRate * elapsed, (backlog * elapsed) / 1200)
+    typed = target.slice(0, typed.length + Math.min(backlog, Math.max(1, Math.ceil(advance))))
     draw()
     typing = requestAnimationFrame(step)
   }
@@ -2356,8 +2375,8 @@ $('btn-send').addEventListener('click', sendNow)
 /**
  * Shown the instant "보내기" is pressed, before the broker has echoed the message back over SSE (17):
  * otherwise a slow connection left the composer looking like nothing happened for up to a second. Dropped
- * once a matching real `user` event arrives (apply(), case 'user'), on failure, or after 5,000 ms with no
- * match (a `/`·`!` command, say, that never comes back as a `user` row).
+ * once a matching real `user` event arrives (apply(), case 'user'), at once on failure, or 5,000 ms after the
+ * send was accepted with no match (a `/`·`!` command, say, that never comes back as a `user` row).
  */
 let optimistic = null
 function showOptimisticBubble(text, imageCount) {
@@ -2368,7 +2387,8 @@ function showOptimisticBubble(text, imageCount) {
   el.firstElementChild.textContent = text || `이미지 ${imageCount}장`
   $('log').append(el)
   if (stuck) scrollToBottom()
-  optimistic = { text, after: thread(current).last, el, timer: setTimeout(dropOptimisticBubble, 5000) }
+  optimistic = { text, after: thread(current).last, el, timer: null }
+  return optimistic
 }
 function dropOptimisticBubble() {
   if (!optimistic) return
@@ -2407,15 +2427,17 @@ async function sendNow() {
   saveDraft()
   histIndex = null
   if (text && hist.at(-1) !== text) store.set('history:' + current, [...hist, text].slice(-50))
-  showOptimisticBubble(text, pics.length)
-  if (!(await sendText(s, text, pics))) {
-    dropOptimisticBubble()
-    if (!input.value) input.value = keep // not if something new was typed meanwhile
-    pending.set(current, pics)
-    renderPending()
-    autosize()
-    saveDraft()
+  const bubble = showOptimisticBubble(text, pics.length)
+  if (await sendText(s, text, pics)) {
+    if (optimistic === bubble) bubble.timer = setTimeout(dropOptimisticBubble, 5000)
+    return
   }
+  dropOptimisticBubble()
+  if (!input.value) input.value = keep // not if something new was typed meanwhile
+  if (!pending.get(current)?.length) pending.set(current, pics) // not over pictures picked meanwhile
+  renderPending()
+  autosize()
+  saveDraft()
 }
 async function sendText(s, text, pics = []) {
   // `/btw` answers from the screen, which the broker's :btw reads back; typed raw it would stay in the terminal.
