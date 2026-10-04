@@ -5228,6 +5228,7 @@ export class Broker {
   private async endSession(session: Session, why: string): Promise<void> {
     if (session.ended) return
     session.ended = true
+    session.reviewLoop = undefined // the loop ends with the session (75)
     this.archiveEnded(session)
     this.logAt('INFO', 'session', `ended: ${why}`, this.tag(session, { held: session.held?.length ?? 0 }))
     this.clearStall(session)
