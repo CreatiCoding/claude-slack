@@ -72,6 +72,8 @@ export interface Session {
   /** Watchdog: fires when a busy session shows no transcript activity for a while. */
   stallTimer?: ReturnType<typeof setTimeout>
   stallSince?: number
+  /** This turn wrote code (Edit, MultiEdit, Write, NotebookEdit): the list shows 코딩 중 (75). */
+  codingTurn?: boolean
   /** The dialog already surfaced for this screen, so it is not posted twice. */
   stallShown?: string
   /** The "still working" notice for this turn, edited in place instead of reposted. */

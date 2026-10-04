@@ -96,6 +96,10 @@ export interface WebSession {
   /** The newest message in the thread (this broker run), and whether the person said it. */
   last?: { text: string; mine: boolean }
   /** The status line's context use, as a percentage text (43). Falls back to the terminal's reading. */
+  /** 75: the list's state beside the badge: 코딩 중 while a turn writes code. */
+  coding?: boolean
+  /** 75: background work still running after the turn ended (titles). */
+  background?: string[]
   context?: string
   /** The context window and what it holds: `used` is rounded to 1,000 tokens (43). */
   contextWindow?: { size: number; used: number }
@@ -390,6 +394,8 @@ const WEB_IMAGES_MAX = 8
 const BUILTIN_DEFAULT_PROMPT = '나는 한국어를 읽어. 페이지에 보이는 글은 모두 한국어로 써 줘: 최종 답, 도구를 쓰는 사이사이 쓰는 짧은 설명, reply 메시지까지. 코드·명령·파일 경로·식별자·인용한 출력은 원래 그대로 둬.'
 /** Claude Code's own permission modes (the ones `--permission-mode` takes). */
 const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto']
+/** Tools that write code: a turn using one is 코딩 중 in the list (75). */
+const CODING_TOOLS = new Set(['Edit', 'MultiEdit', 'Write', 'NotebookEdit'])
 /** How many just-ended sessions the list keeps (43). */
 const RECENT_ENDED_MAX = 10
 /** A turn quiet this long shows as 'no new output' (43, §4.3.3). */
@@ -908,6 +914,7 @@ export class Broker {
         canKeys: !!s.pane,
         autoAllow: !!s.autoAllow,
         ...(s.resting ? { resting: true } : {}),
+        ...(s.codingTurn && s.turn ? { coding: true } : {}),
         ...(s.refreshAfter ? { refreshAfter: true } : {}),
         ...(this.pluginsFor(s) ? { plugins: this.pluginsFor(s) } : {}),
         lastSeq: this.events.last(s.threadTs),
@@ -2505,6 +2512,7 @@ export class Broker {
           await this.showTodos(session, parseTodos(ev.input))
           break
         }
+        if (CODING_TOOLS.has(ev.name)) session.codingTurn = true
         this.emitEvent(session.threadTs, { type: 'tool', id: ev.id, name: ev.name, title: activityLine(ev.name, ev.input, session.cwd).replace(/`/g, ''), ...(activityDetails(ev.name, ev.input) ? { detail: activityDetails(ev.name, ev.input) } : {}) })
         // Summary view: the answer and the decisions, no cards. The tool is still tracked as in flight.
         if (view === 'summary') {
@@ -2598,6 +2606,7 @@ export class Broker {
   }
 
   private async beginTurn(session: Session, recipient: string): Promise<void> {
+    session.codingTurn = undefined
     if (session.turn) {
       await session.turn.end()
       session.turn = undefined

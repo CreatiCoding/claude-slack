@@ -613,6 +613,8 @@ function waitedFor(s) {
 function badgeHtml(s) {
   // Put to rest and not working: a grey 휴면 badge (45).
   if (s.resting && s.state !== 'busy') return `<span class="badge resting">휴면</span>`
+  // 코딩 중 (75): a busy turn that writes code says so; waiting on a person still wins.
+  if (s.coding && s.state === 'busy') return `<span class="badge busy">코딩 중</span>`
   const text = s.state === 'waiting' ? (isPhone() ? s.waiting || STATE.waiting : waitedFor(s)) : STATE[s.state] || s.state
   return `<span class="badge ${s.state}">${esc(text)}</span>`
 }
