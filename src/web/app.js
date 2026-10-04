@@ -2569,7 +2569,9 @@ function prefill(text) {
 }
 async function command(s, cmd) {
   try {
-    await api('/api/action', { actionId: 'ctl_btn_web', value: `${s.pid}:${cmd}` })
+    // The result of the command comes back as a toast (42), not only as a line in the conversation.
+    const r = await api('/api/action', { actionId: 'ctl_btn_web', value: `${s.pid}:${cmd}` })
+    if (r?.note && r.note !== '눌렀어요') toast(r.note)
   } catch (err) {
     toast(err.message, 'err')
   }
