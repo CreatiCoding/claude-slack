@@ -3359,7 +3359,9 @@ function openFinder() {
   const draw = () => {
     const t = q.value.trim().toLowerCase()
     const found = sessions.filter((s) => !t || [nameOf(s), STATE[s.state], s.waiting, s.cwd, s.preview].some((v) => (v || '').toLowerCase().includes(t)))
-    items = [{ label: '새 세션', icon: 'plus', run: newSession }, ...found.map((s) => ({ label: nameOf(s), sub: `${STATE[s.state] ?? ''} · ${folderOf(s.cwd)} · ${s.preview ?? ''}`.slice(0, 120), icon: 'chat', run: () => open(s.thread) }))]
+    // Only sessions not finished (73); the new-session line only when the search asks for it.
+    const open_ = found.filter((x) => !x.ended && x.state !== 'ended')
+    items = [...(!t || '새 세션'.includes(t) ? [{ label: '새 세션', icon: 'plus', run: newSession }] : []), ...open_.map((s) => ({ label: nameOf(s), sub: `${STATE[s.state] ?? ''} · ${folderOf(s.cwd)} · ${s.preview ?? ''}`.slice(0, 120), icon: 'chat', run: () => open(s.thread) }))]
     sel = Math.max(0, Math.min(sel, items.length - 1))
     const box = el.querySelector('.finder-list')
     box.innerHTML = ''
@@ -3381,7 +3383,8 @@ function openFinder() {
   q.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
       e.preventDefault()
-      sel = (sel + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length
+      // Stops at the ends, it does not wrap (73).
+      sel = Math.max(0, Math.min(items.length - 1, sel + (e.key === 'ArrowDown' ? 1 : -1)))
       draw()
     } else if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault()
