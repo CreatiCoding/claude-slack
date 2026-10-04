@@ -174,6 +174,8 @@ export function _resetAuthStateForTests(): void {
 
 /** When screen errors came in, over the last minute. */
 const clientErrorTimes: number[] = []
+/** What this broker can do for the page, sent in hello (60). */
+const WEB_TOOLS = ['screen', 'btw', 'stats', 'trash', 'pr-view', 'fork', 'lightfork', 'resting', 'notices']
 /** The web app's files, served as they are: no build step. */
 const WEB_FILES: Record<string, string> = {
   '/': 'index.html',
@@ -421,7 +423,7 @@ async function handle(req: IncomingMessage, res: ServerResponse, api: AdminApi, 
     const me: { thread: string | null; live?: string; thinking?: boolean; write?: typeof write } = { thread: null, write }
     streams.set(conn, me)
     // What this broker can do, from its settings, not from the address the page was opened on (60).
-    write('hello', { conn, webHash: WEB_HASH, caps: { phoneAccess: !!opts?.publicUrl, tools: [] } })
+    write('hello', { conn, webHash: WEB_HASH, caps: { phoneAccess: !!opts?.publicUrl, tools: WEB_TOOLS } })
     const offEvent = api.events.subscribe((thread, ev) => {
       if (me.thread === thread) write('ev', { thread, ev }, `ev:${ev.type}`)
     })
