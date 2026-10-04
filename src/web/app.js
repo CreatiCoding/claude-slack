@@ -1039,7 +1039,7 @@ function previewResume(r) {
   win.querySelector('[data-act="go"]').addEventListener('click', () => (close(), resume(r, { confirmed: true })))
   document.body.append(win)
 }
-async function resume(r, { confirmed = false } = {}) {
+async function resume(r, { confirmed = false, fromEnded = false } = {}) {
   // Started from the preview (47) it needs no second question; a press anywhere else still asks (19).
   if (!confirmed && !(await askDialog({ title: '이 대화를 이어서 할까요?', body: r.title || folderOf(r.cwd), ok: '이어서 하기' }))) return
   try {
@@ -1049,7 +1049,7 @@ async function resume(r, { confirmed = false } = {}) {
     } catch (err) {
       // Already alive (71): the broker answers with the thread; go there instead of stopping at the error.
       if (!err.data?.thread) throw err
-      res = { thread: err.data.thread, note: '이미 살아 있는 대화예요. 그 세션으로 갈게요' }
+      res = { thread: err.data.thread, note: fromEnded ? '이 대화는 살아 있어요. 다시 열게요' : '이미 살아 있는 대화예요. 그 세션으로 갈게요' }
     }
     toast(res.note)
     if (res.thread) {
@@ -2604,7 +2604,7 @@ function renderComposerBits() {
     const note = document.createElement(back ? 'button' : 'span')
     note.className = back ? 'chip hot' : 'hint'
     note.textContent = back ? '이 대화 이어서 하기' : '끝난 세션이에요'
-    if (back) note.addEventListener('click', () => resume(back))
+    if (back) note.addEventListener('click', () => resume(back, { fromEnded: true }))
     chips.append(note)
     return
   }
