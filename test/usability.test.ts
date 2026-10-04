@@ -346,11 +346,11 @@ test(':esc 는 멈췄는지 확인해서 말한다', async () => {
   await hook(t.socketPath, 100, { hook_event_name: 'SessionStart', source: 'startup' }, t.transcript)
   t.tmux.screen = '⏺ 답\n\n❯ \n'
   await t.broker.handleSlackMessage({ user: 'U1', text: ':esc', ts: '9.1', threadTs: s.ack, channel: 'C1' })
-  assert.match(t.slack.posts.at(-1)!.text, /이미 유휴 상태/)
+  assert.match(t.slack.posts.at(-1)!.text, /이미 쉬고 있었어요/)
   // Idle with unsent text in the box is still idle, and worth saying (live QA reported "still working" here).
   t.tmux.screen = '⏺ 답\n\n❯ 취소, 다시 실행 안 해도 돼\n'
   await t.broker.handleSlackMessage({ user: 'U1', text: ':esc', ts: '9.15', threadTs: s.ack, channel: 'C1' })
-  assert.match(t.slack.posts.at(-1)!.text, /이미 유휴 상태.*보내지 않은 글/)
+  assert.match(t.slack.posts.at(-1)!.text, /이미 쉬고 있었어요.*보내지 않은 글/)
 
   await t.broker.handleSlackMessage({ user: 'U1', text: 'go', ts: '9.2', threadTs: s.ack, channel: 'C1' })
   t.tmux.screen = '  ⎿  Interrupted · What should Claude do instead?\n\n❯ \n'

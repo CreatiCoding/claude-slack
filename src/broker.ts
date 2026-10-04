@@ -3195,7 +3195,7 @@ export class Broker {
     if (!s.refreshAfter) return void (await c.ack('예약된 새로고침이 없어요'))
     s.refreshAfter = undefined
     this.logAt('INFO', 'session', 'scheduled refresh cancelled', this.tag(s))
-    await c.post('↩️ 새로고침 예약을 취소했어요')
+    await c.post('새로고침 예약을 취소했어요')
     this.changed()
     // What was held for the relaunch goes now, as it would have without the reservation.
     await this.releaseHeldIfIdle(s, 'refresh cancelled', { drain: true })
@@ -3218,7 +3218,7 @@ export class Broker {
       if (tasks.length && !s.refreshWaitNoted) {
         // Said once, not on every look a minute later (42).
         s.refreshWaitNoted = true
-        await this.slack.post({ threadTs: s.threadTs, text: `🔄 백그라운드 작업 ${tasks.length}개가 끝나면 새로고침할게요 · ${truncate(tasks[0]!.label, 80)}` }).catch(() => {})
+        await this.slack.post({ threadTs: s.threadTs, text: `🔄 작업과 백그라운드 작업이 끝나면 새로고침할게요. 그사이 보낸 메시지는 새로고침한 세션에 전달해요` }).catch(() => {})
       }
       if (tasks.length || !s.refreshAfter || s.turn || s.refreshing) return
       this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))
@@ -5043,9 +5043,9 @@ export class Broker {
     }
     if (!wasBusy && !/esc to interrupt/i.test(screen)) {
       const typed = screen.split('\n').some((l) => /^\s*❯\s*\S/.test(l))
-      return void (await c.ack(`⏹️ 이미 유휴 상태였습니다. 중단할 작업이 없습니다.${typed ? ' 입력칸에 보내지 않은 글이 남아 있습니다 (`:screen` 으로 확인).' : ''}`))
+      return void (await c.ack(`이미 쉬고 있었어요. 멈출 작업이 없어요${typed ? ' 입력칸에 보내지 않은 글이 남아 있어요' : ''}`))
     }
-    await c.ack('⏹️ Esc를 보냈지만 터미널에 아직 작업 표시가 남아 있습니다. 잠시 뒤 `:screen` 으로 확인하세요.')
+    await c.ack('Esc 를 보냈지만 터미널에 아직 작업 표시가 남아 있어요. 잠시 뒤 화면을 확인하세요')
   }
 
   /** `/model` and `/effort` share a shape: type it, remember it, watch for the dialog it opens. */
