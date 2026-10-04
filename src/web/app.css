@@ -338,6 +338,15 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .pr-title { flex: 1; font-weight: 600; }
 .pr-body { flex: 1; min-height: 0; }
 .pr-body iframe { width: 100%; height: 100%; border: 0; background: #fff; }
+.stats-series { display: flex; align-items: flex-end; gap: 1px; height: 60px; }
+.stats-series i { flex: 1; background: var(--accent); min-height: 1px; border-radius: 2px 2px 0 0; }
+.stats-heat { display: grid; grid-template-columns: repeat(24, 1fr); gap: 2px; }
+.stats-heat i { display: block; aspect-ratio: 1; background: var(--accent); border-radius: 2px; }
+.sec-sub { display: block; color: var(--muted); font-size: var(--fs-s); }
+.chip.pr-draft { color: var(--muted); }
+.chip.pr-missing { color: var(--muted); opacity: .7; }
+.codebox .add { color: var(--green); }
+.codebox .del { color: var(--red); }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }

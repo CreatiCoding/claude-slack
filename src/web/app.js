@@ -785,7 +785,12 @@ function renderList() {
   // under the pointer and drop keyboard focus. "기다리는 중" shows as a badge/colour (liveRow), not a move.
   // On a phone the sessions waiting on a person come first (56).
   const live = shown.filter((s) => !grouped.has(s.thread)).sort((a, b) => (isPhone() ? (b.state === 'waiting') - (a.state === 'waiting') : 0) || rank(a) - rank(b) || a.startedAt - b.startedAt)
-  const h = secHead('live', '진행 중', live.length, { dropOut: true })
+  const h = secHead('live', isPhone() ? '실행 중인 세션' : '진행 중', live.length, { dropOut: true })
+  if (isPhone()) {
+    const waiting = live.filter((s) => s.state === 'waiting').length
+    h.el.querySelector('.gname').textContent = `실행 중인 세션 ${live.length}개`
+    h.el.insertAdjacentHTML('beforeend', `<span class="sec-sub">${waiting ? `${waiting}개가 응답을 기다려요` : '말을 걸어 보세요'}</span>`)
+  }
   list.append(h.el)
   if (h.open) {
     for (const s of live) list.append(liveRow(s, null))
@@ -809,7 +814,7 @@ function renderList() {
   if (ha.open)
     for (const a of arc.slice(0, 20)) {
       const at = Date.parse(a.archivedAt)
-      list.append(plainRow({ lead: icon('clipboard'), name: a.title || folderOf(a.cwd), sub: a.preview, where: `${folderOf(a.cwd)} · ${ago(at)}`, when: ago(at), title: a.cwd }, () => viewArchive(a), (p) => openMenu(p, [{ label: '기록 보기', icon: 'file', run: () => viewArchive(a) }])))
+      list.append(plainRow({ lead: icon('clipboard'), name: a.title || folderOf(a.cwd), sub: a.preview, where: `${folderOf(a.cwd)} · ${ago(at)}`, when: ago(at), title: a.cwd }, () => viewArchive(a), (p) => openMenu(p, [{ label: '기록 보기', icon: 'file', run: () => viewArchive(a) }, { label: '기록 지우기', icon: 'deny', danger: true, run: () => confirm('이 지난 기록을 지울까요?') && api('/api/archives/delete', { path: a.path }).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) }])))
     }
   // A fixed line under the list (54): a new group, always there to reach.
   if (!list.querySelector('.new-group-line')) {
@@ -965,8 +970,17 @@ async function resume(r, { confirmed = false } = {}) {
     toast(err.message, 'err')
   }
 }
+// A past record is read in the page (47): its timeline in a window, not a jump to another page.
 function viewArchive(a) {
-  location.href = withToken('/view?kind=archive&path=' + encodeURIComponent(a.path))
+  const win = document.createElement('div')
+  win.className = 'pr-window'
+  win.innerHTML = `<div class="pr-bar"><span class="pr-title"></span><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="pr-body"></div>`
+  win.querySelector('.pr-title').textContent = a.title || folderOf(a.cwd)
+  win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
+  const frame = document.createElement('iframe')
+  frame.src = withToken('/view?kind=archive&path=' + encodeURIComponent(a.path))
+  win.querySelector('.pr-body').append(frame)
+  document.body.append(win)
 }
 
 // ------------------------------------------------------------------ opening a session
@@ -1329,6 +1343,12 @@ function drawConvo(evs, { live = false } = {}) {
   const follow = atBottom()
   const before = view.rows.length
   for (const ev of evs) apply(ev, live)
+  // An empty conversation says why (55): starting, or nothing said yet.
+  if (!view.rows.length && !live) {
+    const st = current && sessionOf(current)
+    $('log').querySelector('.empty-convo')?.remove()
+    $('log').insertAdjacentHTML('beforeend', `<div class="empty-note empty-convo">${st?.state === 'starting' ? '세션이 뜨는 중이에요…' : '아직 주고받은 대화가 없어요'}</div>`)
+  }
   // The first draw of a session shows only the newest rows.
   if (!view.opened) {
     view.opened = true
@@ -1607,6 +1627,14 @@ function textFileEl(f) {
   })
   return box
 }
+// The newest message the page itself sent: the only one a retraction is offered for (48).
+function lastWebUserTs() {
+  for (let i = view.rows.length - 1; i >= 0; i--) {
+    const r = view.rows[i]
+    if (r.kind === 'user' && r.ev.via === 'web' && !r.deleted) return r.ev.ts
+  }
+  return null
+}
 function userEl(row) {
   const ev = row.ev
   const el = document.createElement('div')
@@ -1646,7 +1674,7 @@ function userEl(row) {
       : set.has('x')
         ? '<span class="failed">취소함</span>'
         : delivered
-          ? `<span>전달됨</span>${ev.via !== 'terminal' ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
+          ? `<span>전달됨</span>${ev.via === 'web' && lastWebUserTs() === ev.ts ? `<button class="linkish" type="button" data-act="retract" data-ts="${esc(ev.ts)}" title="멈추고 무시하라고 하기">잘못 보냄</button>` : ''}`
           : ''
   el.lastElementChild.innerHTML = `${via}<span class="t" title="${esc(new Date(ev.at).toLocaleString('ko-KR'))}">${stamp(ev.at)}</span>${st}`
   return el
@@ -1921,7 +1949,9 @@ function openHtmlViewer(html, name) {
   box.querySelector('.hp-close').addEventListener('click', close)
 }
 
-const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${inner}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
+// A diff (a hunk header or +++/--- lines) gets its added and removed lines coloured (55).
+const diffInner = (inner) => (/^(@@ |\+\+\+ |--- )/m.test(inner) ? inner.split('\n').map((l) => (/^\+(?!\+\+ )/.test(l) ? `<span class="add">${l}</span>` : /^-(?!-- )/.test(l) ? `<span class="del">${l}</span>` : l)).join('\n') : inner)
+const codeBoxHtml = (inner) => `<div class="codebox"><pre><code>${diffInner(inner)}</code></pre><button class="copy" type="button" aria-label="복사">${icon('copy')}<span>복사</span></button></div>`
 
 function noticeEl(ic, text, { markdown = false } = {}) {
   const el = document.createElement('div')
@@ -2380,6 +2410,7 @@ function renderComposerBits() {
   if (s.state === 'busy' || s.state === 'waiting') chip('stop', hasMouse ? '중단 · Esc' : '중단', () => command(s, 'esc'))
   // Order (57): paste, skills, /btw, then the ones only this app has (화면, /compact, /context, /clear).
   if (navigator.clipboard?.read) chip('image', '이미지 붙여넣기', pasteFromClipboard)
+  chip('file', 'AGENTS.md', () => showAgentsMd(s))
   chip('spark', '스킬', (e) => pickSkill(s, e.currentTarget))
   chip('chat', '/btw', () => prefill(':btw '))
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
@@ -2868,7 +2899,7 @@ async function trashFolder(s) {
   }
   if (!info.ok) return toast(info.note, 'err')
   const home = (p) => p.replace(/^\/Users\/[^/]+/, '~')
-  const lines = (info.repos || []).map((r) => `• ${home(r.path)}: ${r.uncommitted ? `커밋 안 한 변경 ${r.uncommitted}개` : '변경 없음'}, ${r.unpushed ? `push 안 한 커밋 ${r.unpushed}개` : 'push 안 한 커밋 없음'}`)
+  const lines = (info.repos || []).map((r) => `• ${home(r.path)}${r.branch ? ` (브랜치 ${r.branch})` : ''}: ${r.uncommitted ? `커밋 안 한 변경 ${r.uncommitted}개` : '변경 없음'}, ${r.unpushed ? `push 안 한 커밋 ${r.unpushed}개` : 'push 안 한 커밋 없음'}`)
   const risky = (info.repos || []).some((r) => r.uncommitted || r.unpushed)
   const msg = [`${home(info.folder)} 폴더를 휴지통으로 옮기고 세션을 끝낼까요?`, '', ...(lines.length ? lines : ['(git 저장소 없음)']), ...(risky ? ['', '⚠ 저장하지 않은 작업이 있어요. 휴지통에서 되살릴 수는 있어요.'] : [])].join('\n')
   if (!confirm(msg)) return
@@ -2941,6 +2972,21 @@ async function openPrWindow(url) {
     win.querySelector('.pr-body').textContent = err.message
   }
 }
+// AGENTS.md of the session's folder, drawn as Markdown in a window (57).
+async function showAgentsMd(s) {
+  let r
+  try {
+    r = await api(`/api/session/${s.pid}/agents-md`)
+  } catch (err) {
+    return toast(err.message, 'err')
+  }
+  const win = document.createElement('div')
+  win.className = 'stats-window'
+  win.innerHTML = `<div class="stats-card"><div class="stats-head"><b>AGENTS.md</b><button type="button" class="icon-btn" data-act="close" aria-label="닫기">${icon('close')}</button></div><div class="stats-body md"></div></div>`
+  win.querySelector('.stats-body').innerHTML = md(r.text || '')
+  win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
+  document.body.append(win)
+}
 // Usage statistics (53): the numbers the broker works out from the logs, for 1, 7, 30 or 90 days.
 async function openStats(days) {
   document.querySelector('.stats-window')?.remove()
@@ -2967,6 +3013,10 @@ async function openStats(days) {
         <div><span>권한 요청</span><b>${s.permissions}</b></div>
       </div>
       ${s.pr ? `<h4>풀 리퀘스트</h4><div class="stats-grid"><div><span>머지</span><b>${s.pr.merged}</b></div><div><span>생성</span><b>${s.pr.created}</b></div><div><span>머지까지 중앙값</span><b>${fmt(s.pr.medianMergeMs)}</b></div><div><span>머지까지 p90</span><b>${fmt(s.pr.p90MergeMs)}</b></div></div>` : ''}
+      <h4>동시성</h4>
+      <div class="stats-series" aria-label="동시성 그래프">${s.series.map((v) => `<i style="height:${Math.min(100, Math.round(v * 40))}%" title="${v}"></i>`).join('')}</div>
+      <h4>요일 × 시간 (내 글)</h4>
+      <div class="stats-heat">${s.heat.map((row) => row.map((n) => `<i style="opacity:${n ? Math.min(1, 0.2 + n / Math.max(1, ...s.heat.flat()) * 0.8) : 0.06}" title="${n}"></i>`).join('')).join('')}</div>
       <h4>날마다</h4>
       ${s.daily.map((d) => `<div class="stats-row"><span>${d.day.slice(5)}</span><i style="width:${Math.round((d.workMs / max) * 100)}%"></i><em>${fmt(d.workMs)} · 내 글 ${d.mine} · 세션 ${d.sessions}</em></div>`).join('') || '<p class="stats-none">기록이 없어요</p>'}
       <h4>많이 쓴 폴더</h4>

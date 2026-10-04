@@ -14,6 +14,8 @@ export interface RepoState {
   uncommitted: number
   /** Commits on local branches that no remote has. */
   unpushed: number
+  /** The checked-out branch, shown in the confirmation (48). */
+  branch?: string
 }
 
 /** Why this folder must not go to the Trash, or undefined when it may. */
@@ -78,7 +80,11 @@ export function repoStates(folder: string): RepoState[] {
     try {
       unpushed = git(path, ['log', '--branches', '--not', '--remotes', '--oneline']).split('\n').filter(Boolean).length
     } catch {}
-    return { path, uncommitted, unpushed }
+    let branch: string | undefined
+    try {
+      branch = git(path, ['rev-parse', '--abbrev-ref', 'HEAD']).trim() || undefined
+    } catch {}
+    return { path, uncommitted, unpushed, branch }
   })
 }
 

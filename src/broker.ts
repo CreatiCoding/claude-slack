@@ -42,7 +42,7 @@ import { NoticeStore, type Notice } from './notices.ts'
 import { parseSlackLink, ThreadInfoStore } from './thread-info.ts'
 import { computeStats, prSummary, type StatDays, type StatThread } from './stats.ts'
 import { prViewHtml } from './pr-view.ts'
-import { prHosts } from './links.ts'
+import { originHosts, prHosts } from './links.ts'
 import { BackgroundTracker, parseTaskNotifications, processFacts, type BackgroundTask } from './background.ts'
 import { githubAccounts, SkillLineReader, sessionPlugins, type PluginLine } from './plugins.ts'
 import { availableSkills, skillMenu, SkillUsage } from './skills.ts'
@@ -728,8 +728,11 @@ export class Broker {
       .since(session.threadTs, Math.max(0, last - 2000))
       .flatMap((e) => (e.type === 'user' || e.type === 'text' ? [e.text] : e.type === 'tool_end' ? [e.output] : []))
     const fromGh = (await Promise.all(repos(session.cwd).slice(0, 5).map((r) => branchPr(r)))).filter((x): x is Link => !!x)
-    const prs = sortPrs(fromGh.length ? fromGh : await (this.cfg.prInfo ?? prInfo)(linksIn(texts, 'pr').slice(-10)))
+    const hosts = [...prHosts(), ...originHosts(session.cwd)]
+    const prLinks = linksIn(texts, 'pr', hosts)
+    const prs = sortPrs(fromGh.length ? fromGh : await (this.cfg.prInfo ?? prInfo)(prLinks.slice(-10)))
     const own = await this.adminThreadLink(session.threadTs).catch(() => undefined)
+    // The folder's own origin host (50): a GitHub Enterprise remote's pull requests are recognised without a setting.
     const slackLinks = linksIn(texts, 'slack').filter((u) => !own || !u.startsWith(own.split('?')[0]!)).slice(-10)
     this.scheduleThreadInfo(slackLinks)
     const threads = [...(own ? [{ url: own, label: '이 세션의 스레드' }] : []), ...slackLinks.map((url) => ({ url, label: this.threadLabel(url) }))]
@@ -1236,6 +1239,22 @@ export class Broker {
     } catch (err) {
       return { ok: false, note: `PR 을 읽지 못했어요: ${describeError(err)}` }
     }
+  }
+
+  /** Delete one past record (47): only the ones the list shows. */
+  webDeleteArchive(path: string): { ok: boolean; note: string } {
+    const known = listArchives(10_000, this.cfg.archiveDir).some((a) => a.path === path)
+    if (!known) return { ok: false, note: '그 기록을 찾지 못했어요' }
+    return deleteArchive(path, this.cfg.archiveDir) ? { ok: true, note: '기록을 지웠어요' } : { ok: false, note: '기록을 지우지 못했어요' }
+  }
+
+  /** The session folder's AGENTS.md, for the chip (57); nothing when there is none. */
+  webAgentsMd(pid: number): { ok: boolean; note: string; text?: string } {
+    const session = this.registry.byPid(pid)
+    if (!session) return { ok: false, note: '이미 끝난 세션이에요' }
+    const path = join(session.cwd, 'AGENTS.md')
+    if (!existsSync(path)) return { ok: false, note: 'AGENTS.md 가 없어요' }
+    return { ok: true, note: '', text: readFileSync(path, 'utf8').slice(0, 200_000) }
   }
 
   /** Clear one notice, or all (49). */
@@ -5035,7 +5054,12 @@ export class Broker {
     // A side question does not touch the main turn — typed in even while one is running.
     const before = screenDigest(await this.tmux.capture(session.pane), 200)
     await this.tmux.typeLine(session.pane, `/btw ${q}`)
-    const fresh = await this.readBtwAnswer(session.pane, before)
+    // The card shows the wait, once a second at most (52).
+    const started = Date.now()
+    const tick = setInterval(() => {
+      this.slack.update(card, `${head}\n답을 기다리는 중… ${Math.round((Date.now() - started) / 1000)}초`).catch(() => {})
+    }, 1000)
+    const fresh = await this.readBtwAnswer(session.pane, before).finally(() => clearInterval(tick))
     // The answer sits in a panel that keeps the keyboard until Esc; close it so the next message is not typed into it.
     await this.tmux.sendKeys(session.pane, ['Escape'])
     const body = fresh ? '```' + truncate(fresh.replace(/```/g, "'''"), 3800) + '```' : '답을 화면에서 읽지 못했어요. 화면을 확인하세요'

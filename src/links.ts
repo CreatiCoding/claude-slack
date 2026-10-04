@@ -2,7 +2,7 @@
  * The links a session is about, for the chips above the web app's input: the pull request of the branch it
  * works on (asked of gh, in the folder and in clones inside it) and Slack threads, its own and any mentioned.
  */
-import { execFile } from 'node:child_process'
+import { execFile, execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -75,6 +75,17 @@ function branchPrOnce(repo: string, gh: string): Promise<Link | undefined> {
       }
     }),
   )
+}
+
+/** The host of a folder's `origin` remote, when it is a web address (50). Empty when there is none. */
+export function originHosts(folder: string): string[] {
+  try {
+    const url = execFileSync('git', ['-C', folder, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+    const host = /^(?:https?:\/\/|ssh:\/\/git@|git@)([^/:]+)/.exec(url)?.[1]
+    return host ? [host] : []
+  } catch {
+    return []
+  }
 }
 
 /** The state the chip shows: a draft is its own (50), anything gh does not name is missing. */
