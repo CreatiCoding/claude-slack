@@ -1128,6 +1128,25 @@ function closeConvo() {
   $('list').scrollTop = listScrollTop // the list's own scroll position, from before a thread was opened (16)
 }
 $('btn-back').addEventListener('click', () => (history.state?.thread ? history.back() : closeConvo()))
+// A swipe from the left edge goes back, as the back button does (73): it starts within 24 px of the edge and
+// moves 80 px to the right, mostly sideways; the page then settles for 180 ms.
+let edgeX = null
+document.addEventListener('touchstart', (e) => {
+  edgeX = e.touches[0].clientX <= 24 && isPhone() ? { x: e.touches[0].clientX, y: e.touches[0].clientY } : null
+}, { passive: true })
+document.addEventListener('touchend', (e) => {
+  if (!edgeX) return
+  const t = e.changedTouches[0]
+  const dx = t.clientX - edgeX.x
+  const dy = Math.abs(t.clientY - edgeX.y)
+  edgeX = null
+  if (dx > 80 && dy < 40) {
+    document.body.style.transition = 'transform 180ms cubic-bezier(.25,.1,.25,1)'
+    document.body.style.transform = 'translateX(0)'
+    if (history.state?.thread) history.back()
+    else if (current) closeConvo()
+  }
+})
 addEventListener('popstate', (e) => {
   if (e.state?.thread) open(e.state.thread, { push: false })
   else closeConvo()
