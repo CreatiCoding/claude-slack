@@ -733,12 +733,11 @@ function dropTarget(el, spot) {
 function groupItems(g) {
   return [
     { label: '이름 바꾸기', icon: 'edit', run: () => {
-      const name = prompt('그룹 이름', g.name)
-      if (name && name.trim()) groupOp({ op: 'rename', id: g.id, name })
+      askDialog({ title: '그룹 이름', ok: '바꾸기', field: { value: g.name } }).then((name) => name && groupOp({ op: 'rename', id: g.id, name }))
     } },
     { label: '위로 이동', icon: 'up', run: () => moveGroup(g, -1) },
     { label: '아래로 이동', icon: 'down', run: () => moveGroup(g, 1) },
-    { label: '그룹 삭제', icon: 'deny', danger: true, run: () => confirm(`"${g.name}" 그룹을 지울까요? 안의 세션은 그대로 남아요.`) && groupOp({ op: 'delete', id: g.id }) },
+    { label: '그룹 삭제', icon: 'deny', danger: true, run: () => askDialog({ title: `"${g.name}" 그룹을 지울까요?`, body: '안의 세션은 그대로 남아요.', ok: '지우기', danger: true }).then((ok) => ok && groupOp({ op: 'delete', id: g.id })) },
   ]
 }
 // Up one place: before the group above; down one place: before the group after the next (54).
@@ -757,8 +756,8 @@ async function groupOp(op) {
   }
 }
 async function newGroup(thenThread) {
-  const name = prompt('새 그룹 이름')
-  if (!name || !name.trim()) return
+  const name = await askDialog({ title: '새 그룹 이름', ok: '만들기', field: { value: '' } })
+  if (!name) return
   const r = await groupOp({ op: 'create', name })
   if (r?.id && thenThread) groupOp({ op: 'move', thread: thenThread, group: r.id })
 }
@@ -1019,7 +1018,7 @@ function previewResume(r) {
 }
 async function resume(r, { confirmed = false } = {}) {
   // Started from the preview (47) it needs no second question; a press anywhere else still asks (19).
-  if (!confirmed && !confirm(`"${r.title || folderOf(r.cwd)}" 대화를 이어서 할까요?`)) return
+  if (!confirmed && !(await askDialog({ title: '이 대화를 이어서 할까요?', body: r.title || folderOf(r.cwd), ok: '이어서 하기' }))) return
   try {
     let res
     try {
@@ -1296,8 +1295,8 @@ $('title').addEventListener('click', () => {
   if (s) renameSession(s)
 })
 async function renameSession(s) {
-  const name = prompt('세션 이름', nameOf(s))
-  if (!name || !name.trim() || name.trim() === nameOf(s)) return
+  const name = await askDialog({ title: '세션 이름', ok: '바꾸기', field: { value: nameOf(s) } })
+  if (!name || name === nameOf(s)) return
   try {
     const r = await api(`/api/session/${s.pid}/rename`, { title: name.trim() })
     toast(r.note)
@@ -2271,7 +2270,7 @@ $('log').addEventListener('click', async (e) => {
       toast(err.message, 'err')
     }
   } else if (b.dataset.act === 'retract') {
-    if (!confirm('잘못 보냈다고 알릴까요?\n작업을 멈추고, 이 메시지를 따르지 말라고 보내요. 이미 한 일은 무엇인지 알려 달라고 해요.')) return
+    if (!(await askDialog({ title: '잘못 보냈다고 알릴까요?', body: '작업을 멈추고, 이 메시지를 따르지 말라고 보내요. 이미 한 일은 무엇인지 알려 달라고 해요.', ok: '알리기' }))) return
     try {
       toast((await api(`/api/session/${s.pid}/retract`, { ts })).note)
       // The wrong message fades and says it was taken back (48), so the page shows what Claude was told.
@@ -2520,7 +2519,7 @@ function renderComposerBits() {
   if (s.canKeys) chip('screen', '화면', () => showScreen(s))
   chip('clipboard', '/compact', () => sendText(s, '/compact'))
   chip('search', '/context', () => sendText(s, '/context'))
-  chip('refresh', '/clear', () => confirm('대화를 비울까요? (/clear)') && sendText(s, '/clear'))
+  chip('refresh', '/clear', () => askDialog({ title: '대화를 비울까요?', body: '/clear', ok: '비우기', danger: true }).then((ok) => ok && sendText(s, '/clear')))
 }
 /** "스킬": what this folder can call, the ones called by hand most often first. Picking fills "/name ". */
 async function pickSkill(s, chipEl) {
@@ -3085,9 +3084,9 @@ function sessionItems(s) {
       ],
     },
     'sep',
-    { label: '종료', icon: 'ended', danger: true, run: () => confirm(`"${nameOf(s)}" 세션을 종료할까요?`) && command(s, 'exit') },
+    { label: '종료', icon: 'ended', danger: true, run: () => askDialog({ title: `"${nameOf(s)}" 세션을 종료할까요?`, ok: '종료', danger: true }).then((ok) => ok && command(s, 'exit')) },
     { label: '폴더 버리고 종료', icon: 'folder', danger: true, run: () => trashFolder(s) },
-    { label: '강제 종료', icon: 'deny', danger: true, run: () => confirm('tmux 창을 닫아 강제로 끝낼까요?') && api(`/api/session/${s.pid}/kill`, {}).then((r) => toast(r.note), (e) => toast(e.message, 'err')) },
+    { label: '강제 종료', icon: 'deny', danger: true, run: () => askDialog({ title: 'tmux 창을 닫아 강제로 끝낼까요?', ok: '강제 종료', danger: true }).then((ok) => ok && api(`/api/session/${s.pid}/kill`, {}).then((r) => toast(r.note), (e) => toast(e.message, 'err'))) },
   ]
 }
 /** Say what would be lost (per repository), then end the session and move its folder to the Trash. */
@@ -3103,7 +3102,7 @@ async function trashFolder(s) {
   const lines = (info.repos || []).map((r) => `• ${home(r.path)}${r.branch ? ` (브랜치 ${r.branch})` : ''}: ${r.uncommitted ? `커밋 안 한 변경 ${r.uncommitted}개` : '변경 없음'}, ${r.unpushed ? `push 안 한 커밋 ${r.unpushed}개` : 'push 안 한 커밋 없음'}`)
   const risky = (info.repos || []).some((r) => r.uncommitted || r.unpushed)
   const msg = [`${home(info.folder)} 폴더를 휴지통으로 옮기고 세션을 끝낼까요?`, '', ...(lines.length ? lines : ['(git 저장소 없음)']), ...(risky ? ['', '⚠ 저장하지 않은 작업이 있어요. 휴지통에서 되살릴 수는 있어요.'] : [])].join('\n')
-  if (!confirm(msg)) return
+  if (!(await askDialog({ title: '폴더를 휴지통으로 옮길까요?', body: msg, ok: '옮기고 끝내기', danger: true }))) return
   try {
     toast((await api(`/api/session/${s.pid}/trash`, { path: info.folder })).note)
   } catch (err) {
@@ -3151,7 +3150,7 @@ async function refreshSession(s) {
 }
 async function toggleAuto(s) {
   const on = !s.autoAllow
-  if (on && !confirm('전부 허용을 켤까요?\n권한 요청을 묻지 않고 브로커가 바로 허용합니다. 허용한 내용은 대화에 남아요.')) return
+  if (on && !(await askDialog({ title: '전부 허용을 켤까요?', body: '권한 요청을 묻지 않고 브로커가 바로 허용합니다. 허용한 내용은 대화에 남아요.', ok: '켜기', danger: true }))) return
   await command(s, on ? 'auto on' : 'auto off')
 }
 
@@ -3187,6 +3186,43 @@ async function showAgentsMd(s) {
   win.querySelector('.stats-body').innerHTML = md(r.text || '')
   win.querySelector('[data-act="close"]').addEventListener('click', () => win.remove())
   document.body.append(win)
+}
+// Confirmation and name dialogs (67): drawn here instead of the browser's own boxes. Enter confirms, Esc
+// cancels, and the confirm button has the focus when it opens.
+function askDialog({ title, body = '', ok = '확인', cancel = '취소', danger = false, field }) {
+  return new Promise((resolve) => {
+    const scrim = document.createElement('div')
+    scrim.className = 'dlg-scrim'
+    scrim.innerHTML = `<div class="dlg" role="dialog" aria-modal="true"><div class="dlg-body"><div class="dlg-title"></div>${body ? '<div class="dlg-text"></div>' : ''}${field ? `<input class="dlg-field" placeholder="" value="">` : ''}</div><div class="dlg-actions"><button type="button" class="dlg-cancel"></button><button type="button" class="dlg-ok${danger ? ' danger' : ''}"></button></div></div>`
+    scrim.querySelector('.dlg-title').textContent = title
+    if (body) scrim.querySelector('.dlg-text').textContent = body
+    scrim.querySelector('.dlg-cancel').textContent = cancel
+    scrim.querySelector('.dlg-ok').textContent = ok
+    const input = scrim.querySelector('.dlg-field')
+    if (input) {
+      input.value = field.value ?? ''
+      input.placeholder = field.placeholder ?? ''
+    }
+    const done = (v) => {
+      document.removeEventListener('keydown', onKey, true)
+      scrim.remove()
+      resolve(v)
+    }
+    const value = () => (input ? input.value : true)
+    const okBtn = scrim.querySelector('.dlg-ok')
+    if (input) okBtn.disabled = !input.value.trim()
+    input?.addEventListener('input', () => (okBtn.disabled = !input.value.trim()))
+    const onKey = (e) => {
+      if (e.key === 'Escape') (e.preventDefault(), done(field ? null : false))
+      else if (e.key === 'Enter' && !e.isComposing && !okBtn.disabled) (e.preventDefault(), done(field ? input.value.trim() : true))
+    }
+    document.addEventListener('keydown', onKey, true)
+    scrim.querySelector('.dlg-cancel').addEventListener('click', () => done(field ? null : false))
+    okBtn.addEventListener('click', () => done(value() === true ? true : input.value.trim()))
+    scrim.addEventListener('click', (e) => e.target === scrim && done(field ? null : false))
+    document.body.append(scrim)
+    ;(input ?? okBtn).focus()
+  })
 }
 // Usage statistics (53): the numbers the broker works out from the logs, for 1, 7, 30 or 90 days.
 async function openStats(days) {
@@ -3407,8 +3443,8 @@ $('btn-more').addEventListener('click', (e) => {
   const r = e.currentTarget.getBoundingClientRect()
   openMenu({ x: r.right, y: r.bottom + 4, end: true }, globalItems())
 })
-const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => confirm('이어서 하기 목록을 비울까요?\n맥의 대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).') && groupOp({ op: 'clearRecent' }).then(loadSideLists) })
-const clearArchivesItem = () => ({ label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => confirm('지난 기록을 모두 지울까요? 실행 중인 세션의 기록은 남겨요.') && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err')) })
+const clearRecentItem = () => ({ label: '이어서 하기 비우기', icon: 'undo', run: () => askDialog({ title: '이어서 하기 목록을 비울까요?', body: '대화 파일은 지우지 않고, 지금까지의 것을 목록에서만 숨겨요(다시 쓰면 다시 보여요).', ok: '비우기', danger: true }).then((ok) => ok && groupOp({ op: 'clearRecent' }).then(loadSideLists)) })
+const clearArchivesItem = () => ({ label: '지난 기록 모두 지우기', icon: 'deny', danger: true, run: () => askDialog({ title: '지난 기록을 모두 지울까요?', body: '실행 중인 세션의 기록은 남겨요.', ok: '모두 지우기', danger: true }).then((ok) => ok && api('/api/archives/clear', {}).then((r) => (toast(r.note), loadSideLists()), (e) => toast(e.message, 'err'))) })
 // ------------------------------------------------------------------ notification center (49)
 // The newest three show at the top right (PC) or top (phone), then "N개 더". A tap opens the session and clears
 // the notice; a drag to the left of 80 px, or the close button, clears it without opening anything.
@@ -3584,7 +3620,7 @@ function newSession() {
         make.type = 'button'
         make.className = 'btn'
         make.textContent = '폴더를 만들고 시작'
-        make.addEventListener('click', () => confirm(`${cwdInput.value.trim()} 폴더를 만들고 시작할까요?`) && start(true))
+        make.addEventListener('click', () => askDialog({ title: `${cwdInput.value.trim()} 폴더를 만들고 시작할까요?`, ok: '만들고 시작' }).then((ok) => ok && start(true)))
         m.append(make)
       } else toast(err.message, 'err')
     } finally {

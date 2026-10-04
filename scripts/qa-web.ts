@@ -228,6 +228,12 @@ const check = (name: string, cond: unknown, detail = '') => {
 }
 const settle = (p: Page, ms = 400) => p.waitForTimeout(ms)
 
+const answerDialog = async (page: Page, text?: string) => {
+  await page.waitForSelector('.dlg', { timeout: 3000 }).catch(() => {})
+  if (text !== undefined) await page.fill('.dlg-field', text).catch(() => {})
+  await page.click('.dlg-ok', { timeout: 3000 }).catch(() => {})
+}
+
 const browser = await chromium.launch()
 // The empty pane: a QR that keeps its size; "브로커가 꺼져 있어요" only after 2.5s without a connection (fake clock).
 {
@@ -600,8 +606,8 @@ for (const [label, size, phone] of [
   await page.waitForSelector('text=취소함', { timeout: 3000 }).catch(() => {})
   check(`${label}: 뺀 메시지는 취소함`, (await page.locator('.user .failed', { hasText: '취소함' }).count()) >= 1)
   await page.locator('#input').fill('')
-  page.once('dialog', (d) => d.accept())
   await page.locator('button[data-act="retract"]').first().click()
+  await answerDialog(page)
   await page.waitForTimeout(300)
   check(`${label}: 잘못 보냄 → 묻고 retract`, calls.some((c) => c.startsWith('retract:11:')), calls.join(' | '))
 
@@ -691,12 +697,13 @@ for (const [label, size, phone] of [
   await page.locator('#input').fill('')
 
   // 전부 허용 toggle: asks first, then runs the same `:auto on` command a thread would.
-  page.once('dialog', (d) => d.accept())
   await page.locator('#btn-more').click()
+  await answerDialog(page)
   check(`${label}: 메뉴에 '이 세션' 항목`, (await page.locator('.menu .mhead', { hasText: '이 세션' }).count()) === 1)
   // 전부 허용 now sits under 설정 (79/73): open it there.
   await page.locator('.menu .mi', { hasText: /^설정/ }).click()
   await page.locator('.menu .mi', { hasText: '전부 허용 켜기' }).click()
+  await answerDialog(page)
   await page.waitForSelector('#badge .badge.auto', { timeout: 3000 }).catch(() => {})
   check(`${label}: 전부 허용 켜기는 :auto on 명령`, calls.some((c) => c.startsWith('action:ctl_btn_web:11:auto on')), calls.join(' | '))
   check(`${label}: 켜진 표시(상태 줄 배지)`, (await page.locator('#badge .badge.auto').count()) === 1)
@@ -720,8 +727,8 @@ for (const [label, size, phone] of [
   await page.locator('.ns-start').click()
   await page.waitForSelector('.ns-missing:not([hidden])')
   check(`${label}: 없는 폴더면 알려 준다`, ((await page.locator('.ns-missing').textContent()) ?? '').includes('폴더가 없어요'))
-  page.once('dialog', (d) => d.accept())
   await page.locator('.ns-missing .btn').click()
+  await answerDialog(page)
   await page.waitForTimeout(300)
   check(`${label}: 만들고 시작(모델 포함)`, calls.includes('new:/Users/me/projects/nope:sonnet:create:새 일'), calls.join(' | '))
   check(`${label}: 시작하면 그 세션을 연다`, (await page.locator('.newsess').count()) === 0 && (await page.locator('#title').textContent()) === '알파 작업')
@@ -729,18 +736,21 @@ for (const [label, size, phone] of [
   // 폴더 버리고 종료: shows what would be lost first, then goes on only when confirmed.
   if (!phone) {
     let asked = ''
-    page.once('dialog', (d) => ((asked = d.message()), d.accept()))
     await page.locator(`.row[data-thread="${A}"]`).click({ button: 'right' })
     await page.locator('.menu .mi', { hasText: '폴더 버리고 종료' }).click()
+    // The confirmation shows what would be lost (67): read it, then answer it.
+    await page.waitForSelector('.dlg-text', { timeout: 3000 }).catch(() => {})
+    asked = (await page.locator('.dlg-text').textContent().catch(() => '')) ?? ''
+    await answerDialog(page)
     await page.waitForTimeout(300)
     check(`${label}: 버리기 전에 저장소 상태를 보여 준다`, /커밋 안 한 변경 2개/.test(asked) && /push 안 한 커밋 1개/.test(asked), asked)
     check(`${label}: 확인하면 trash`, calls.includes('trash:11'))
   }
 
   // Groups: made from the menu, a session put in one from its menu (and, on a PC, by dragging onto the head).
-  page.once('dialog', (d) => d.accept('업무'))
   await page.locator('#btn-more').click()
   await page.locator('.menu .mi', { hasText: '새 그룹' }).click()
+  await answerDialog(page, '업무')
   await page.waitForSelector('.sec-head.group', { timeout: 3000 }).catch(() => {})
   if (phone) await page.goBack()
   check(`${label}: 새 그룹`, ((await page.locator('.sec-head.group .gname').first().textContent()) ?? '') === '업무')
@@ -782,15 +792,15 @@ for (const [label, size, phone] of [
   check(`${label}: 전역 메뉴에 비우기·파괴적 세션 항목 없음`, !/이어서 하기 비우기|지난 기록 모두 지우기|강제 종료|폴더 버리고 종료/.test(gmText), gmText)
   await page.keyboard.press('Escape')
   if (phone) await page.goBack()
-  page.once('dialog', (d) => d.accept())
   await page.locator('.sec-head', { hasText: '이어서 하기' }).hover()
   await page.locator('.sec-head', { hasText: '이어서 하기' }).locator('.gmore').click()
   await page.locator('.menu .mi', { hasText: '이어서 하기 비우기' }).click()
+  await answerDialog(page)
   await page.waitForTimeout(200)
-  page.once('dialog', (d) => d.accept())
   await page.locator('.sec-head', { hasText: '지난 기록' }).hover()
   await page.locator('.sec-head', { hasText: '지난 기록' }).locator('.gmore').click()
   await page.locator('.menu .mi', { hasText: '지난 기록 모두 지우기' }).click()
+  await answerDialog(page)
   await page.waitForTimeout(200)
   if (phone) {
     await page.locator(`.row[data-thread="${A}"]`).click()
