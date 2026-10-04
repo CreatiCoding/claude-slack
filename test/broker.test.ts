@@ -2836,3 +2836,17 @@ test('46: 가벼운 복제 — SESSION.md 가 20KB 를 넘으면 묻고, 앞부�
   s.conn.close()
   t.close()
 })
+
+test('행 값(43): 실행 중인 도구·멈춘 시간·SESSION.md 크기·대화 기록 크기를 목록 행에 싣는다', async () => {
+  const t = await setup()
+  const dir = mkdtempSync(join(tmpdir(), 'facts-'))
+  writeFileSync(join(dir, 'SESSION.md'), 'x'.repeat(1234))
+  writeFileSync(t.transcript, 'y'.repeat(300_000))
+  const s = { key: 'k', cwd: dir, transcriptPath: t.transcript, turn: { inFlight: ['Bash'] }, stallSince: Date.now() - 100_000 }
+  const facts = (t.broker as unknown as { listFacts(s: unknown): Record<string, unknown> }).listFacts(s)
+  assert.deepEqual(facts.running, ['Bash'])
+  assert.ok((facts.quietMs as number) >= 100_000)
+  assert.deepEqual(facts.sessionMd, { bytes: 1234, max: 20_000 })
+  assert.equal(facts.transcriptMb, 0.3)
+  t.close()
+})
