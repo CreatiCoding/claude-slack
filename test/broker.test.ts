@@ -1517,7 +1517,7 @@ test(':refresh 는 같은 스레드에서 대화 그대로 세션을 다시 연�
   s.conn.close()
   await tick(150)
   const launched = t.tmux.launches.at(-1)!
-  assert.deepEqual(launched.command, ['/bin/claude-slack', '--resume', 'sess-refresh'])
+  assert.deepEqual(launched.command, ['/bin/claude-slack', '--resume', 'sess-refresh', '--permission-mode', 'auto'])
   assert.equal(launched.env.CLAUDE_SLACK_THREAD_TS, s.ack, '새 스레드를 파지 않는다')
   assert.ok(!t.slack.texts().some((x) => x.startsWith('⚫ 세션')), `종료로 알리지 않는다: ${t.slack.texts()}`)
   assert.ok(panelTs && t.slack.deleted.includes(panelTs), '죽은 pid 를 가리키는 낡은 패널은 지운다')
@@ -1854,7 +1854,7 @@ test('스레드만 남은 대화는 이어서 목록에서 빠지고, 잔재 탭
   assert.equal(r.ok, true, JSON.stringify(r))
   assert.equal(t.tmux.launches.length, before.launches + 1)
   const launched = t.tmux.launches.at(-1)!
-  assert.deepEqual(launched.command.slice(-2), ['--resume', 'sess-left'])
+  assert.deepEqual(launched.command.slice(-4), ['--resume', 'sess-left', '--permission-mode', 'auto'], launched.command.join(' '))
   assert.equal(launched.env.CLAUDE_SLACK_THREAD_TS, s.ack, '새 스레드를 만들지 않고 같은 스레드에서 연다')
   assert.equal(roots(), before.roots, '새 루트 메시지도 없다')
 
@@ -2766,6 +2766,31 @@ test('41: 번호 다이얼로그가 떠 있을 때 사람 글은 Esc 로 닫고 
   await t.broker.webSend(session.pid, '권한 창 옆 글')
   await tick(120)
   assert.ok(!t.tmux.keys.slice(mid).includes('%1:Escape'), `권한 창에는 Esc 를 누르지 않는다: ${t.tmux.keys.slice(mid)}`)
+  s.conn.close()
+  t.close()
+})
+
+test('42: 같은 모델·effort 를 다시 고르면 아무것도 치지 않고 ok 를 돌려준다 (claude-web 이관: 42)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:model opus' })
+  assert.equal(t.tmux.keys.filter((k) => k.includes('/model opus')).length, 1)
+  const again = await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:model opus' })
+  assert.equal(again.ok, true)
+  assert.equal(t.tmux.keys.filter((k) => k.includes('/model opus')).length, 1, '같은 값은 다시 치지 않는다')
+  s.conn.close()
+  t.close()
+})
+
+test('42: 권한 모드 전부 허용은 웹 버튼으로 켜고, 다른 모드를 고르면 꺼진다 (claude-web 이관: 42)', async () => {
+  const t = await setup()
+  const s = await shim(t.socketPath, { tmuxPane: '%1' })
+  const on = await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:mode autoAllow' })
+  assert.equal(on.note, '권한 모드를 바꿨어요')
+  const session = (t.broker as unknown as { registry: { live: Array<{ autoAllow?: boolean }> } }).registry.live[0]!
+  assert.equal(session.autoAllow, true)
+  await t.broker.webAction({ actionId: 'ctl_btn_web', value: '100:mode plan' })
+  assert.equal(session.autoAllow, undefined, '다른 모드를 고르면 전부 허용이 꺼진다')
   s.conn.close()
   t.close()
 })

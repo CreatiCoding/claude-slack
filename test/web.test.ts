@@ -270,7 +270,7 @@ test('복제: --fork-session 으로 새 세션, 원래 대화는 원래 시각�
   const r = await t.broker.webFork(100)
   assert.ok(r.ok && r.thread && r.thread !== s.ack, r.note)
   const cmd = t.tmux.launches.at(-1)!.command
-  assert.deepEqual(cmd.slice(-3), ['--resume', 's1', '--fork-session'])
+  assert.deepEqual(cmd.slice(-5), ['--resume', 's1', '--permission-mode', 'auto', '--fork-session'], cmd.join(' '))
   const copied = t.broker.events.since(r.thread!, 0)
   assert.deepEqual(copied.map((e) => e.type), ['user', 'text', 'notice'])
   assert.equal(copied[1]!.at, originalAt, '원래 시각 그대로')

@@ -23,6 +23,8 @@ export interface Session {
   refreshAfter?: number
   /** A scheduled-refresh check is under way (set before its first await, so two cannot run at once). */
   refreshChecking?: boolean
+  /** The "백그라운드 작업이 끝나면 새로고침" line was already posted for the current wait (42). */
+  refreshWaitNoted?: boolean
   /** Background work that a refresh cut off, told to the relaunched session first. */
   interrupted?: Array<{ kind: string; label: string }>
   /** How often each dialog was surfaced lately, so one that keeps coming back is explained once instead of carded forever. */

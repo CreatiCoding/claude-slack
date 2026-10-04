@@ -18,6 +18,8 @@ export const PERMISSION_MODES: Array<{ value: string; label: string }> = [
   { value: 'acceptEdits', label: 'acceptEdits · 파일 편집은 자동 승인' },
   { value: 'plan', label: 'plan · 계획만 세우고 실행 안 함' },
   { value: 'auto', label: 'auto · 거의 모두 자동 승인' },
+  // Not a Claude Code mode: the broker answers the permission requests itself (42, 전부 허용).
+  { value: 'autoAllow', label: '전부 허용 · 권한 요청을 브로커가 허용' },
 ]
 
 /** Slack's per-actions-block element limit, minus room for the multi-select confirm button. */
@@ -48,6 +50,8 @@ export interface PanelState {
   model?: string
   effort?: string
   permissionMode?: string
+  /** 전부 허용 is on (42): the mode radio shows its own choice. */
+  autoAllow?: boolean
   state: SessionState
   purgeScope?: PurgeScope
 }
@@ -145,7 +149,7 @@ export function settingsModal(s: PanelState): unknown {
         block_id: 'mode',
         optional: true,
         label: { type: 'plain_text', text: '권한 모드 (도구 사용 시 얼마나 물어볼지)' },
-        element: radio('mode', PERMISSION_MODES, s.permissionMode),
+        element: radio('mode', PERMISSION_MODES, s.autoAllow ? 'autoAllow' : s.permissionMode),
       },
     ],
   }

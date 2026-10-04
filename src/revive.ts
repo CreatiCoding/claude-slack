@@ -44,6 +44,8 @@ export interface ReviveEntry {
   /** "끝나면 새로고침" was reserved at this time. */
   refreshAfter?: number
   effort?: string
+  /** Permission mode at the time (42): a refresh or a revive carries it over. */
+  permissionMode?: string
 }
 
 export class ReviveStore {

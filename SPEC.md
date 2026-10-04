@@ -2709,6 +2709,22 @@ cache-control: no-store
 - 근거: `src/preview.ts` `writingPreview`(`visualWidth`·`reflow`·`continuation`), `src/broker.ts` `webLive`·`LIVE_HISTORY`·`liveShown`
 - 추적: §4.3.10 ⑦~⑨, REQ-F-067
 
+### REQ-F-096 모델·effort·권한 모드: 같은 값은 치지 않고, 전부 허용은 모드 목록에, 결과는 토스트로, 새로고침이 모드를 이어간다 (42)
+- 의무: MUST
+- 액터: 브로커, 웹
+- 트리거: 패널 버튼(`model`·`effort`·`mode` 명령), 새로고침·되살리기·복제
+- 처리 규칙:
+  1. `model`·`effort`: 지금 값과 같으면 터미널에 아무것도 치지 않고 ok 를 돌려준다.
+  2. `mode`: 권한 모드 목록의 다섯째 `전부 허용`(값 `autoAllow`, 브로커가 허용)을 고르면 `전부 허용`을 켠다(`setAutoAllow`). 다른 Claude Code 모드를 고르면 켜져 있던 `전부 허용`을 먼저 끈다. 세션 메뉴의 `전부 허용 켜기/끄기` 는 그대로 둔다.
+  3. 웹 버튼 응답의 `note` 에 결과를 싣는다: 바꿨으면 `권한 모드를 바꿨어요`, 못 바꿨으면 `<모드>로 못 바꿨어요`. 결과가 없는 버튼은 `눌렀습니다.`.
+  4. 새로고침·되살리기·복제는 권한 모드를 `--permission-mode` 로 넘긴다(Claude Code 의 네 모드만: `default`·`acceptEdits`·`plan`·`auto`). 재시작 기록(`revive.ts` `permissionMode`)에도 남기고 `restoreFromRecord` 에서 되살린다. `전부 허용` 은 브로커 것이라 Claude Code 에 넘기지 않는다.
+  5. 예약된 새로고침이 백그라운드 작업을 기다릴 때 한 번 알린다: `🔄 백그라운드 작업 N개가 끝나면 새로고침할게요 · <첫 작업 설명>`(Slack 스레드에도 같은 한 줄). 예약을 다시 걸면 다시 알린다.
+- 출력: 버튼 응답 `note`, 스레드 메시지
+- 사후조건: `refreshWaitNoted` 는 새로고침이 돌거나 예약을 걸 때 지운다
+- 수용 기준: AC-166
+- 근거: `src/broker.ts` `setSetting`·명령 `mode`·`webAction`·`settingsArgs`·`maybeRunScheduledRefresh`, `src/panel.ts` `PERMISSION_MODES`, `src/revive.ts`
+- 추적: REQ-F-034(휴면과 무관), REQ-F-010, 전부 허용(REQ-F-026)
+
 ### REQ-F-095 터미널 다이얼로그: 글은 창을 닫고 전달하고, 버튼은 화면을 확인한 뒤 누른다 (41)
 - 의무: MUST
 - 액터: 브로커
@@ -5466,6 +5482,7 @@ Slack 오류 표:
 | REQ-F-077 | 요청 "HTML 미리보기 안의 복사 버튼"(35) | AC-160 | `web/app.js`, `channel.ts` |
 | AC-161 | REQ-F-077 | `#scroller` 에서 손가락 하나로 짚고 130px 끈다. 다른 터치에서 80px 만 끈다 | 두 번의 터치 제스처 | 첫 번째는 입력칸이 `blur` 된다. 두 번째는(120px 미만) `blur` 가 안 된다 |
 | REQ-F-077 | 요청 "폰 키보드 — 길게 끌면 내리기"(37) | AC-161 | `web/app.js` |
+| AC-166 | REQ-F-096 | 같은 모델을 다시 고르면 터미널에 아무것도 가지 않는다. 웹 버튼으로 전부 허용을 켜고 다른 모드를 고르면 꺼진다. 응답 note 는 `권한 모드를 바꿨어요` | `test/broker.test.ts` 의 42 묶음, 기존 새로고침 인수 테스트 갱신(`--permission-mode auto`) | 위 규칙대로 나온다 |
 | AC-165 | REQ-F-095 | 번호 다이얼로그가 떠 있을 때 웹 글은 Esc 로 닫고 전달된다. 권한 진행 창(yes/no)에는 Esc 를 누르지 않는다 | `test/broker.test.ts` 의 41 묶음 | 위 규칙대로 나온다 |
 | AC-164 | REQ-F-094 | 살아 있지 않은 세션의 행(뜨는 중·다시 여는 중·휴면)에서 보내고, 같은 글을 1.5초 안에 두 번 보내고, 그림 한 장이 빈 값이면 | `test/web.test.ts` 의 웹 보내기 묶음(40), `scripts/qa-web.ts` | 위 규칙대로 나온다 |
 | AC-163 | REQ-F-093 | 긴 답이 화면 위로 밀린 상태에서 미리보기를 읽는다. 꺾인 줄은 잇고 목록·펜스는 잇지 않는다. 머리가 200줄 밖이면 앞 글 끝을 앵커로 이어 붙이고, 앵커가 없으면 `''` 를 돌려준다 | `test/preview.test.ts` 의 쓰는 중 미리보기 묶음(39) | 위 규칙대로 나온다 |

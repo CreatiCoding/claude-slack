@@ -344,6 +344,8 @@ const SIZE_BLOCK_BYTES = 100 * 1024 * 1024
 const READ_SESSION_MAX_CHARS_CAP = 200_000
 // 18: a web message's picture limits, checked here (never just in the page that happened to send them).
 const WEB_IMAGES_MAX = 8
+/** Claude Code's own permission modes (the ones `--permission-mode` takes). */
+const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto']
 const WEB_IMAGES_BASE64_MAX = 3_145_728
 const WEB_IMAGE_BYTES_MAX = 10 * 1024 * 1024
 const DIALOG_CLOSE_TRIES = 5
@@ -419,6 +421,8 @@ export class Broker {
   /** A mobile double-tap delivers the same button twice. */
   private recentActions = new RecentKeys(ACTION_DEDUPE_MS)
   private recentWebSends = new RecentKeys(WEB_SEND_DEDUPE_MS)
+  /** The one-line result of the page's last button press, for its toast (42). */
+  private lastWebNote?: string
   private pendingLaunches = new Map<string, PendingLaunch>()
   private pendingPermissions = new Map<string, { msgTs: string; pid: number; requestId: string; toolName: string; at: number; timer?: ReturnType<typeof setTimeout>; reminded?: number; text?: string; blocks?: unknown[] }>()
   /** Block types this workspace rejected, so they are not sent (and refused) again every time. */
@@ -1033,8 +1037,12 @@ export class Broker {
     const target = decodeValue(a.value)?.pid
     if (target && !this.registry.byPid(target)) return { ok: false, note: '세션이 아직 다시 붙지 않았어요. 잠시 뒤 다시 눌러 주세요.' }
     const thread = a.messageTs ? this.msgThread.get(a.messageTs) : undefined
+    this.lastWebNote = undefined
     await this.handleAction({ user: this.defaultRecipient, channel: this.cfg.channelId, actionId: a.actionId, value: a.value, messageTs: a.messageTs ?? '', ...(thread ? { threadTs: thread } : {}), ...(a.blocks ? { blocks: a.blocks } : {}) })
-    return { ok: true, note: '눌렀습니다.' }
+    // The result of what was pressed, as a toast (42); a press with no result of its own still says 눌렀습니다.
+    const note = this.lastWebNote ?? '눌렀습니다.'
+    this.lastWebNote = undefined
+    return { ok: true, note }
   }
 
   // ----------------------------------------------------------------- admin
@@ -1432,6 +1440,7 @@ export class Broker {
         ...(s.launchModel ?? s.model ? { launchModel: s.launchModel ?? s.model } : {}),
         ...(s.refreshAfter ? { refreshAfter: s.refreshAfter } : {}),
         ...(s.effort ? { effort: s.effort } : {}),
+        ...(s.permissionMode ? { permissionMode: s.permissionMode } : {}),
       })
     }
     this.offsets.flush()
@@ -1600,6 +1609,7 @@ export class Broker {
     session.notify = rec.notify ?? session.notify
     session.view = rec.view ?? session.view
     session.autoAllow = rec.autoAllow ?? session.autoAllow
+    session.permissionMode ??= rec.permissionMode
     session.manualTitle = rec.manualTitle ?? session.manualTitle
     session.model ??= rec.model
     session.launchModel ??= rec.launchModel
@@ -2826,6 +2836,7 @@ export class Broker {
     if (!s.sessionId) return void (await c.ack('⚠️ 아직 세션 id를 몰라 새로고침할 수 없습니다.'))
     if (!s.pane) return void (await c.ack('⚠️ tmux 밖에서 띄운 세션이라 새로고침할 수 없습니다.'))
     s.refreshAfter = Date.now()
+    s.refreshWaitNoted = undefined
     this.logAt('INFO', 'session', 'refresh scheduled for when the work ends', this.tag(s))
     await c.post('⏳ 작업이 끝나면 새로고침합니다. 그동안 보낸 메시지는 붙잡아 두었다가 다시 연 세션에 넘깁니다.')
     this.changed()
@@ -2856,6 +2867,11 @@ export class Broker {
     s.refreshChecking = true
     try {
       const tasks = await this.backgroundTasks(s).catch(() => [])
+      if (tasks.length && !s.refreshWaitNoted) {
+        // Said once, not on every look a minute later (42).
+        s.refreshWaitNoted = true
+        await this.slack.post({ threadTs: s.threadTs, text: `🔄 백그라운드 작업 ${tasks.length}개가 끝나면 새로고침할게요 · ${truncate(tasks[0]!.label, 80)}` }).catch(() => {})
+      }
       if (tasks.length || !s.refreshAfter || s.turn || s.refreshing) return
       this.logAt('INFO', 'session', 'running the scheduled refresh', this.tag(s))
       await this.runCommand(s, 'refresh now')
@@ -2879,13 +2895,16 @@ export class Broker {
   }
 
   /** --model / --effort for relaunching a session as it is now (a refresh must not fall back to the defaults). */
-  private settingsArgs(session: { launchModel?: string; model?: string; effort?: string }): string[] {
+  private settingsArgs(session: { launchModel?: string; model?: string; effort?: string; permissionMode?: string }): string[] {
     // The model it was launched or switched with (opus[1m] keeps its 1M context; the transcript's name drops [1m]),
     // else the one it runs now: better than falling back to the default.
     const chosen = session.launchModel ?? (session as { model?: string }).model
     const model = chosen && /^[\w.\[\]-]+$/.test(chosen) ? chosen : undefined
     const effort = session.effort && EFFORT_OPTIONS.includes(session.effort) ? session.effort : undefined
-    return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : [])]
+    // The permission mode too (42): a refresh or a revive opens in the mode the session was in. 전부 허용 is the
+    // broker's own, not a Claude Code mode, so it is not passed; the record carries it instead.
+    const mode = session.permissionMode && CLAUDE_PERMISSION_MODES.includes(session.permissionMode) ? session.permissionMode : undefined
+    return [...(model ? ['--model', model] : []), ...(effort ? ['--effort', effort] : []), ...(mode ? ['--permission-mode', mode] : [])]
   }
 
   private sizeCheckTimer?: ReturnType<typeof setInterval>
@@ -4506,11 +4525,19 @@ export class Broker {
 
     mode: {
       run: async (c) => {
+        if (c.arg === 'autoAllow') {
+          await this.setAutoAllow(c.session, true)
+          this.lastWebNote = '권한 모드를 바꿨어요'
+          return
+        }
+        // Any Claude Code mode turns 전부 허용 off (42): it is the broker's answer, not a mode of the terminal.
+        if (c.session.autoAllow) await this.setAutoAllow(c.session, false)
         const { reached } = await this.cycleToMode(c.pane, c.arg)
         if (reached) {
           c.session.permissionMode = reached
           this.schedulePanelRefresh(c.session, PANEL_REFRESH_SETTLE_MS)
         }
+        this.lastWebNote = c.arg && reached !== c.arg ? `${c.arg}로 못 바꿨어요` : '권한 모드를 바꿨어요'
         await c.ack(c.arg && reached !== c.arg ? `⚠️ 권한 모드를 ${c.arg}로 못 바꿨습니다 (현재 ${reached ?? '?'}). 화면을 확인하세요.` : `→ 권한 모드 ${reached ?? c.arg}`)
       },
     },
@@ -4605,6 +4632,8 @@ export class Broker {
 
   /** `/model` and `/effort` share a shape: type it, remember it, watch for the dialog it opens. */
   private async setSetting(c: CommandContext, which: 'model' | 'effort'): Promise<void> {
+    // The value already in use: nothing is typed, and the answer is still ok (42).
+    if (c.arg && c.session[which] === c.arg) return void (await c.ack(`→ /${which} ${c.arg}`))
     await this.tmux.typeLine(c.pane, `/${which} ${c.arg}`.trim())
     if (c.arg) c.session[which] = c.arg
     if (c.arg && which === 'model') c.session.launchModel = c.arg
@@ -4694,6 +4723,7 @@ export class Broker {
       model: session.launchModel ?? session.model,
       effort: session.effort,
       permissionMode: session.permissionMode,
+      autoAllow: !!session.autoAllow,
       state: session.ended ? 'ended' : session.state,
     }
   }
