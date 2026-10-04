@@ -679,3 +679,5 @@ button:active:not(:disabled) { transform: scale(.9); transition: transform .2s c
 .pr-page { font-size: var(--fs-s); color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pr-bar .icon-btn:disabled { opacity: .35; }
 .screen-text { max-width: 100%; max-height: 100%; overflow: auto; margin: 0; padding: 12px; border-radius: 10px; background: var(--card); font: var(--fs-s)/1.5 var(--mono); white-space: pre; }
+.body-plain { font-weight: 400; }
+.screen-img { max-width: 100%; max-height: 100%; border-radius: 10px; box-shadow: var(--shadow); }

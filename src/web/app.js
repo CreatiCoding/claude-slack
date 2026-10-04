@@ -2290,7 +2290,7 @@ function blockEl(b, ev, all, titled) {
         const { icon: ic, rest } = takeEmoji(raw)
         const [head, ...body] = rest.split('\n')
         d.className = 'blk ttl'
-        d.innerHTML = `${icon(ic || 'question')}<div><div class="md">${mrkdwn(head)}</div>${body.length ? `<div class="md" style="font-weight:400">${mrkdwn(body.join('\n'))}</div>` : ''}</div>`
+        d.innerHTML = `${icon(ic || 'question')}<div><div class="md">${mrkdwn(head)}</div>${body.length ? `<div class="md body-plain">${mrkdwn(body.join('\n'))}</div>` : ''}</div>`
       } else d.innerHTML = textOf(b.text)
       if (b.fields) d.insertAdjacentHTML('beforeend', `<div class="fields">${b.fields.map((f) => `<div>${textOf(f)}</div>`).join('')}</div>`)
       if (b.accessory?.type === 'button') {
@@ -2715,7 +2715,7 @@ function showScreen(s) {
   scrim.style.display = 'grid'
   scrim.style.placeItems = 'center'
   scrim.style.padding = '16px'
-  scrim.innerHTML = `<img alt="터미널 화면" style="max-width:100%;max-height:100%;border-radius:10px;box-shadow:var(--shadow)">`
+  scrim.innerHTML = `<img alt="터미널 화면" class="screen-img">`
   scrim.firstElementChild.src = withToken(`/api/session/${s.pid}/screen.png?part=screen&_=${Date.now()}`)
   // No picture (59): the text of the screen instead, from the same session.
   scrim.firstElementChild.onerror = () => {
