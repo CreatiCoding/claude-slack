@@ -1195,6 +1195,7 @@ function renderSizeBanner(s) {
   const mb = s?.transcriptMb ?? 0
   const locked = mb >= 100
   const input = $('input')
+input.after(skillBox)
   input.disabled = locked
   // The composer's hint (57): busy says the message waits for the end; a PC also shows the keys.
   input.placeholder = locked ? '대화 기록이 너무 커서 입력을 막았어요 · 가벼운 복제로 이어가요' : composerHint(s)
@@ -2747,6 +2748,94 @@ input.addEventListener('input', () => {
 })
 /** Position while walking ↑/↓ through this session's sent-message history; `null` = not walking it. */
 let histIndex = null
+// Skill suggestions as you type "/…" (78): ranked by name start, then word start, name contains, description
+// contains, then how often it is used. ↑↓ choose (wrapping), Tab fills; Enter fills only once one is chosen,
+// so a command like /clear sent by Enter is not held up. Esc closes; editing brings it back.
+let skillCache = { pid: null, list: [] }
+let skillSuggest = { items: [], at: -1, open: false }
+async function loadSkillsFor(s) {
+  if (skillCache.pid === s.pid) return skillCache.list
+  const m = await api(`/api/session/${s.pid}/skills`)
+  skillCache = { pid: s.pid, list: [...m.direct, ...m.auto, ...m.other] }
+  return skillCache.list
+}
+function rankSkills(list, q) {
+  const rank = (x) => {
+    const n = x.name.toLowerCase()
+    const d = (x.description || '').toLowerCase()
+    if (n.startsWith(q)) return 0
+    if (n.split(/[-:]/).some((w) => w.startsWith(q))) return 1
+    if (n.includes(q)) return 2
+    if (d.includes(q)) return 3
+    return -1
+  }
+  return list
+    .map((x) => ({ x, r: rank(x) }))
+    .filter((o) => o.r >= 0 && (q || o.r === 0))
+    .sort((a, b) => a.r - b.r || (b.x.count || 0) - (a.x.count || 0))
+    .map((o) => o.x)
+    .slice(0, 8)
+}
+const skillBox = document.createElement('div')
+skillBox.className = 'skill-suggest'
+skillBox.hidden = true
+function paintSkillSuggest() {
+  skillBox.innerHTML = ''
+  skillBox.hidden = !skillSuggest.open || !skillSuggest.items.length
+  skillSuggest.items.forEach((x, i) => {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.className = 'ss-item' + (i === skillSuggest.at ? ' on' : '')
+    b.innerHTML = `<span class="ss-name">/${esc(x.name)}</span><span class="ss-desc">${esc(x.description || '')}</span>`
+    b.addEventListener('mousedown', (e) => (e.preventDefault(), fillSkill(x)))
+    skillBox.append(b)
+  })
+  if (!skillSuggest.items.length) return
+  const foot = document.createElement('div')
+  foot.className = 'ss-foot'
+  foot.textContent = '↑↓ 고르기 · Tab 채우기 · Esc 닫기'
+  skillBox.append(foot)
+}
+function fillSkill(x) {
+  input.value = `/${x.name} `
+  skillSuggest.open = false
+  paintSkillSuggest()
+  autosize()
+  input.focus()
+}
+input.addEventListener('input', async () => {
+  const v = input.value
+  const s = current && sessionOf(current)
+  if (!s || !/^\/[^\s]*$/.test(v)) {
+    skillSuggest = { items: [], at: -1, open: false }
+    return paintSkillSuggest()
+  }
+  try {
+    const list = await loadSkillsFor(s)
+    skillSuggest = { items: rankSkills(list, v.slice(1).toLowerCase()), at: -1, open: true }
+  } catch {
+    skillSuggest = { items: [], at: -1, open: false }
+  }
+  paintSkillSuggest()
+})
+input.addEventListener('keydown', (e) => {
+  if (!skillSuggest.open || !skillSuggest.items.length) return
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault()
+    const n = skillSuggest.items.length
+    skillSuggest.at = (skillSuggest.at + (e.key === 'ArrowDown' ? 1 : -1) + n) % n
+    return paintSkillSuggest()
+  }
+  if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey && skillSuggest.at >= 0)) {
+    e.preventDefault()
+    return fillSkill(skillSuggest.items[Math.max(0, skillSuggest.at)])
+  }
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    skillSuggest.open = false
+    paintSkillSuggest()
+  }
+}, true)
 input.addEventListener('keydown', (e) => {
   // ↑/↓ walk this session's own sent messages, one at a time, oldest-first on the way back (20; it used
   // to recall only the single last one). Only once the field is empty, or already mid-walk — otherwise a

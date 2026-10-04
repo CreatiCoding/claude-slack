@@ -428,6 +428,12 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .seg button { flex: 1; height: 33px; padding: 5px 14px; border-radius: var(--r-8); font-size: var(--fs-m); font-weight: 500; color: var(--muted); transition: color var(--t) var(--ease); }
 .seg button.on { background: #fff; color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.09); }
 :root[data-theme="dark"] .seg button.on, :root:not([data-theme="light"]) .seg button.on { background: #4d4d59; }
+.skill-suggest { position: absolute; left: 50%; transform: translateX(-50%); bottom: 100%; width: min(640px, calc(100% - 2 * var(--gutter))); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-12); padding: 4px; box-shadow: var(--sh-m); z-index: var(--z-pop); max-height: 280px; overflow-y: auto; }
+.ss-item { display: flex; gap: 10px; width: 100%; padding: 8px 10px; border-radius: var(--r-8); text-align: left; }
+.ss-item.on, .ss-item:hover { background: var(--hover); }
+.ss-name { font-weight: 600; white-space: nowrap; }
+.ss-desc { color: var(--muted); font-size: var(--fs-s); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-foot { color: var(--muted); font-size: var(--fs-s); padding: 6px 10px 2px; }
 .todos { font-size: var(--fs-s); background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 6px 12px; margin-bottom: 8px; max-height: 28vh; overflow-y: auto; }
 .todos summary { color: var(--muted); list-style: none; display: flex; align-items: center; gap: 6px; }
 .todos summary::-webkit-details-marker { display: none; }
@@ -446,7 +452,7 @@ html.kbd-open .composer { padding-bottom: 10px; }
 .choice-chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; align-self: flex-start; margin: -4px 0 4px; }
 .choice-chips .chip-x { width: 24px; height: 24px; }
 .choice-chips .chip-x .ic { width: 14px; height: 14px; }
-.input-box { display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line-strong); border-radius: var(--r-14); background: var(--bg); padding: 4px; box-shadow: var(--sh-xs); }
+.input-box { position: relative; display: flex; align-items: flex-end; gap: 6px; border: 1px solid var(--line-strong); border-radius: var(--r-14); background: var(--bg); padding: 4px; box-shadow: var(--sh-xs); }
 .input-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); }
 /* 20: a repeated identical send is held back once — this is what says "같은 메시지예요" without words alone. */
 .input-box.shake { animation: shake .3s; }
