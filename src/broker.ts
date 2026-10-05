@@ -18,7 +18,7 @@ import type { SlackApi, InMsg, InAction, InStop, InCommand, InView } from './sla
 import { detectEffort, detectPermissionMode, type TmuxLike } from './tmux.ts'
 import { cursorKeys, DialogDriver, isProceedDialog, parseDialog, parseKeyedDialog, questionTag, promptHoldsFocus } from './dialog.ts'
 import { ACTION, decodeAnswer, decodeResume, decodeValue, encodeValue, isAction, isPanelBlockId, questionBlockId } from './actions.ts'
-import { TurnStream } from './stream.ts'
+import { TurnStream, answerKey } from './stream.ts'
 import { lastModelInTranscript, readSessionText, transcriptPathFor, transcriptTurnLooksOpen, TranscriptTailer, transcriptUuids, type TranscriptEvent } from './transcript.ts'
 import { normalizeMessage, sameMessage } from './format.ts'
 import { activityDetails, activityLine, activitySources, alertBlock, chunk, describeError, extractChoices, processAlive, detectContextUsage, duration, expandHome, parseColumns, tableBlock, todoPlanBlock, parseTodos, todoList, type Todo, parseLaunchText, PERMISSION_REPLY_RE, screenDigest, shortenHome, systemEnvelope, toMrkdwn, truncate } from './format.ts'
@@ -2435,7 +2435,7 @@ export class Broker {
       this.emitEvent(session.threadTs, { type: 'text', text: stripped, ...(choices ? { choices } : {}) })
       // A turn no person started (a stop-hook continuation, 3-4) that says what the last answer said is not posted
       // to Slack again: the page keeps it, the thread does not get a second copy.
-      const key = stripped.replace(/[\s*_`#>-]+/g, ' ').trim().slice(0, 200)
+      const key = answerKey(stripped)
       const repeat = !session.triggerTs && !choices && !!key && key === session.lastPostedKey
       session.lastPostedKey = key
       if (repeat) this.logAt('INFO', 'stream', 'repeat of the last answer from a turn no person started: not posted again', this.tag(session))
@@ -2654,7 +2654,14 @@ export class Broker {
     }
     this.clearWaiting(session)
     await this.setStatus(session, 'processing')
-    session.turn = new TurnStream(this.quietSlack, { threadTs: session.threadTs, recipient: session.recipient, flushMs: this.cfg.flushMs, heartbeatMs: this.cfg.heartbeatMs, log: (m) => this.logAt('INFO', 'stream', m, this.tag(session)) })
+    session.turn = new TurnStream(this.quietSlack, { threadTs: session.threadTs, recipient: session.recipient, flushMs: this.cfg.flushMs, heartbeatMs: this.cfg.heartbeatMs, log: (m) => this.logAt('INFO', 'stream', m, this.tag(session)),
+      // A turn no person started (a stop-hook continuation) that says the last answer again is not posted again (3-4).
+      repeat: session.triggerTs ? undefined : (t) => {
+        const key = answerKey(t)
+        const same = !!key && key === session.lastPostedKey
+        if (!same) session.lastPostedKey = key
+        return same
+      } })
     session.stallShown = undefined
     session.quietTs = undefined
     this.noteActivity(session)

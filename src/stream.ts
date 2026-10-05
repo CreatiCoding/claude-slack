@@ -33,6 +33,11 @@ const MAX_STREAM_RESTARTS = 2
  * back to a plain message that is edited in place. Appends are batched so we
  * stay under Slack's per-minute limits.
  */
+/** The text a repeated answer is compared by: whitespace and markdown marks dropped, the first 200 characters (3-4). */
+export function answerKey(text: string): string {
+  return text.replace(/[\s*_`#>-]+/g, ' ').trim().slice(0, 200)
+}
+
 export class TurnStream {
   private slack: SlackApi
   private threadTs: string
@@ -63,8 +68,12 @@ export class TurnStream {
   private seenTexts = new Set<string>()
   ended = false
 
-  constructor(slack: SlackApi, opts: { threadTs: string; recipient: string; flushMs?: number; heartbeatMs?: number; log?: (m: string) => void }) {
+  /** A block that repeats the last answer of a turn no person started is kept for the record, not posted (3-4). */
+  private repeat?: (text: string) => boolean
+
+  constructor(slack: SlackApi, opts: { threadTs: string; recipient: string; flushMs?: number; heartbeatMs?: number; log?: (m: string) => void; repeat?: (text: string) => boolean }) {
     this.slack = slack
+    this.repeat = opts.repeat
     this.threadTs = opts.threadTs
     this.recipient = opts.recipient
     this.flushMs = opts.flushMs ?? DEFAULT_FLUSH_MS
@@ -84,6 +93,10 @@ export class TurnStream {
   text(text: string): void {
     if (this.ended) return
     this.seenTexts.add(text.trim())
+    if (this.repeat?.(text)) {
+      this.log('repeat of the last answer from a turn no person started: not posted again')
+      return
+    }
     // One chunk past Slack's per-message text limit is rejected as msg_too_long
     // no matter how the stream is split; cut it up here, keeping fences balanced.
     for (const part of splitText(convertTables(text))) {

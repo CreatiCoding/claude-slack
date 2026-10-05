@@ -984,3 +984,24 @@ test('onStall: 화면은 유휴처럼 보여도 트랜스크립트가 아직 안
   s.conn.close()
   t.close()
 })
+
+test('사람이 시작하지 않은 턴이 직전 답을 되풀이하면, 그 블록은 스레드에 다시 올리지 않는다(3-4)', async () => {
+  const { TurnStream, answerKey } = await import('../src/stream.ts')
+  const { FakeSlack } = await import('./helpers.ts')
+  const slack = new FakeSlack()
+  let last = ''
+  const repeat = (t: string) => {
+    const key = answerKey(t)
+    const same = !!key && key === last
+    if (!same) last = key
+    return same
+  }
+  const turn = new TurnStream(slack, { threadTs: '1.1', recipient: 'U1', flushMs: 10, heartbeatMs: 40, repeat })
+  turn.text('아직 끝나지 않았습니다. D, C, F가 남아 있습니다.')
+  await tick(60)
+  const sent = JSON.stringify(slack.streams.map((s) => s.chunks))
+  turn.text('아직 끝나지 않았습니다. D, C, F가 남아 있습니다.')
+  await tick(60)
+  assert.equal(JSON.stringify(slack.streams.map((s) => s.chunks)), sent, '같은 답은 스트림에 더 올라가지 않는다')
+  await turn.end()
+})
